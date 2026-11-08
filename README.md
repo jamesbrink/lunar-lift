@@ -1,31 +1,38 @@
 # LUNAR LIFT
 
-Fly a three-stage rocket — S-1 BOOSTER, S-2 UPPER, CSM ENGINE — off a launch pad on a 1000 km-radius
-planet and out to a Moon 12,000 km away. Two-body inverse-square gravity, atmospheric drag, and
-staging are simulated, so the flight is a real mission profile: climb, gravity turn, coast, lunar
-encounter, and a powered descent. Touch down softer than 32 m/s or you lose the spacecraft. The HUD
+Fly a three-stage rocket — an S-1 SOLID BOOSTER, a throttleable S-2 UPPER, and a throttleable CSM
+ENGINE — off a launch pad on a 1000 km-radius planet and out to a Moon 12,000 km away. Two-body
+inverse-square gravity, atmospheric drag, and staging are simulated, so the flight is a real mission
+profile: climb, gravity turn, coast, lunar encounter, and a powered descent. Touch down softer than
+32 m/s or you lose the spacecraft. Flight controls are inertial: the keys apply torque against the
+vehicle's live moment of inertia, so the fully fueled stack turns slowly and the flight computer's
+`authority` readout climbs as propellant burns off; tail fins damp the rate and weathervane the nose
+into the airflow, and the burning engine gimbal tilts its plume opposite each turn. The HUD
 carries telemetry, a flight computer (periapsis, apoapsis, range), a green trajectory prediction
 line, an Earth-Moon minimap with the lunar sphere of influence drawn as a dashed sphere of about
 2,100 km, stage fuel pips, and a center throttle gauge reading percent and engine output in kN. Time
 display scales sim seconds so surface gravity reads 9.81 m/s^2 and MET shows mission-realistic
-durations.
+durations. The planet wears a weather system — cumulus fields and spiral storms on two cloud decks
+that cast moving shadows across the surface — and a sun whose shadow camera follows the vehicle, so
+the rocket, the launch complex, and the lander all cast real shadows from tower to lunar surface.
 
 ## Run
 
 Open `index.html` in any modern browser with an internet connection — Three.js loads from a CDN via
-an importmap. Or serve the folder and open it locally:
+an importmap. Or serve the folder:
 
 ```
-python3 -m http.server
+python3 serve-nocache.py 8078      # recommended: disables caching so ES modules never go stale
+python3 -m http.server             # plain server also works; hard-reload after edits
 ```
 
-then visit `http://127.0.0.1:8000/index.html`.
+then visit `http://127.0.0.1:8078/index.html` (or `http://127.0.0.1:8000/index.html` for the plain server).
 
 ## Controls
 
 | Key | Action |
 | --- | --- |
-| SPACE | Ignite / flameout |
+| SPACE | Ignite — the S-1 solid booster burns at 100% to burnout and sheds itself; on S-2/CSM also flameout |
 | SHIFT (hold) | Throttle up |
 | CTRL (hold) | Throttle down |
 | W / S or arrows | Pitch |
@@ -56,8 +63,8 @@ then visit `http://127.0.0.1:8000/index.html`.
 - `js/physics.js` — two-body simulation, staging, trajectory predictor.
 - `js/camera.js` — chase, orbit, and system cameras.
 - `js/hud.js` — telemetry, flight computer, minimap, throttle gauge.
-- `js/world.js` — planet, Moon, sky, launch pad.
+- `js/world.js` — planet, Moon, sky gradient, weather cloud decks, sun-tracking shadows, launch pad.
 - `js/vehicle.js` — rocket stages and their meshes.
-- `js/textures.js` — generated surface and flame textures.
+- `js/textures.js` — generated planet surfaces, cloud decks, and flame glow.
 - `js/audio.js` — engine and ambience audio.
 - `js/main.js` — loop, input handling, and the debug API at `window.game`.

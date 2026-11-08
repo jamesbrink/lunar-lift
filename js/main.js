@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { RE, RM, MOON, WARPS, DTPHYS, PAD_POS } from './constants.js';
-import { initWorld, spinBodies, updateSky } from './world.js';
+import { initWorld, spinBodies, updateSky, updateSunShadow } from './world.js';
 import { stages, initVehicle, spawnParticle, addDebris, detachStage, setVisible, updateParticles, updateDebris, updateBurnVisuals, clearDebris, resetStages } from './vehicle.js';
 import { S, keys, initPhysics, getState, getSimTime, getEngineOn, getThrottle, getWarpIndex, setWarpIndex, setTargetThrottle, getSasOn, setSas, cycleWarp, toggleSas, toggleSasRetro, activeStage, fwd, isBurning, accelAt, physStep, predict, toggleIgnite, separateStage, addDistFlown, pushTrail, resetSim, clearPredictor, markTeleported, predLine, omega, getControlAuthority } from './physics.js';
 import { camera, initCamera, cycleCamera, updateCamera, resetCameraView, setCamMode, setCamDist, resizeCamera } from './camera.js';
@@ -13,6 +13,8 @@ const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, logarithmicD
 renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
 renderer.setSize(innerWidth, innerHeight);
 renderer.toneMapping = THREE.ACESFilmicToneMapping;
+renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 const scene = new THREE.Scene();
 scene.background = new THREE.Color(0x04060b);
 scene.fog = new THREE.FogExp2(0x04060b, 0);
@@ -98,6 +100,7 @@ function frame() {
   updateCamera(dtReal);
   updateHUD(dtReal);
   updateSky(S.pos);
+  updateSunShadow(S.pos);
   drawMap();
   renderer.render(scene, camera);
   } catch (err) {
