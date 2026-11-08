@@ -17,7 +17,7 @@ export function initPhysics(deps) {
 }
 
 /* ---------------- state ---------------- */
-let state = 'briefing';        // briefing | pad | flying | won | lost
+let state = 'pad';               // pad | flying | won | lost
 let engineOn = false, throttle = 0, targetThrottle = 0;
 let sasOn = false, sasRetro = false, simTime = 0, warpIdx = 0;
 let maxQ = 0, loggedStageOut = [false, false, false], flightStarted = false;
@@ -25,6 +25,9 @@ let tliLogged = false, loiLogged = false, impactWarn = '';
 let turnHintLogged = false, loggedMaxQ = false;
 export const S = { pos: PAD_POS.clone(), v: new THREE.Vector3(), q: new THREE.Quaternion() };
 export const keys = Object.create(null);
+/* true flight controls: body-frame angular velocity driven by commanded torque        */
+export const omega = new THREE.Vector3();
+let I0 = null;                       // fully loaded reference inertia, recomputed each mission
 let trail = [];
 let distFlown = 0;
 let sasHoldTime = 0;
@@ -68,12 +71,38 @@ export function totalMass() { let m = CAPSULE_MASS; for (const st of stages) if 
 export function fwd() { return new THREE.Vector3(0, 0, 1).applyQuaternion(S.q); }
 export function isBurning() { const i = activeStage(); return engineOn && throttle > .01 && i >= 0 && stages[i].fuel > 0; }
 
+/* ---- moment of inertia from live mass distribution (build units, see vehicle.js) ---- */
+const GEOM = [
+  { L: 34, r: 6.2, zc: -20.5 },    // S-1 booster
+  { L: 22, r: 5.2, zc: 7.5 },      // S-2 upper
+  { L: 19, r: 4.4, zc: 24.5 },     // CSM service body + cone
+  { L: 8,  r: 2.0, zc: 33.5 },     // capsule lump
+];
+function inertiaAxes() {
+  let m = CAPSULE_MASS, mz = CAPSULE_MASS * GEOM[3].zc;
+  for (let k = 0; k < 3; k++) if (!stages[k].separated) { const mk = stages[k].dry + stages[k].fuel; m += mk; mz += mk * GEOM[k].zc; }
+  const zc = mz / m;
+  let py = CAPSULE_MASS * ((GEOM[3].zc - zc) ** 2 + GEOM[3].L ** 2 / 12 + GEOM[3].r ** 2 / 4);
+  let roll = CAPSULE_MASS * GEOM[3].r ** 2 / 2;
+  for (let k = 0; k < 3; k++) if (!stages[k].separated) {
+    const mk = stages[k].dry + stages[k].fuel, gm = GEOM[k];
+    py += mk * ((gm.zc - zc) ** 2 + gm.L * gm.L / 12 + gm.r * gm.r / 4);
+    roll += mk * gm.r * gm.r / 2;
+  }
+  return { py, roll };
+}
+export function getControlAuthority() { const I = inertiaAxes(); return { py: I0 ? I0.py / I.py : 1, roll: I0 ? I0.roll / I.roll : 1 }; }
+const UP_Z = new THREE.Vector3(0, 0, 1);
+const _ax = new THREE.Vector3(), _dq = new THREE.Quaternion();
+const MAX_RATE_PY = 1.15, MAX_RATE_ROLL = 1.9;        // rad/s ceilings on body rates
+
 export function toggleIgnite() {
   const i = activeStage();
   if (i < 0) { hooks.addLog('NO ENGINE LEFT — ALL STAGES SEPARATED', 'bad'); return; }
   if (stages[i].fuel <= 0) { hooks.addLog(`STAGE ${i + 1} DRY — PRESS X TO SEPARATE IT`, 'warn'); return; }
+  if (i === 0 && engineOn) { hooks.addLog('SOLID BOOSTER BURNS AT FULL THROTTLE TO DEPLETION', 'warn'); return; }
   engineOn = !engineOn;
-  if (engineOn) { targetThrottle = Math.max(targetThrottle, 1); throttle = Math.max(throttle, 0.6); audio.engine(true); }
+  if (engineOn) { targetThrottle = 1; throttle = Math.max(throttle, i === 0 ? 1 : 0.6); audio.engine(true); }
   else hooks.addLog('ENGINE FLAMEOUT');
 }
 
@@ -127,6 +156,7 @@ export function physStep(dt) {
 
   if (state !== 'pad' && state !== 'flying') return;
   const i = activeStage();
+  if (i === 0 && !stages[0].separated && engineOn) targetThrottle = 1;   // solid booster: full throttle or nothing
   if (!engineOn && targetThrottle > 0.05 && i >= 0 && stages[i].fuel > 0) {
     engineOn = true; audio.engine(true);        // raising the throttle lights the engine, KSP-style
   }
@@ -139,7 +169,12 @@ export function physStep(dt) {
     thrustAcc = fwd().multiplyScalar(sp.thrust * throttle / totalMass());
     if (stages[i].fuel === 0 && !loggedStageOut[i]) {
       loggedStageOut[i] = true; engineOn = false; targetThrottle = 0;
-      hooks.addLog(`${sp.name} DEPLETED — PRESS X TO DROP IT`, 'warn');
+      if (i === 0) {                            // solid boosters shed themselves at burnout
+        separateStage();                        // logs "STAGE 1 SEPARATED — S-2 UPPER IS NOW FLYING"
+        engineOn = true; targetThrottle = 1; throttle = 1;
+        hooks.addLog('S-2 UPPER IGNITES AUTOMATICALLY — TRIM WITH ⇧ / CTRL', 'good');
+        audio.engine(true);
+      } else hooks.addLog(`${sp.name} DEPLETED — PRESS X TO DROP IT`, 'warn');
     }
   }
   const mass = totalMass();
@@ -147,23 +182,64 @@ export function physStep(dt) {
   S.v.addScaledVector(a, dt);
   S.pos.addScaledVector(S.v, dt);
 
-  // steering (rates in rad/s)
-  const steer = new THREE.Vector3(
-    (keys['w'] ? 1 : 0) - (keys['s'] ? 1 : 0) + (keys['arrowup'] ? 1 : 0) - (keys['arrowdown'] ? 1 : 0),
-    (keys['a'] ? 1 : 0) - (keys['d'] ? 1 : 0) + (keys['arrowleft'] ? 1 : 0) - (keys['arrowright'] ? 1 : 0),
-    (keys['e'] ? 1 : 0) - (keys['q'] ? 1 : 0));
-  steer.x *= 0.45; steer.y *= 0.35; steer.z *= 0.65;
-  if (steer.lengthSq() > 0) {
-    const ang = steer.length() * dt;
-    S.q.multiply(new THREE.Quaternion().setFromAxisAngle(steer.normalize(), ang));
-    if (sasOn) sasHoldTime = 0;                    // hands-on overrides SAS briefly
-  } else if (sasOn) {
+  // ---- true flight controls: keys command torque; ω integrates against live inertia ----
+  const I = inertiaAxes();
+  if (!I0) I0 = { py: I.py, roll: I.roll };
+  const ratio = I0.py / I.py, ratioR = I0.roll / I.roll;
+  const altE = S.pos.length() - RE;
+  let qNorm = 0;
+  if (altE < 420) {
+    const rho = RHO0 * Math.exp(-Math.max(0, altE) / ATMO_H);
+    qNorm = Math.min(1.6, 0.5 * rho * S.v.lengthSq() / 14);        // dynamic pressure, normalized
+  }
+  const pitchIn = (keys['w'] ? 1 : 0) - (keys['s'] ? 1 : 0) + (keys['arrowup'] ? 1 : 0) - (keys['arrowdown'] ? 1 : 0);
+  const yawIn = (keys['a'] ? 1 : 0) - (keys['d'] ? 1 : 0) + (keys['arrowleft'] ? 1 : 0) - (keys['arrowright'] ? 1 : 0);
+  const rollIn = (keys['e'] ? 1 : 0) - (keys['q'] ? 1 : 0);
+  const manual = pitchIn !== 0 || yawIn !== 0 || rollIn !== 0;
+  omega.x += pitchIn * 1.15 * ratio * dt;                          // commanded angular acceleration
+  omega.y += yawIn * 1.15 * ratio * dt;
+  omega.z += rollIn * 2.4 * ratioR * dt;
+  if (manual && sasOn) sasHoldTime = 0;                            // hands-on overrides SAS briefly
+
+  if (sasOn && !manual) {                                          // SAS: rate servo toward the reference
     sasHoldTime = Math.min(6, sasHoldTime + dt);
-    const dir = sasRetro ? S.v.clone().negate() : S.v.clone();
+    const dir = sasRetro ? _d.copy(S.v).negate() : _d.copy(S.v);
     if (dir.lengthSq() > 1e-6) {
-      const tq = new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 0, 1), dir.normalize());
-      S.q.slerp(tq, Math.min(1, 0.6 * dt));
+      const tq = new THREE.Quaternion().setFromUnitVectors(UP_Z, dir.normalize());
+      const errB = S.q.clone().invert().multiply(tq);              // pointing error in body frame
+      if (errB.w < 0) errB.multiplyScalar(-1);
+      errB.normalize();
+      const angle = 2 * Math.acos(THREE.MathUtils.clamp(errB.w, -1, 1));
+      if (angle > 1e-3) {
+        const axis = _ax.set(errB.x, errB.y, errB.z);
+        if (axis.lengthSq() > 1e-9) axis.normalize(); else axis.set(1, 0, 0);
+        const want = Math.min(0.85 * MAX_RATE_PY, 1.6 * angle);
+        const k = Math.min(0.9, 2.6 * ratio * dt);
+        omega.x += (axis.x * want - omega.x) * k;
+        omega.y += (axis.y * want - omega.y) * k;
+        omega.z += (axis.z * want - omega.z) * k;
+      }
     }
+  }
+
+  // aerodynamics: fin damping opposes the rate; tail fins weathervane the nose into the flow
+  const dpy = 2.3 * (1 + 2.6 * qNorm), drl = 1.0 * (1 + 2.6 * qNorm);
+  omega.x *= Math.max(0, 1 - dpy * dt);
+  omega.y *= Math.max(0, 1 - dpy * dt);
+  omega.z *= Math.max(0, 1 - drl * dt);
+  if (qNorm > 0.02 && S.v.lengthSq() > 1) {
+    const vb = _g.copy(S.v).applyQuaternion(S.q.clone().invert()).normalize();
+    const ax = _ax.set(0, 0, 1).cross(vb);
+    const m = ax.length();
+    if (m > 1e-4) omega.addScaledVector(_ax.multiplyScalar(1 / m), 0.8 * qNorm * m * dt);
+  }
+
+  omega.x = THREE.MathUtils.clamp(omega.x, -MAX_RATE_PY, MAX_RATE_PY);
+  omega.y = THREE.MathUtils.clamp(omega.y, -MAX_RATE_PY, MAX_RATE_PY);
+  omega.z = THREE.MathUtils.clamp(omega.z, -MAX_RATE_ROLL, MAX_RATE_ROLL);
+  if (omega.lengthSq() > 1e-10) {
+    const rate = omega.length();
+    S.q.multiply(_dq.setFromAxisAngle(_ax.copy(omega).multiplyScalar(1 / rate), rate * dt));
   }
   S.q.normalize();
   simTime += dt;
@@ -312,7 +388,7 @@ export function resetSim() {
   engineOn = false; throttle = targetThrottle = 0;
   sasOn = false; sasRetro = false; simTime = 0; warpIdx = 0; maxQ = 0;
   tliLogged = loiLogged = loggedMaxQ = turnHintLogged = false; impactWarn = ''; distFlown = 0; trail = [];
-  flightStarted = false; state = 'pad';
+  flightStarted = false; state = 'pad'; omega.set(0, 0, 0); I0 = null;
 }
 
 /* teleport() starts the flight directly, bypassing the liftoff guard */

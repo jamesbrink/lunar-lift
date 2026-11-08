@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { RE, RM, MU_E, MU_M, MOON, SOI_M, PAD_UP, WARPS, VSCALE, TSCALE, SPECS } from './constants.js';
 import { stages } from './vehicle.js';
-import { S, getState, getSimTime, getEngineOn, getThrottle, getWarpIndex, getSasOn, getSasRetro, getDistFlown, getMaxQ, getTrail, activeStage, totalMass, orbitalElements } from './physics.js';
+import { S, getState, getSimTime, getEngineOn, getThrottle, getWarpIndex, getSasOn, getSasRetro, getDistFlown, getMaxQ, getTrail, activeStage, totalMass, orbitalElements, getControlAuthority } from './physics.js';
 
 const $ = id => document.getElementById(id);
 
@@ -83,6 +83,8 @@ export function updateHUD(dt) {
   $('oPe').textContent = km(el.pe); $('oAp').textContent = km(el.ap);
   $('oMoon').textContent = km(rM) + (nearMoon ? ' · SOI' : '');
   $('oSas').textContent = getSasOn() ? (getSasRetro() ? 'RETRO' : 'PRO') : 'off';
+  const auth = getControlAuthority().py;
+  $('oCtrl').textContent = '×' + (auth > 9.95 ? '9.9' : auth.toFixed(1));
 
   stages.forEach((st, idx) => {
     const row = $('pip' + idx); const fill = row.querySelector('i');
@@ -138,10 +140,10 @@ export function drawMap() {
   mg.fillText('EARTH', ex - 14, ey + 26); mg.fillText('MOON', mx - 12, my - 8);
 }
 
-export function initHUD({ startMission, resetMission }) {
+export function initHUD({ resetMission }) {
   buildStagePips();
   mm = $('minimap'); mg = mm.getContext('2d');
   { const dpr = Math.min(devicePixelRatio, 2); mm.width = 252 * dpr; mm.height = 150 * dpr; mm.style.width = '252px'; mm.style.height = '150px'; mg.scale(dpr, dpr); }
-  $('bigBtn').addEventListener('click', () => { if (getState() === 'briefing') startMission(); else resetMission(); });
+  $('bigBtn').addEventListener('click', () => resetMission());
   $('helpBtn').addEventListener('click', () => $('helpCard').classList.toggle('on'));
 }

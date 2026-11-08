@@ -15,48 +15,71 @@ const matFlame = new THREE.MeshBasicMaterial({ color: 0xffb45c, transparent: tru
 
 export const stages = SPECS.map(s => ({ ...s, fuel: s.fuel, separated: false, meshes: new THREE.Group(), tailZ: 0, flame: null, glow: null }));
 
+const ZERO_V = new THREE.Vector3();
+
 function cyl(rt, rb, len, z, mat, seg = 20) {
   const m = new THREE.Mesh(new THREE.CylinderGeometry(rt, rb, len, seg), mat);
-  m.rotation.x = Math.PI / 2; m.position.z = z; return m;
+  m.rotation.x = Math.PI / 2; m.position.z = z; m.castShadow = true; return m;
 }
 
 // stage 1: spans z -37.5 .. -3.5
 {
   const g = stages[0].meshes;
-  g.add(cyl(6, 6, 34, -20.5, matBody));
-  g.add(cyl(6.15, 6.15, 2.2, -34, matAccent));
-  g.add(cyl(6.15, 6.15, 1.4, -12, matAccent));
-  for (let i = 0; i < 4; i++) {
-    const fin = new THREE.Mesh(new THREE.BoxGeometry(1, 11, 9), matDark);
-    const a = i * Math.PI / 2 + Math.PI / 4;
-    fin.position.set(Math.cos(a) * 6.8, Math.sin(a) * 6.8, -33); fin.rotation.z = a; g.add(fin);
+  g.add(cyl(6, 6, 30, -22.5, matBody));                       // long white booster body, -37.5..-7.5
+  g.add(cyl(3.8, 6, 4, -5.5, matDark));                       // black nose-cone skirt at top, -7.5..-3.5
+  g.add(cyl(6.28, 6.28, 1, -4, matDark));                     // interstage ring at the -3.5 junction
+  g.add(cyl(6.14, 6.14, 3, -16, matAccent));                  // red roll band
+  const finShape = new THREE.Shape();                         // swept trapezoidal fin: x = radial, y = axial z
+  finShape.moveTo(5.4, -21.5); finShape.lineTo(14.8, -25.8); finShape.lineTo(13.1, -33.6); finShape.lineTo(5.4, -34.8);
+  const finGeo = new THREE.ExtrudeGeometry(finShape, { depth: .8, bevelEnabled: false }); finGeo.translate(0, 0, -.4);
+  for (let i = 0; i < 4; i++) {                               // 4 big swept tail fins
+    const arm = new THREE.Group(); arm.rotation.z = i * Math.PI / 2 + Math.PI / 4;
+    const fin = new THREE.Mesh(finGeo, matDark); fin.rotation.x = Math.PI / 2; fin.castShadow = true;
+    arm.add(fin); g.add(arm);
   }
-  g.add(cyl(1.1, 2.4, 5, -39.5, matNozzle));
+  g.add(cyl(1.9, 3.9, 4.5, -39.75, matNozzle));               // large center bell, reaches tailZ -42
+  for (let i = 0; i < 4; i++) {                               // cluster of 4 small nozzle bells around it
+    const a = i * Math.PI / 2 + Math.PI / 4;
+    const bell = cyl(.8, 1.7, 3.4, -39.2, matNozzle, 12);
+    bell.position.x = Math.cos(a) * 4.2; bell.position.y = Math.sin(a) * 4.2; g.add(bell);
+  }
   stages[0].tailZ = -42;
 }
 // stage 2: spans z -3.5 .. 18.5
 {
   const g = stages[1].meshes;
-  g.add(cyl(5, 5, 22, 7.5, matBody));
-  g.add(cyl(5.2, 5.2, 1.6, 16, matAccent));
-  g.add(cyl(1.2, 2, 6, -4.5, matNozzle));      // interstage shroud conceals it until staging
+  g.add(cyl(5, 5, 18.5, 9.25, matBody));                      // white body, 0..18.5
+  g.add(cyl(5, 1.7, 3.5, -1.75, matDark));                    // black engine skirt cone at tail, -3.5..0
+  g.add(cyl(5.14, 5.14, 2.4, 13, matAccent));                 // red roll band
+  g.add(cyl(5.26, 5.26, 1, 17.9, matDark));                   // interstage ring at the 18.5 junction
+  g.add(cyl(1.7, 3.2, 4.5, -5.75, matNozzle));                // single large bell, reaches tailZ -8 (shrouded until staging)
   stages[1].tailZ = -8;
 }
 // stage 3 + capsule: spans z 18.5 .. 37.5  (one vehicle to the Moon)
 {
   const g = stages[2].meshes;
-  g.add(cyl(4, 4, 9, 23, matBody));
-  const cone = new THREE.Mesh(new THREE.ConeGeometry(4.6, 8, 24), matBody); cone.rotation.x = Math.PI / 2; cone.position.z = 31.5; g.add(cone);
-  const win = new THREE.Mesh(new THREE.SphereGeometry(.7, 10, 10), new THREE.MeshBasicMaterial({ color: 0x8fdcff })); win.position.set(0, 3.6, 31); g.add(win);
-  g.add(cyl(.8, 1.7, 4, 17.5, matNozzle));
-  const ant = new THREE.Mesh(new THREE.CylinderGeometry(.12, .12, 6, 6), matDark); ant.rotation.x = Math.PI / 2; ant.position.z = 38; g.add(ant);
+  g.add(cyl(4, 4, 9, 23, matBody));                           // cylindrical service module, 18.5..27.5
+  g.add(cyl(4.16, 4.16, 1, 19, matDark));                     // interstage ring at the 18.5 junction
+  g.add(cyl(4.12, 4.12, 1, 24.5, matAccent));                 // red service-module stripe
+  g.add(cyl(1.1, 2.1, 3.5, 16.75, matNozzle));                // service-module engine bell, reaches tailZ 15
+  const cm = new THREE.Mesh(new THREE.ConeGeometry(4.15, 5, 24), matBody);  // conical command capsule, base 27.5 tip 32.5
+  cm.rotation.x = Math.PI / 2; cm.position.z = 30; cm.castShadow = true; g.add(cm);
+  const winGeo = new THREE.BoxGeometry(.5, 1.3, .9);
+  for (const wy of [1, -1]) {                                 // small capsule windows set into the cone wall
+    const w = new THREE.Mesh(winGeo, matDark); w.position.set(2.85, wy * .95, 29); w.castShadow = true; g.add(w);
+  }
+  g.add(cyl(.6, .6, .8, 32.6, matDark));                      // launch-escape tower mount at the capsule tip
+  g.add(cyl(.18, .18, 4.2, 34.7, matDark));                   // tall thin launch-escape tower, 32.6..36.8
+  const lesTip = new THREE.Mesh(new THREE.ConeGeometry(.75, 1, 12), matDark);  // tiny escape-rocket cone tip, top at 37.5
+  lesTip.rotation.x = Math.PI / 2; lesTip.position.z = 37.0; lesTip.castShadow = true; g.add(lesTip);
   stages[2].tailZ = 15;
 }
 stages.forEach(st => {
   const flame = new THREE.Mesh(new THREE.ConeGeometry(1, 1, 14), matFlame);
-  flame.rotation.x = -Math.PI / 2; flame.position.z = st.tailZ - 0.6; flame.visible = false;
+  flame.rotation.order = 'YXZ'; // gimbal yaw term must rotate the already-pitched plume; see updateBurnVisuals
+  flame.rotation.x = -Math.PI / 2; flame.position.z = st.tailZ - 0.6; flame.visible = false; flame.castShadow = false;
   const glow = new THREE.Sprite(new THREE.SpriteMaterial({ map: glowTex(), color: 0xffb060, transparent: true, opacity: .8, blending: THREE.AdditiveBlending, depthWrite: false }));
-  glow.position.z = st.tailZ; glow.visible = false;
+  glow.position.z = st.tailZ; glow.visible = false; glow.castShadow = false;
   st.meshes.add(flame, glow); st.flame = flame; st.glow = glow;
   rocketGroup.add(st.meshes);
 });
@@ -137,8 +160,9 @@ export function resetStages() {
 }
 
 /* visuals follow physics: rocket transform, flame/glow, plume emission */
-export function updateBurnVisuals({ pos, quat, vel, throttle, activeIdx, burn, fwd }) {
+export function updateBurnVisuals({ pos, quat, vel, throttle, activeIdx, burn, fwd, omega }) {
   rocketGroup.position.copy(pos); rocketGroup.quaternion.copy(quat);
+  const om = omega || ZERO_V;   // body-frame angular velocity (rad/s)
   stages.forEach((st, idx) => {
     const on = burn && idx === activeIdx;
     st.flame.visible = on; st.glow.visible = on;
@@ -147,6 +171,12 @@ export function updateBurnVisuals({ pos, quat, vel, throttle, activeIdx, burn, f
       const flick = .9 + Math.random() * .2;
       st.flame.scale.set((2 + throttle * 1.6) * flick, L * flick, L * flick);
       st.glow.scale.setScalar((6 + throttle * 13) * flick);
+      // engine gimbal: the plume lags the turn, swinging opposite the body rate (clamped +/-0.22 rad).
+      // Euler 'YXZ': Rx pitches apex toward +Y for omega.x > 0 (nose pitches toward -Y),
+      // then Ry swings apex toward -X for omega.y > 0 (nose yaws toward +X) — both opposite the turn.
+      st.flame.rotation.set(-Math.PI / 2 + THREE.MathUtils.clamp(om.x, -1, 1) * .22, THREE.MathUtils.clamp(om.y, -1, 1) * .22, 0);
+    } else {
+      st.flame.rotation.set(-Math.PI / 2, 0, 0);
     }
   });
   if (burn) {

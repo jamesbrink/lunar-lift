@@ -42,6 +42,7 @@
     <span>apoapsis</span><b id="oAp">—</b>
     <span>range → moon</span><b id="oMoon">—</b>
     <span>sas</span><b id="oSas">off</b>
+    <span>authority</span><b id="oCtrl">×1.0</b>
   </div>
 </div>
 
@@ -56,33 +57,22 @@
 <button id="helpBtn" title="controls">? controls</button>
 <div id="helpCard" class="panel">
   <div class="cols">
-    <div><kbd>SPACE</kbd>ignite / flameout</div><div><kbd>Q</kbd><kbd>E</kbd>roll</div>
+    <div><kbd>SPACE</kbd>ignite booster</div><div><kbd>Q</kbd><kbd>E</kbd>roll</div>
     <div><kbd>⇧</kbd>throttle up</div><div><kbd>W</kbd><kbd>S</kbd>pitch</div>
     <div><kbd>CTRL</kbd>throttle down</div><div><kbd>A</kbd><kbd>D</kbd>yaw</div>
     <div><kbd>X</kbd>separate stage</div><div><kbd>C</kbd>camera</div>
     <div><kbd>P</kbd>SAS autopilot</div><div><kbd>V</kbd>pro / retro grade</div>
     <div><kbd>[</kbd><kbd>]</kbd>time warp</div><div><kbd>R</kbd>restart mission</div>
   </div>
-  <p>Chase the <b style="color:var(--fg)">green trajectory line</b>. Pitch toward the Moon while climbing (gravity turn), build an
-  apoapsis that reaches the Moon's dashed sphere of influence, then flip <b style="color:var(--fg)">V + P</b> and burn retrograde at
-  encounter to land softer than <b style="color:var(--fg)">32 m/s</b>. Drop each spent stage with <b style="color:var(--fg)">X</b> to fly light.</p>
+  <p>The <b style="color:var(--fg)">S-1 solid booster</b> burns at 100% once lit and sheds itself at burnout; the S-2 and CSM engines are throttled with <b style="color:var(--fg)">⇧ / CTRL</b>. Chase the <b style="color:var(--fg)">green trajectory line</b>: pitch toward the Moon while climbing (gravity turn), build an apoapsis past the Moon's dashed sphere of influence, then flip <b style="color:var(--fg)">V + P</b> and burn retrograde at encounter to land softer than <b style="color:var(--fg)">32 m/s</b>.</p>
+  <p>Controls are inertial: the keys apply torque, so the fully fueled stack turns slowly and control authority climbs as propellant burns off.</p>
 </div>
 
-<div id="overlay">
+<div id="overlay" class="hidden">
   <div id="overlayCard">
     <h1>LUNAR LIFT<small>A THREE-STAGE LUNAR MISSION</small></h1>
-    <div id="overlayText">
-      <div class="brief">Fly a three-stage rocket from the launch tower to the surface of the Moon.
-      Real two-body physics: inverse-square gravity from both bodies, atmospheric drag, staging, and a live
-      trajectory predictor. Land softly — under <b>32 m/s</b> — or the mission is lost.</div>
-      <ol>
-        <li><b>Ignite &amp; climb</b> — vertical until ~300 km.</li>
-        <li><b>Gravity turn</b> toward the Moon (see map).</li>
-        <li><b>Translunar injection</b> — apoapsis at or past the Moon.</li>
-        <li><b>Brake &amp; land</b> — retrograde burn, touch down soft.</li>
-      </ol>
-    </div>
-    <button id="bigBtn">LAUNCH</button>
+    <div id="overlayText"></div>
+    <button id="bigBtn">FLY AGAIN</button>
   </div>
 </div>
 

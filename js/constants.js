@@ -17,7 +17,7 @@ export const LAND_SAFE_M = 32 / VSCALE;      // landing speed limits in game uni
 export const SAFE_EARTH = 0.6;
 
 export const SPECS = [
-  { name: 'S-1 BOOSTER', dry: 12, fuel: 60, thrust: 2700, isp: 300 },
+  { name: 'S-1 SOLID BOOSTER', dry: 12, fuel: 48, thrust: 2900, isp: 240 },
   { name: 'S-2 UPPER',   dry: 6,  fuel: 45, thrust: 1400, isp: 300 },
   { name: 'CSM ENGINE',  dry: 4,  fuel: 40, thrust: 380,  isp: 300 },
 ];

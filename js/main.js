@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import { RE, RM, MOON, WARPS, DTPHYS, PAD_POS } from './constants.js';
 import { initWorld, spinBodies, updateSky } from './world.js';
 import { stages, initVehicle, spawnParticle, addDebris, detachStage, setVisible, updateParticles, updateDebris, updateBurnVisuals, clearDebris, resetStages } from './vehicle.js';
-import { S, keys, initPhysics, getState, setState, getSimTime, getEngineOn, getThrottle, getWarpIndex, setWarpIndex, setTargetThrottle, getSasOn, setSas, cycleWarp, toggleSas, toggleSasRetro, activeStage, fwd, isBurning, accelAt, physStep, predict, toggleIgnite, separateStage, addDistFlown, pushTrail, resetSim, clearPredictor, markTeleported, predLine } from './physics.js';
+import { S, keys, initPhysics, getState, getSimTime, getEngineOn, getThrottle, getWarpIndex, setWarpIndex, setTargetThrottle, getSasOn, setSas, cycleWarp, toggleSas, toggleSasRetro, activeStage, fwd, isBurning, accelAt, physStep, predict, toggleIgnite, separateStage, addDistFlown, pushTrail, resetSim, clearPredictor, markTeleported, predLine, omega, getControlAuthority } from './physics.js';
 import { camera, initCamera, cycleCamera, updateCamera, resetCameraView, setCamMode, setCamDist, resizeCamera } from './camera.js';
 import { initHUD, addLog, updateHUD, drawMap, endOverlay, setWarn, hideOverlay, clearLog } from './hud.js';
 import { audioInit, audioEngine, audioThud, audioExplosion, audioWin, updateEngineGain } from './audio.js';
@@ -18,13 +18,6 @@ scene.background = new THREE.Color(0x04060b);
 scene.fog = new THREE.FogExp2(0x04060b, 0);
 
 /* ---------------- overlays / flow ---------------- */
-function startMission() {
-  hideOverlay();
-  if (getState() === 'briefing') setState('pad');
-  audioInit();
-  if (getState() === 'pad') addLog('VEHICLE IS PAD-READY — SPACE TO IGNITE, THEN HOLD ⇧');
-}
-
 function resetMission() {
   clearDebris();
   resetStages();
@@ -39,6 +32,7 @@ function resetMission() {
 }
 
 /* ---------------- wiring ---------------- */
+let audioArmed = false;
 initWorld(scene);
 initVehicle(scene);
 initPhysics({
@@ -49,15 +43,16 @@ initPhysics({
   vehicleOps: { spawnParticle, addDebris, detachStage, setVisible },
 });
 initCamera(canvas, addLog);
-initHUD({ startMission, resetMission });
+initHUD({ resetMission });
 
 addEventListener('keydown', e => {
   const k = e.key.toLowerCase();
   if ([' ', 'arrowup', 'arrowdown', 'arrowleft', 'arrowright'].includes(k) || (k === ']' || k === '[')) e.preventDefault();
   if (e.repeat) return; keys[k] = true;
+  if (!audioArmed) { audioArmed = true; audioInit(); }          // browsers gate sound on a user gesture
   const mode = getState();
-  if (mode === 'briefing' || mode === 'won' || mode === 'lost') {
-    if (k === 'enter' || k === ' ') { mode === 'briefing' ? startMission() : resetMission(); }
+  if (mode === 'won' || mode === 'lost') {
+    if (k === 'enter' || k === ' ') resetMission();
     return;
   }
   if (k === ' ') toggleIgnite();
@@ -94,7 +89,7 @@ function frame() {
     if (getState() === 'flying') { trailTick += simDt; if (trailTick > 0.8) { trailTick = 0; pushTrail(S.pos.clone()); } }
 
     // visuals follow physics
-    updateBurnVisuals({ pos: S.pos, quat: S.q, vel: S.v, throttle: getThrottle(), activeIdx: activeStage(), burn: isBurning(), fwd });
+    updateBurnVisuals({ pos: S.pos, quat: S.q, vel: S.v, throttle: getThrottle(), activeIdx: activeStage(), burn: isBurning(), fwd, omega });
     updateDebris(simDt, accelAt);
     updateEngineGain(isBurning(), Math.max(0, S.pos.length() - RE));
     predTick += dtReal; if (predTick > .35) { predTick = 0; if (getState() === 'flying') predict(); }
@@ -121,12 +116,14 @@ window.game = {
   state: () => ({ state: getState(), simTime: getSimTime(), altE: S.pos.length() - RE, altM: S.pos.distanceTo(MOON) - RM,
     radialM: S.v.dot(new THREE.Vector3().subVectors(S.pos, MOON).normalize()),
     speed: S.v.length(), fuel: stages.map(s => s.fuel), separated: stages.map(s => s.separated),
-    engineOn: getEngineOn(), throttle: getThrottle(), sasOn: getSasOn() }),
+    engineOn: getEngineOn(), throttle: getThrottle(), sasOn: getSasOn(),
+    omega: [omega.x, omega.y, omega.z], authority: getControlAuthority().py }),
   ignite: toggleIgnite, stage: separateStage, setSas,
   warp: m => { setWarpIndex(WARPS.indexOf(m)); }, camera: n => { setCamMode(n); },
   ff(sec) { let left = sec; while (left > 1e-9) { const h = Math.min(DTPHYS, left); physStep(h); left -= h; } },
   setThrottle(v) { setTargetThrottle(v); },
-  teleport(pos, vel) { markTeleported(); S.pos.set(...pos); S.v.set(...vel); prevPos.copy(S.pos); },
-  reset: resetMission, start: startMission,
+  nudge(ax, ay, az) { omega.set(ax, ay, az); },
+  teleport(pos, vel) { markTeleported(); S.pos.set(...pos); S.v.set(...vel); prevPos.copy(S.pos); omega.set(0, 0, 0); },
+  reset: resetMission,
   _cam: camera, _pred: predLine, setCam: d => { setCamDist(d); },
 };
