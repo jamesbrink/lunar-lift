@@ -1,27 +1,55 @@
 import * as THREE from 'three';
 
-/* ---------------- world constants (game units: 1 unit = 1 km) ---------------- */
-export const RE = 1000, MU_E = 9.81 * RE * RE;            // Earth radius, gravity param
-export const MOON = new THREE.Vector3(8485, 0, -8485);   // 135° from the pad: a classic gravity-turn transfer reaches it
-export const RM = 273, MU_M = 1.62 * RM * RM, SOI_M = 2100;
-export const PAD_UP = new THREE.Vector3(0, 0, 1);
-export const VS = 0.013;                    // vehicle visual scale: a slender rocket on a 1000 km planet, KSP-style
-export const PAD_SCALE = VS;                // launch complex scales with the vehicle
-export const RHALF = 37 * VS + 0.02;        // contact offset from rocket center (~ half vehicle height)
-export const PAD_POS = PAD_UP.clone().multiplyScalar(RE + 4 * PAD_SCALE + 37 * VS);   // platform + half rocket
-export const ATMO_H = 95, RHO0 = 0.0024, CD_AREA = 30;
-export const DTPHYS = 0.02, WARPS = [1, 2, 4, 8];
-export const VSCALE = 31.62;      // game-velocity -> displayed m/s (keeps g = 9.81 believable)
-export const TSCALE = 31.62;      // sim-seconds -> displayed mission-elapsed-seconds
-export const LAND_SAFE_M = 32 / VSCALE;      // landing speed limits in game units
-export const SAFE_EARTH = 0.6;
+/* ---------------- real-world constants, all distances in km, time in seconds ----------------
+   Gravity is GM/r^2 in km/s^2. Masses are tonnes, thrust is kN, so thrust/mass is m/s^2. */
+export const RE = 6371, MU_E = 398600.4418;              // Earth radius, GM (km³/s²)
+export const RM = 1737.4, MU_M = 4904.8695, SOI_M = 66200;  // Moon radius, GM, sphere of influence (km)
+export const MOON_DIST = 384400;
+export const MOON_RATE = 2.6617e-6;                      // rad/s — 27.32 d sidereal period
+export const EARTH_SPIN = 7.292115e-5;                   // rad/s
 
-export const SPECS = [
-  { name: 'S-1 SOLID BOOSTER', dry: 12, fuel: 48, thrust: 2900, isp: 240 },
-  { name: 'S-2 UPPER',   dry: 6,  fuel: 45, thrust: 1400, isp: 300 },
-  { name: 'CSM ENGINE',  dry: 4,  fuel: 40, thrust: 380,  isp: 300 },
-];
-export const CAPSULE_MASS = 5;
+/* Launch site: LC-39, Cape Canaveral. Fixed forever in inertial space at t = 0,
+   and the pad mesh rides the rotating planet, so it stays on the same ground. */
+export const PAD_LAT = 28.4961, PAD_LON = -80.6194;      // degrees
+const LATR = PAD_LAT * Math.PI / 180, LONR = PAD_LON * Math.PI / 180;
 
-/* KSP-style sky: blue with haze near the ground, fading to black space as you climb */
+/* three's SphereGeometry (x = -R cos(phi) sin(theta), y = R cos(theta), z = R sin(phi) sin(theta),
+   u = (lon+180)/360, v = (90-lat)/180) puts north at +Y, so the surface normal at (lat, lon) is: */
+export const PAD_UP = new THREE.Vector3(Math.cos(LATR) * Math.cos(LONR), Math.sin(LATR), -Math.cos(LATR) * Math.sin(LONR)).normalize();
+export const SPIN_AXIS = new THREE.Vector3(0, 1, 0);
+export const PAD_EAST = new THREE.Vector3().crossVectors(SPIN_AXIS, PAD_UP).normalize();
+
+/* The Moon's orbit is tilted 28.5° to the equator and its node is aligned with the launch
+   azimuth — the classic launch window, where the translunar trajectory lies in one plane. */
+export const MOON_PLANE_N = new THREE.Vector3().crossVectors(PAD_UP, PAD_EAST).normalize();
+export const MOON_U = PAD_EAST.clone();
+export const MOON_V = new THREE.Vector3().crossVectors(MOON_PLANE_N, MOON_U).normalize();
+export const MOON_PHASE = 1.7595;                        // Moon ~101° along its orbit at MET 0: launch window
+
+export function moonPos(t, out = new THREE.Vector3()) {
+  const a = MOON_PHASE + MOON_RATE * t;
+  return out.copy(MOON_U).multiplyScalar(Math.cos(a)).addScaledVector(MOON_V, Math.sin(a)).multiplyScalar(MOON_DIST);
+}
+
+export const VS = 0.0014;                 // vehicle visual scale: 75 build units → ~105 m, Saturn-V sized
+export const PAD_SCALE = VS;
+export const RHALF = 37 * VS;             // contact offset from the vehicle centre (~ half its height)
+export const PAD_POS = PAD_UP.clone().multiplyScalar(RE + 4 * PAD_SCALE + 37 * VS);
+export const PAD_ANGULAR = new THREE.Vector3().crossVectors(SPIN_AXIS, PAD_POS).multiplyScalar(EARTH_SPIN); // pad's inertial velocity
+
+/* atmosphere: exponential density with an 8.5 km scale height */
+export const ATMO_H = 8.5, RHO0 = 1.225, CD_AREA = 28;   // kg/m³, m²
+export const DTPHYS = 0.1, WARPS = [1, 2, 4, 8, 16, 32, 64, 128, 256, 512, 1000];
+
+export const LAND_SAFE = 0.032;          // km/s — 32 m/s touchdown limit
+export const SAFE_EARTH = 0.12;          // km/s — splashdown is survivable below this
+
 export const SKY_DAY = new THREE.Color(0x79b1de), SKY_NULL = new THREE.Color(0x04060b);
+
+/* stage specs: dry/fuel in tonnes, thrust in kN, isp in seconds */
+export const SPECS = [
+  { name: 'S-1 SATURN I', dry: 130, fuel: 2400, thrust: 46000, isp: 263 },
+  { name: 'S-2 SATURN II', dry: 120, fuel: 700, thrust: 12000, isp: 340 },
+  { name: 'CSM ENGINE', dry: 20, fuel: 400, thrust: 3000, isp: 420 },
+];
+export const CAPSULE_MASS = 10;

@@ -1,10 +1,10 @@
 import * as THREE from 'three';
-import { RE, RM, MOON, WARPS, DTPHYS, PAD_POS } from './constants.js';
+import { RE, RM, WARPS, DTPHYS, PAD_POS, moonPos } from './constants.js';
 import { initWorld, spinBodies, updateSky, updateSunShadow } from './world.js';
-import { stages, initVehicle, spawnParticle, addDebris, detachStage, setVisible, updateParticles, updateDebris, updateBurnVisuals, clearDebris, resetStages } from './vehicle.js';
+import { stages, initVehicle, initNavVectors, updateNavVectors, spawnParticle, addDebris, detachStage, setVisible, updateParticles, updateDebris, updateBurnVisuals, clearDebris, resetStages } from './vehicle.js';
 import { S, keys, initPhysics, getState, getSimTime, getEngineOn, getThrottle, getWarpIndex, setWarpIndex, setTargetThrottle, getSasOn, setSas, cycleWarp, toggleSas, toggleSasRetro, activeStage, fwd, isBurning, accelAt, physStep, predict, toggleIgnite, separateStage, addDistFlown, pushTrail, resetSim, clearPredictor, markTeleported, predLine, omega, getControlAuthority } from './physics.js';
 import { camera, initCamera, cycleCamera, updateCamera, resetCameraView, setCamMode, setCamDist, resizeCamera } from './camera.js';
-import { initHUD, addLog, updateHUD, drawMap, endOverlay, setWarn, hideOverlay, clearLog } from './hud.js';
+import { initHUD, addLog, updateHUD, drawMap, toggleMapView, endOverlay, setWarn, hideOverlay, clearLog } from './hud.js';
 import { audioInit, audioEngine, audioThud, audioExplosion, audioWin, updateEngineGain } from './audio.js';
 
 /* ---------------- renderer / scene ---------------- */
@@ -37,6 +37,7 @@ function resetMission() {
 let audioArmed = false;
 initWorld(scene);
 initVehicle(scene);
+initNavVectors(scene);
 initPhysics({
   scene,
   stages,
@@ -64,6 +65,7 @@ addEventListener('keydown', e => {
   else if (k === ']') cycleWarp(1);
   else if (k === '[') cycleWarp(-1);
   else if (k === 'c') cycleCamera();
+  else if (k === 'm') toggleMapView();
   else if (k === 'r') resetMission();
 });
 addEventListener('keyup', e => { keys[e.key.toLowerCase()] = false; });
@@ -90,7 +92,7 @@ function frame() {
     prevPos.copy(S.pos);
     spinBodies(simDt);
 
-    if (getState() === 'flying') { trailTick += simDt; if (trailTick > 0.8) { trailTick = 0; pushTrail(S.pos.clone()); } }
+    if (getState() === 'flying') { trailTick += dtReal; if (trailTick > 0.5) { trailTick = 0; pushTrail(S.pos); } }
 
     // visuals follow physics
     updateBurnVisuals({ pos: S.pos, quat: S.q, vel: S.v, throttle: getThrottle(), activeIdx: activeStage(), burn: isBurning(), fwd, omega });
@@ -98,7 +100,7 @@ function frame() {
     updateEngineGain(isBurning(), Math.max(0, S.pos.length() - RE));
     predTick += dtReal; if (predTick > .35) { predTick = 0; if (getState() === 'flying') predict(); }
   }
-  updateParticles(dtReal);
+  updateParticles(Math.min(1, dtReal * WARPS[getWarpIndex()]));
   updateCamera(dtReal);
   updateHUD(dtReal);
   updateSky(S.pos);
@@ -118,10 +120,13 @@ addEventListener('resize', () => {
 
 /* ---------------- debug/test handle ---------------- */
 window.game = {
-  state: () => ({ state: getState(), simTime: getSimTime(), altE: S.pos.length() - RE, altM: S.pos.distanceTo(MOON) - RM,
-    radialM: S.v.dot(new THREE.Vector3().subVectors(S.pos, MOON).normalize()),
+  state: () => ({ state: getState(), simTime: getSimTime(), altE: S.pos.length() - RE,
+    radialE: S.v.dot(new THREE.Vector3().copy(S.pos).normalize()),
+    moon: moonPos(getSimTime(), new THREE.Vector3()).toArray(),
+    altM: S.pos.distanceTo(moonPos(getSimTime(), new THREE.Vector3())) - RM,
+    radialM: S.v.dot(new THREE.Vector3().subVectors(S.pos, moonPos(getSimTime(), new THREE.Vector3())).normalize()),
     speed: S.v.length(), fuel: stages.map(s => s.fuel), separated: stages.map(s => s.separated),
-    engineOn: getEngineOn(), throttle: getThrottle(), sasOn: getSasOn(),
+    engineOn: getEngineOn(), throttle: getThrottle(), sasOn: getSasOn(), warp: WARPS[getWarpIndex()],
     omega: [omega.x, omega.y, omega.z], authority: getControlAuthority().py }),
   ignite: toggleIgnite, stage: separateStage, setSas,
   warp: m => { setWarpIndex(WARPS.indexOf(m)); }, camera: n => { setCamMode(n); },

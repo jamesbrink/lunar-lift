@@ -92,7 +92,7 @@ pLife.fill(0);
 const pGeo = new THREE.BufferGeometry();
 pGeo.setAttribute('position', new THREE.BufferAttribute(pPos, 3));
 pGeo.setAttribute('color', new THREE.BufferAttribute(pCol, 3));
-const plume = new THREE.Points(pGeo, new THREE.PointsMaterial({ size: 0.06, vertexColors: true, transparent: true, blending: THREE.AdditiveBlending, depthWrite: false, sizeAttenuation: true }));
+const plume = new THREE.Points(pGeo, new THREE.PointsMaterial({ size: 0.0004, vertexColors: true, transparent: true, blending: THREE.AdditiveBlending, depthWrite: false, sizeAttenuation: true }));
 plume.frustumCulled = false;
 let pCursor = 0;
 
@@ -159,6 +159,52 @@ export function resetStages() {
   rocketGroup.quaternion.identity();
 }
 
+/* ---------------- navigation vectors drawn in the world ----------------
+   The plume shows where the engines are firing, but only while they are lit.
+   These two lines make the attitude legible at any zoom: an orange arrow along
+   the nose (the direction the thrust will push the vehicle) and a cyan line
+   along the velocity. Both are scaled to the camera distance so they stay
+   readable from the pad out to orbit.                                            */
+const navGroup = new THREE.Group();
+navGroup.frustumCulled = false;
+function arrowPair(colour) {
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(6), 3));
+  const line = new THREE.Line(geo, new THREE.LineBasicMaterial({ color: colour, transparent: true, opacity: .8 }));
+  const head = new THREE.Mesh(new THREE.ConeGeometry(1, 2, 14), new THREE.MeshBasicMaterial({ color: colour, transparent: true, opacity: .85, depthWrite: false }));
+  line.frustumCulled = head.frustumCulled = false;
+  return { geo, line, head };
+}
+export const thrustArrow = arrowPair(0xff7a3c);
+export const velArrow = arrowPair(0x6fd3ff);
+
+export function initNavVectors(target) {
+  navGroup.add(thrustArrow.line, thrustArrow.head, velArrow.line, velArrow.head);
+  target.add(navGroup);
+}
+
+const _nv = new THREE.Vector3();
+function setArrow(a, pos, dir, len) {
+  const p = a.geo.attributes.position.array;
+  p[0] = pos.x; p[1] = pos.y; p[2] = pos.z;
+  p[3] = pos.x + dir.x * len; p[4] = pos.y + dir.y * len; p[5] = pos.z + dir.z * len;
+  a.geo.attributes.position.needsUpdate = true;
+  a.head.position.set(pos.x + dir.x * len, pos.y + dir.y * len, pos.z + dir.z * len);
+  a.head.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), dir);
+  const s = len * 0.16;
+  a.head.scale.setScalar(s);
+  a.head.visible = true;
+}
+
+export function updateNavVectors(pos, nose, vel, burning, camDist) {
+  const len = THREE.MathUtils.clamp(camDist * 0.35, 0.05, 600);
+  thrustArrow.line.visible = thrustArrow.head.visible = burning;
+  if (burning) setArrow(thrustArrow, pos, nose, len);
+  _nv.copy(vel);
+  if (_nv.lengthSq() > 1e-9) setArrow(velArrow, pos, _nv.normalize(), len);
+  else velArrow.line.visible = velArrow.head.visible = false;
+}
+
 /* visuals follow physics: rocket transform, flame/glow, plume emission */
 export function updateBurnVisuals({ pos, quat, vel, throttle, activeIdx, burn, fwd, omega }) {
   rocketGroup.position.copy(pos); rocketGroup.quaternion.copy(quat);
@@ -183,6 +229,6 @@ export function updateBurnVisuals({ pos, quat, vel, throttle, activeIdx, burn, f
     const tailPos = pos.clone().addScaledVector(fwd(), stages[activeIdx].tailZ * VS);
     const base = vel.clone();
     for (let k = 0; k < Math.max(1, throttle * 2.2); k++)
-      spawnParticle(tailPos, base.addScaledVector(fwd(), -34).add(new THREE.Vector3().randomDirection().multiplyScalar(4)), .55 + Math.random() * .5, [1, .72, .35]);
+      spawnParticle(tailPos, base.addScaledVector(fwd(), -2.8).add(new THREE.Vector3().randomDirection().multiplyScalar(0.15)), .5 + Math.random() * .5, [1, .72, .35]);
   }
 }

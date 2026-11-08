@@ -18,15 +18,16 @@ the rocket, the launch complex, and the lander all cast real shadows from tower 
 
 ## Run
 
-Open `index.html` in any modern browser with an internet connection — Three.js loads from a CDN via
-an importmap. Or serve the folder:
+Node 18+ is the only requirement — the dev server is dependency-free and reloads the page in the
+browser the moment any `js/`, `css/` or `index.html` file changes:
 
 ```
-python3 serve-nocache.py 8078      # recommended: disables caching so ES modules never go stale
-python3 -m http.server             # plain server also works; hard-reload after edits
+npm run dev            # node server.js, port 8078
+npm run dev 8000       # any port you like
 ```
 
-then visit `http://127.0.0.1:8078/index.html` (or `http://127.0.0.1:8000/index.html` for the plain server).
+then visit `http://127.0.0.1:8078/index.html`. Three.js still comes from a CDN through the
+importmap, so an internet connection is required.
 
 ## Controls
 

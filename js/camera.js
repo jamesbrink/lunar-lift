@@ -1,14 +1,17 @@
 import * as THREE from 'three';
-import { RE, MOON, SOI_M, PAD_UP, PAD_POS } from './constants.js';
-import { S, fwd } from './physics.js';
+import { RE, RM, SOI_M, PAD_POS, moonPos } from './constants.js';
+import { S, fwd, getSimTime } from './physics.js';
 
-export const camera = new THREE.PerspectiveCamera(58, innerWidth / innerHeight, 0.01, 400000);
+/* distances are km; 1 m near plane so the 105 m rocket resolves, 3 M km far plane
+   so the starfield and the lunar approach both render (logarithmic depth buffer) */
+export const camera = new THREE.PerspectiveCamera(58, innerWidth / innerHeight, 0.001, 3000000);
 
 export const camModes = ['chase', 'orbit', 'system'];
-let camMode = 0, camYaw = 0.3, camPitch = 0.15, camDist = 2.6, dragging = false, lastInput = 0;
-const camPos = new THREE.Vector3(0, -2.4, RE + 1.1), camTgt = PAD_POS.clone(), camUp = new THREE.Vector3(0, 0, 1);
+export const getCamDist = () => camDist;
+let camMode = 0, camYaw = 0.3, camPitch = 0.15, camDist = 0.35, dragging = false, lastInput = 0;
+const camPos = new THREE.Vector3(), camTgt = PAD_POS.clone(), camUp = new THREE.Vector3(0, 0, 1);
 const noseSmooth = new THREE.Vector3(0, 0, 1);
-const CAM_RANGE = { chase: [0.35, 300, 2.6], orbit: [0.12, 400, 4.5], system: [6000, 60000, 20000] };
+const CAM_RANGE = { chase: [0.02, 400, 0.35], orbit: [0.01, 1000, 2.5], system: [4000, 900000, 150000] };
 
 let addLog = () => {};
 
@@ -41,9 +44,14 @@ export function setCamMode(name) { camMode = camModes.indexOf(name); }
 export function setCamDist(d) { camDist = d; }
 
 export function resetCameraView() {
-  camMode = 0; camYaw = 0.35; camPitch = 0.18; camDist = 72;
-  camPos.set(0, 66, 1012); camTgt.copy(PAD_POS);
+  camMode = 0; camYaw = 0.35; camPitch = 0.18; camDist = 0.9;
+  camPos.copy(PAD_POS).addScaledVector(PAD_UP_LOCAL(), 0.6).addScaledVector(PAD_EAST_LOCAL(), -1.2);
+  camTgt.copy(PAD_POS); camUp.copy(PAD_UP_LOCAL());
 }
+
+const AXIS = new THREE.Vector3(0, 1, 0);
+function PAD_UP_LOCAL() { return new THREE.Vector3().copy(PAD_POS).normalize(); }
+function PAD_EAST_LOCAL() { return new THREE.Vector3().crossVectors(AXIS, PAD_UP_LOCAL()).normalize(); }
 
 export function resizeCamera() {
   camera.aspect = innerWidth / innerHeight; camera.updateProjectionMatrix();
@@ -53,20 +61,23 @@ export function resizeCamera() {
 // the horizon stays level and the view can never roll or flip, whatever the rocket does.
 function bodyRadial() {
   const e = new THREE.Vector3().copy(S.pos).normalize();
-  const rM = S.pos.distanceTo(MOON);
+  moonPos(getSimTime(), _m);
+  const rM = S.pos.distanceTo(_m);
   if (rM > SOI_M * 1.4) return e;
-  const m = new THREE.Vector3().subVectors(S.pos, MOON).normalize();
+  const m = new THREE.Vector3().subVectors(S.pos, _m).normalize();
   const w = THREE.MathUtils.smoothstep(SOI_M * 1.4 - rM, 0, SOI_M * 0.8);
   return e.multiplyScalar(1 - w).addScaledVector(m, w).normalize();
 }
 
+const _m = new THREE.Vector3();
 const desired = new THREE.Vector3();
 export function updateCamera(dt) {
   const mode = camModes[camMode];
   let target, up;
   if (mode === 'system') {
-    target = new THREE.Vector3(MOON.x / 2, 0, MOON.z / 2); up = PAD_UP;
-    const dir = new THREE.Vector3(Math.sin(camYaw) * Math.cos(camPitch), Math.cos(camYaw) * Math.cos(camPitch), Math.sin(camPitch));
+    moonPos(getSimTime(), _m);
+    target = new THREE.Vector3(_m.x / 2, 0, _m.z / 2); up = AXIS;
+    const dir = new THREE.Vector3(Math.sin(camYaw) * Math.cos(camPitch), Math.sin(camPitch), Math.cos(camYaw) * Math.cos(camPitch));
     desired.copy(target).addScaledVector(dir, camDist);
   } else {
     target = S.pos.clone();
@@ -77,7 +88,7 @@ export function updateCamera(dt) {
     const h = noseSmooth.clone().addScaledVector(up, -noseSmooth.dot(up));
     if (h.length() < 0.12) {
       h.copy(S.v).addScaledVector(up, -S.v.dot(up));
-      if (h.length() < 0.12) h.crossVectors(up, Math.abs(up.z) < 0.9 ? PAD_UP : new THREE.Vector3(1, 0, 0));
+      if (h.length() < 0.12) h.crossVectors(up, Math.abs(up.y) < 0.9 ? AXIS : new THREE.Vector3(1, 0, 0));
     }
     h.normalize();
     if (mode === 'chase' && performance.now() - lastInput > 2000) {   // ease back behind the nose
