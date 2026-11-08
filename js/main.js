@@ -81,7 +81,9 @@ function frame() {
 
   if (getState() === 'pad' || getState() === 'flying') {
     const simDt = dtReal * WARPS[getWarpIndex()];
-    let steps = Math.min(600, Math.round(simDt / DTPHYS));
+    // ceil + max(1, …): a frame shorter than DTPHYS (any display above 100 Hz) used to
+    // round to 0 substeps, so at ×1 physics never ran while the visuals kept spinning.
+    const steps = Math.max(1, Math.min(600, Math.ceil(simDt / DTPHYS)));
     const h = simDt / steps;
     for (let s = 0; s < steps; s++) physStep(h);
     if (getState() === 'flying') addDistFlown(S.pos.distanceTo(prevPos));
