@@ -234,28 +234,31 @@ export function initWorld(target) {
      actually hold a puff's shape; it costs the shadow box nothing. */
   cumulus.castShadow = false;
   cumulus.material.fog = false;   // same reason as the ground: a deck 2 km up is a planet-scale body
-  /* The mip chain averages alpha toward the global mean (~0.26, measured), which is exactly what
-     turned the deck into a uniform veil above a few hundred km, so the sampled alpha is
-     re-steepened in the fragment — the same bias trick every planet renderer in a game engine
-     uses. The quantization that replaced the original version is documented on the injection
-     below it. This is NOT the dead `discard` threshold of the old note: it operates on the
-     mip-averaged value, not on a texel. */
-  /* Three cel steps, measured over the real texture (node harness over cumulusTex, mip chain box-
-     built): source cover(a≥0.42) = 0.27 and it HOLDS through mip5 (the field stays hard-edged under
-     averaging), so the old `max(smoothstep(0.42,0.66,ca), ca*0.14)` was fine where cells resolve —
-     its defect was the FLOOR: ca*0.14 is proportional to the mip mean, and across a clear-ocean
-     view the local mean drifts 0.05→0.25, drawing a continuous 0→5/255 gradient haze — measured on
-     07-sky-68km as exactly ±3/255 "soft blurry smudges" over an otherwise dead-flat disc. Now: a
-     cell above thH keeps alpha 1 with a derivative-AA'd edge; the haze is a CONSTANT step over
-     thL (no gradient at all); below is bare planet. fwidth AA is required, not optional: on a deep
-     mip the decision lands on texel-sized blocks otherwise. The deck is a single-wrap sphere —
-     the multi-repeat mip-wedge failure of AGENTS.md cannot apply to it. */
+  /* Two regimes, crossed by TEXELS-PER-PIXEL (|d uv| × texture width), because no constant alpha
+     threshold survives minification and fwidth(ca) is not a valid proxy for it. Where cells
+     RESOLVE (tpp < 2) the cel steps stand: a cell above 0.34 is alpha 1 with a derivative-AA'd
+     edge, the 0.18 haze is a CONSTANT step (the round-4 fix for the ca*0.14 proportional floor's
+     ±3/255 gradient smudges). Where the texture minifies, the GPU's box mips average clear ocean
+     and cloud core into one smooth INTERMEDIATE ca (0.3–0.6 over whole belts — measured over the
+     real chain: global mean 0.263, invariant across mips; region p50s in the mid teens but the
+     grazing horizon mixes thousands of km in all directions) and fwidth(ca) of that smooth field
+     is small, so a fwidth gate never fires — the 0.34 step then decides alpha = 1 across whole
+     ocean: the uniform grey sheet this frame had at 900 km, and its mirror image (ca < 0.34 →
+     bare navy planet) at Moon distance. The uv-derivative gate measures minification directly:
+     tpp = max(|∂u/∂px|·2048, |∂v/∂px|·1024) is exactly what the sampler's LOD picks. Above it the
+     alpha rides the local mean through a contrast window (0.30→0.62: a clear mip cell ≤0.18
+     stays bare, a saturated one goes full white), so zonal structure survives from orbit and
+     intermediate blur reads as haze, not as opaque deck. The deck is a single-wrap sphere — the
+     multi-repeat mip-wedge failure of AGENTS.md cannot apply to it. */
   cumulus.material.onBeforeCompile = (sh) => {
     sh.fragmentShader = sh.fragmentShader.replace('#include <map_fragment>',
       '#include <map_fragment>\n' +
       '  float ca = diffuseColor.a;\n' +
       '  float cw = max(fwidth(ca), 0.004);\n' +
-      '  diffuseColor.a = mix(mix(0.0, 0.06, smoothstep(0.18 - cw, 0.18 + cw, ca)), 1.0, smoothstep(0.34 - cw, 0.34 + cw, ca));');
+      '  float tpp = max(length(vec2(dFdx(vMapUv.x), dFdy(vMapUv.x))) * 2048.0, length(vec2(dFdx(vMapUv.y), dFdy(vMapUv.y))) * 1024.0);\n' +
+      '  float cell = mix(mix(0.0, 0.06, smoothstep(0.18 - cw, 0.18 + cw, ca)), 1.0, smoothstep(0.34 - cw, 0.34 + cw, ca));\n' +
+      '  float veil = smoothstep(0.30, 0.62, ca);\n' +
+      '  diffuseColor.a = mix(cell, veil, smoothstep(2.0, 8.0, tpp));');
   };
   scene.add(cumulus);
 
@@ -266,19 +269,19 @@ export function initWorld(target) {
     }));
   cirrus.castShadow = false;        // see the cumulus note: 9 km up is enough to wreck the ground
   cirrus.material.fog = false;
-  /* Two cel steps, same rule and same harness as the cumulus deck above: the streak field covers
-     0.21 of the planet at any threshold in [0.15,0.25] (mip0→mip4 measured — the fbm's ramped
-     upper tail survives box-averaging essentially intact), so the threshold is dead centre of
-     that plateau, 0.25; everything the old wide smoothstep(0.42,0.75) left as a proportional
-     mid-gray veil between its shoulders is now either streak or bare, with a derivative-AA'd
-     edge. The thin constant floor keeps the planet wearing weather rather than going bare from
-     the Moon without drawing a gradient. */
+  /* Continuous, not stepped — the round-5 correction, measured with a red canary painted into
+     the CUMULUS law at this exact view: the grey sheet that blanketed the 900 km oblique frame
+     tinted the land brown but left the ocean untouched, so it belonged to this mesh, not that
+     one. The streak field's texel alpha (mean 0.13, but region p25 0.22 / p50 0.42 through
+     mips 2–4 in the tropical–mid-latitude band) sits around the old 0.25 step almost everywhere
+     in that band, and a step there is a wash by construction. smoothstep(0.5, 0.8) answers the
+     field's upper tail — the p95 mass (0.76) and nothing else: thin white streak cores against
+     clear sky at any scale, with no gate needed because a continuous law degrades gracefully
+     where the step did not. The 0.55 keeps cirrus under the cumulus at every distance. */
   cirrus.material.onBeforeCompile = (sh) => {
     sh.fragmentShader = sh.fragmentShader.replace('#include <map_fragment>',
       '#include <map_fragment>\n' +
-      '  float wa = diffuseColor.a;\n' +
-      '  float ww = max(fwidth(wa), 0.004);\n' +
-      '  diffuseColor.a = mix(0.025, 1.0, smoothstep(0.25 - ww, 0.25 + ww, wa));');
+      '  diffuseColor.a *= 0.55 * smoothstep(0.5, 0.8, diffuseColor.a);');
   };
   scene.add(cirrus);
 

@@ -40,12 +40,14 @@ const C = {
 };
 
 /* Daylight regolith, not printer paper (the fact sheet's Bond albedo is 0.11). Measured 2026-11-09
-   round 5: under the day ramp the shipped bytes (mean 0.836 sRGB) rendered the near bake at mean
-   0.804 with 33 % of vertices above 0.90 and 41 % inside the top eighth of the histogram — a
-   blown-out white sheet with no headroom left for a crater rim to step ABOVE its own ground, so
-   at 9 km the pockmarks were invisible and rim-minus-floor measured NEGATIVE. These sit the same
-   canvas — the one the far mesh and the near level both read, so they cannot disagree — at ~0.63
-   noon, and every class keeps its step: 0.074 / 0.086 / 0.138 / 0.062 of sRGB between neighbours. */
+   round 5 against the round-4 commit: under the day ramp the shipped palette (canvas mean 0.836
+   sRGB) rendered the near bake at mean 0.834 with 34.2 % of samples above 0.90 and 65.7 % inside
+   the top three sixteenths of the histogram — a blown-out white sheet with no headroom left for a
+   crater rim to step ABOVE its own ground, so at 9 km the pockmarks were invisible and
+   rim-minus-floor measured NEGATIVE at the sub-sun test crater. These bytes put the same canvas —
+   the one the far mesh and the near level both read, so they cannot disagree — at mean 0.650 with
+   6.5 % above 0.90, and every class keeps its step: 0.074 / 0.087 / 0.138 / 0.059 of sRGB between
+   neighbours. */
 const MOON = {
   maria: [94, 98, 108],
   collar: [79, 83, 93],          // the drawn stroke inside a mare border (see mareCollar)
@@ -392,13 +394,15 @@ async function paintMoonJob(path) {
   stampCraterAlbedo(out, blur, w, h);
   stampMidAlbedo(out, w, h);
   /* Gentle large-scale albedo mottling: ~376 km wavelength, second octave 188 km, quantised to
-     steps of 1.5 % (peak ±3 %). A 9 km approach looks through a 440 km window, and inside one the
-     painted ground was before this one flat class tone plus bowls — the reviewer's "sheet". The
+     steps of 1.5 % (levels −3…+3, so peak ±4.5 %; 37 % of texels sit on 0). A 9 km approach looks
+     through a 440 km window, and inside one the painted ground was before this one flat class tone
+     plus bowls — the reviewer's "sheet". The
      mottle is quantised, not smooth (flat factors are cel tones, and a smooth field would be
      re-stepped by the ramp anyway), it lands IDENTICALLY on both sides of a mare border, so the
      round-4 quantile-preserving cut keeps its step and its corner statistics, and 376 km is
      over a hundred times the cap's widest vertex spacing (3 km at the rim), so the near bake can
-     never staircase on it. Two octaves over 524 k texels adds ~20 ms to the paint pass. */
+     never staircase on it. Two octaves over 524 k texels: 14 ms on the paint pass (measured,
+     best of 5). */
   const mottleP = period(MOON_CIRC, 376);
   for (let y = 0; y < h; y++) {
     const v = 1 - (y + 0.5) / h;
@@ -439,7 +443,10 @@ function quantile(a, share) {
    plain from the stroke, not from the tone difference between two grey plates that a bare threshold
    leaves there. Measured across the 3 976 straddling texel pairs of the shipped sheet, the painted
    tone changes by 13.8 levels of 255 at a mare border today; with the stroke it changes by 64.7,
-   over a band 2.3 texels (25 km) wide walking inward. Drawn before the crater passes so a bowl
+   over a band 2.3 texels (25 km) wide walking inward. Re-measured 2026-11-09 after the daylight
+   palette (9 064 straddling samples, both edge directions): 64.1 → 54.1 levels, area 3.32 % and
+   corner-pair share 50.7 % identical — the mask never moved; the step narrowed with the palette,
+   not with the stroke. Drawn before the crater passes so a bowl
    sitting on the rim of a mare still paints over its own stroke. */
 function mareCollar(out, mare, w, h) {
   for (let y = 0; y < h; y++) {
@@ -924,8 +931,15 @@ export function moonPatchDetail(u, v, baseLum, sun) {
            den ≈ 0 means the sun stands at zenith here or the vertex IS the centre: cs = 0. */
         let cs = 0;
         if (sun) {
-          const sE = sun.x * cr.sl + sun.z * cr.cl;
-          const sN = sun.y * cr.cla - (sun.x * cr.cl + sun.z * cr.sl) * cr.sla;
+          /* The prebaked basis here used to be (sinλ, 0, cosλ) plus a vector that is neither
+             north nor −north — east came in negated against the ex/ey offsets above, which run
+             in the mesh's true +θ/+φ directions (terrain places this crater at θ = π + lon).
+             Measured 2026-11-09 on the baked cap at 22° local sun elevation: the ANTI-sun rim
+             arc rendered 0.999 against the sunward rim's 0.855 — the crescent was painted on
+             the night side. Derived from the mesh: east = (−sinλ, 0, −cosλ),
+             north = (−sinφ·cosλ, cosφ, sinφ·sinλ). */
+          const sE = -(sun.x * cr.sl + sun.z * cr.cl);
+          const sN = sun.y * cr.cla - (sun.x * cr.cl - sun.z * cr.sl) * cr.sla;
           const den = Math.hypot(sE, sN) * dd * cr.rKm;
           if (den > 1e-6) cs = (ex * sE + ey * sN) / den;
         }
