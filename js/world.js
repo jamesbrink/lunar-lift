@@ -70,7 +70,7 @@ export function initWorld(target) {
      fill is deliberately blue: the shadow side of a cel-shaded object is a colour, not black. ---- */
   sun = new THREE.DirectionalLight(0xfff6e8, 1.0);
   sun.castShadow = true;
-  sun.shadow.mapSize.set(2048, 2048);
+  sun.shadow.mapSize.set(4096, 4096);   // 1.5 m at the ±6 km pad box; PCF then has texels to work with
   setShadowBox(SHADOW_MAX);
   /* Bias, in NORMALISED depth × the camera's 300 km range: the old −0.0005 was 1.5 km of
      along-light shadow smear, and normalBias 0.12 km slid every mast shadow a full 120 m along

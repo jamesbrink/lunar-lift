@@ -13,12 +13,18 @@ const canvas = document.getElementById('gl');
 const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, logarithmicDepthBuffer: true });
 renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
 renderer.setSize(innerWidth, innerHeight);
-/* Flat output, hard shadows. ACES filmic was compressing and desaturating everything, which is what
-   turned the ocean charcoal; cel shading wants the palette exactly as authored. BasicShadowMap gives
-   the crisp terminator edge and cloud shadows that the soft filter was blurring away. */
+/* Flat output. ACES filmic was compressing and desaturating everything, which is what turned the
+   ocean charcoal; cel shading wants the palette exactly as authored.
+
+   Shadows are PCF-filtered, not Basic. BasicShadowMap compared one texel, and the box tracking the
+   vehicle is ±6 km at the pad at 2048² — 5.9 m per texel — so the launch tower's 2 m shadow arrived as
+   a black staircase marching across the pad, worst at a low sun where it runs for kilometres. The
+   thing the old comment was protecting is the *cloud* shade, which is not a shadow-map caster at all
+   (js/clouds.js projects its own alpha), so filtering the map cannot blur it away. What the cel look
+   needs from the map is the terminator on the planet, and that comes from the ramp, not from the die. */
 renderer.toneMapping = THREE.NoToneMapping;
 renderer.shadowMap.enabled = true;
-renderer.shadowMap.type = THREE.BasicShadowMap;
+renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 const scene = new THREE.Scene();
 scene.background = new THREE.Color(0x04060b);
 scene.fog = new THREE.FogExp2(0x04060b, 0);
