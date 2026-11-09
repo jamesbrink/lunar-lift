@@ -1,322 +1,349 @@
 import * as THREE from 'three';
 import { RE } from './constants.js';
+import { cumulusTex, cirrusTex } from './textures.js';
 
-/* The near cloud layer — the deck you can actually see from the ground.
+/* Weather is ONE field on ONE mesh, not a cap that follows the ship.
 
-   A cloud texture wrapped on a planet-scale sphere cannot put a cumulus overhead: at 1024×512 over
-   40 000 km one texel is 39 km, and the horizon-to-30°-elevation sky above the pad spans 0.18 of
-   one texel. Measured, not estimated — the whole visible sky from the pad samples a single texel,
-   which is why the global decks read as a uniform film (or nothing) from the surface and why no
-   amount of blending, uv or row-convention work could change it.
+   The old system was two tangent-plane caps re-centred under the vehicle: a 44x44 grid at 220 km
+   and a 28x28 grid at 32 km. Both are squares in a plane, so zooming out showed a flat
+   quadrilateral with straight edges hanging around the ship — a 45x45 mesh outline 400+ km wide,
+   unmistakable from 100 km up. A cap cannot be weather either: the field only exists where the
+   camera happens to be, and the rest of the planet is bare.
 
-   So the sky is served at two scales. The global decks in js/world.js keep the orbit view; this
-   plate is a spherical cap that re-centres on the ground under the vehicle, at 7 km, with a
-   64 km tile repeated across it — 125 m per texel, so puffs are kilometres wide and legible from
-   the pad. It is a child of the Earth mesh, so its uv offsets ride the spin with the planet, and it
-   is anchored to the *body* rather than to the camera: recentring shifts the uv by the same arc it
-   shifts the geometry, so the weather stays put while the grid slides underneath it.
+   The atmosphere is now a shell from 4 km to 11 km, and every pixel of it gets its opacity from an
+   optical-depth march through the analytic chord of the view ray. Density grows toward the horizon
+   the way real air does, the top edge is a gradient rather than a decal edge, and there is no mesh
+   silhouette left to see because the surface is only ever translucent.
 
-   The shade plate is the same cap, offset anti-sunward by the deck height over tan(elevation) and
-   draped over the actual terrain through fineGroundHeight. Because it samples the same tile at the
-   same uv (shifted by the same arc), the darkness on the ground is the shape of the cloud that
-   casts it, and the offset grows as the sun drops — the penumbra rule from the art direction,
-   at near scale, for free.
+   Two scales, one mesh. The macro field is the zonal weather from js/textures.js (20 km per texel:
+   ITCZ, dry subtropics, storm tracks) and it decides WHERE clouds live. The cell field is a
+   tileable convective lattice at 160 km per tile (0.3125 km per texel: towers of 3-13 km), which
+   is what makes weather legible from the pad. The old argument that "no deck change will ever put
+   a cumulus over the pad" was true only because the deck was one texel per 39 km; tiling fixes it
+   without a moving cap.
 
-   The deck is not alpha-tested: the tile carries a soft rim, the vertex colour carries the radial
-   fade, and both blend; it is mipmapped, so a grazing plate does not shimmer. The ground SHADE is
-   alpha-quantised in the fragment to two hard cel steps (shadow / no shadow) — see makeCloudLayer:
-   its tile deliberately has no mip chain, which is what makes a hard step safe there. */
+   Two cell lattices drift at different speeds, so cells build and fade as they slide past each
+   other rather than merely translating. Ground shadows come from the SAME march projected up the
+   sun ray (cloudShadeInject), so the darkening on the surface is the column of cloud overhead —
+   the job the 32 km shade cap could only do under the camera. */
 
-const SEG = 44;                       // deck cap: 45×45 vertices over 440 km, 10 km per cell
-const SEG_SHADE = 28;                 // shade cap: 29×29 over 140 km, 5 km per cell
-const RADIUS = 220;                   // km deck radius — matches the terrain patch
-const RADIUS_SHADE = 32;              // km shade radius — the ground beyond this is a grazing sliver
-const RECENTRE = 6;                   // km of ground travel before a rebuild
-const ALT = 7;                        // km above the reference sphere — a fair weather cumulus base
-const TILE = 200;                     // km per tile: 390 m per texel, BOTH caps, same field
+const BAND_BASE = 4;                    // km: cloud base
+const BAND_TOP = 11;                    // km: cloud top
+const R_IN = RE + BAND_BASE;            // 6375
+const R_OUT = RE + BAND_TOP;            // 6382, the shell's own radius
+const THICK = BAND_TOP - BAND_BASE;     // 7 km
+const CELLS = 250;                      // tile repeats around the globe: 160 km per tile
+const CELL_TEX = 512;                   // 0.3125 km per texel
+const SEG_W = 512, SEG_H = 256;         // same chord as the decks it replaces (12.5 km)
+const MARCH = 8;                        // samples through the view column
+const MARCH_SHADE = 4;                  // samples through the sun column for ground shade
 
-/* The uv budget, learned the hard way. Mip derivatives are computed per triangle, so a 10 km
-   triangle that spans several tile repeats picks a different mip level from its neighbour and the
-   ground fills with straight-edged wedges of the tile's mip average — the exact "horrific terrain"
-   look, on top of what the ramp step was already doing. 390 m per texel keeps the derivative near
-   level 0 while still putting a legible puff over the pad (the sky overhead spans ~15 km of tile).
-   The shade cap has to sample the SAME uv field as the deck or a shadow lands under clear sky, so it
-   keeps TILE and shrinks instead: 70 km of shadow is more ground than the pad can resolve anyway. */
-const FADE0 = 0.52;                   // radial fade starts here (fraction of the cap's radius)
-const SHOW_ALT = 45;                  // km: opacity reaches zero here and the decks take over
-const FADE_ALT = 25;                  // km: the handover from the near layer starts here
-const SHADE_LIFT = 0.06;              // km above the ground for the shade cap
-const SHADE_ALPHA = 0.50;             // how dark a puff's shadow gets, before the tile's own alpha
-const SHADE_FADE0 = 0.3;                // the shade gives up earlier than the deck: see updateCloudLayer
+/* Extinction per km of solid cloud. A cumulus core is opaque within a kilometre; the cirrus veil
+   never is. */
+const EXT_LOW = 1.6;
+const EXT_HIGH = 0.10;
+const SHADE = 0.45;                     // how far a cloud column can darken the ground
+/* Fraction of sky covered by cumulus: outside the macro systems (fair weather) and inside them.
+   The macro field moves COVERAGE between these, it does not scale opacity — scaling opacity is
+   what turned the first version of this shell into a planet-wide white fog with no edges. */
+const COVER_CLEAR = 0.07;
+const COVER_STORM = 0.82;
 
-const _g = new THREE.Vector3(), _e1 = new THREE.Vector3(), _e2 = new THREE.Vector3();
-const _d = new THREE.Vector3();
+/* Winds in tile-uv per second: 1.1e-4 is 17.6 m/s at 160 km/tile, 3.5e-4 is 56 m/s for the second
+   lattice. Their difference is what makes cells grow and dissipate; both ride on the planet's spin
+   so weather follows the ground instead of freezing in inertial space. */
+const WIND_LOW = 1.1e-4;
+const WIND_HIGH = 3.5e-4;
 
-/* Tileable value noise: the lattice wraps, so the plate has no seam where the uv runs past 1. */
-function hash2(x, y, seed) {
-  let n = Math.imul(x, 374761393) ^ Math.imul(y, 668265263) ^ Math.imul(seed, 2654435761);
-  n = Math.imul(n ^ (n >>> 13), 1274126177);
-  return ((n ^ (n >>> 16)) >>> 0) / 4294967295;
-}
+const CLOUD_LIT = new THREE.Color(0xffffff);
+const CLOUD_SHADE = new THREE.Color(0x7f93ad);   // bases and the night side
 
-function lattice(px, py, period, seed) {
-  const x0 = Math.floor(px), y0 = Math.floor(py);
-  const fx = px - x0, fy = py - y0;
-  const u = fx * fx * (3 - 2 * fx), v = fy * fy * (3 - 2 * fy);
-  const p = (x) => ((x % period) + period) % period;
-  const a = hash2(p(x0), p(y0), seed), b = hash2(p(x0 + 1), p(y0), seed);
-  const c = hash2(p(x0), p(y0 + 1), seed), e = hash2(p(x0 + 1), p(y0 + 1), seed);
-  return (a + (b - a) * u) * (1 - v) + (c + (e - c) * u) * v;
-}
-
-/* One tileable puff field. Three octaves at 8/16/32 cells, then a narrow ramp: a hard rim with a
-   soft shoulder, which is what makes it read as painted rather than as fog. */
-function tileTexture() {
-  const N = 512, data = new Uint8Array(N * N * 4);
-  for (let y = 0; y < N; y++) {
-    for (let x = 0; x < N; x++) {
-      const fx = x / N, fy = y / N;
-      let d = 0.5 * lattice(fx * 8, fy * 8, 8, 11)
-            + 0.3 * lattice(fx * 16, fy * 16, 16, 29)
-            + 0.2 * lattice(fx * 32, fy * 32, 32, 47);
-      d = (d - 0.34) / 0.66;                       // the fbm centres near 0.5; stretch to 0..1
-      const a = THREE.MathUtils.clamp((d - 0.24) / 0.20, 0, 1);   // ~35% cover, crisp rim
-      const s = a * a * (3 - 2 * a);
-      const i = (y * N + x) * 4;
-      // the tile carries density only; the material's colour sets the tone
-      data[i] = 255; data[i + 1] = 255; data[i + 2] = 255;
-      data[i + 3] = (s * 255) | 0;
+/* Tileable convective noise, two independent fields in R and G, stored as RANK (the value's
+   percentile in its own field), not as raw fbm. Rank is uniform on 0..1 by construction, so the
+   shader can turn a coverage fraction into a threshold exactly instead of by a tuned guess: the
+   mean of two uniform fields is triangular, and its upper tail above t holds 2(1-t)^2 of the area.
+   Four octaves at 10/20/40/80 cells per tile: towers of 16, 8, 4 and 2 km. */
+function cellTex() {
+  const N = CELL_TEX, n2 = N * N;
+  const hash = (x, y, seed) => {
+    let v = Math.imul(x, 374761393) ^ Math.imul(y, 668265263) ^ Math.imul(seed, 2654435761);
+    v = Math.imul(v ^ (v >>> 15), 2246822519);
+    return ((v ^ (v >>> 13)) >>> 0) / 4294967296;
+  };
+  const lattice = (ix, iy, per, seed) => {
+    const fx = ix * per / N, fy = iy * per / N;
+    const x0 = Math.floor(fx), y0 = Math.floor(fy);
+    const tx = fx - x0, ty = fy - y0;
+    const ax = tx * tx * (3 - 2 * tx), ay = ty * ty * (3 - 2 * ty);
+    const x1 = (x0 + 1) % per, y1 = (y0 + 1) % per;
+    return hash(x0, y0, seed) * (1 - ax) * (1 - ay) + hash(x1, y0, seed) * ax * (1 - ay)
+      + hash(x0, y1, seed) * (1 - ax) * ay + hash(x1, y1, seed) * ax * ay;
+  };
+  const data = new Uint8Array(n2 * 4).fill(255);
+  for (let ch = 0; ch < 2; ch++) {
+    const f = new Float32Array(n2);
+    for (let iy = 0; iy < N; iy++) for (let ix = 0; ix < N; ix++) {
+      let v = 0, amp = 1;
+      for (let k = 0; k < 4; k++, amp *= 0.55) v += amp * lattice(ix, iy, 10 << k, 17 + ch * 40 + k * 7);
+      f[iy * N + ix] = v;
     }
+    const order = new Uint32Array(n2);
+    for (let i = 0; i < n2; i++) order[i] = i;
+    order.sort((a, b) => f[a] - f[b]);
+    for (let r = 0; r < n2; r++) data[order[r] * 4 + ch] = Math.round(r / (n2 - 1) * 255);
   }
   const t = new THREE.DataTexture(data, N, N, THREE.RGBAFormat);
   t.wrapS = t.wrapT = THREE.RepeatWrapping;
   t.magFilter = THREE.LinearFilter;
-  t.minFilter = THREE.LinearMipmapLinearFilter;
-  t.generateMipmaps = true;
+  t.minFilter = THREE.LinearMipmapLinearFilter;   // minified cells average toward 0.5: far cloud
+  t.generateMipmaps = true;                       // fields soften into their coverage, never stair
   t.needsUpdate = true;
   return t;
 }
 
-/* The shade's own copy of that field: the same weather, box-filtered to 64 × 64 (3 km per texel) and
-   shipped WITHOUT mipmaps. The deck wants the crisp 512 version, but a ground cap seen from 5 km away
-   minifies hard, and because mip selection is per triangle the level jumps from cell to cell — which is
-   exactly the straight-edged wedge pattern this whole layer spent an afternoon failing to avoid. With no
-   mip chain to select from, and a source already smoothed to the scale a shadow can be read at, the
-   sample is continuous and the shade still belongs to the cloud above it. */
-function shadeTile(src) {
-  const S = src.image.width, R = 64, K = S / R, data = new Uint8Array(R * R * 4);
-  for (let y = 0; y < R; y++) {
-    for (let x = 0; x < R; x++) {
-      let a = 0;
-      for (let dy = 0; dy < K; dy++) for (let dx = 0; dx < K; dx++) {
-        a += src.image.data[((((y * K + dy) % S) * S) + ((x * K + dx) % S)) * 4 + 3];
-      }
-      const i = (y * R + x) * 4;
-      data[i] = 255; data[i + 1] = 255; data[i + 2] = 255; data[i + 3] = (a / (K * K)) | 0;
-    }
-  }
-  /* Two tent passes over the 64 × 64 grid (footprint ~21 km). The single box filter still let a
-     puff's hard tile boundary through: the shader's two cel steps then drew the shadow edge as a
-     straight-edged grey slab - review 4 counted it "like a raft" at 160 km. On a field this small
-     the tent is nearly free and it curves the isolines at the scale a shadow reads at, which is
-     what the quantised edge then draws: a shadow with a boundary, not a decal. */
-  const tmp = new Uint8Array(R * R), tmp2 = new Uint8Array(R * R);
-  for (let pass = 0; pass < 2; pass++) {
-    const from = pass ? tmp2 : data, to = pass ? tmp : tmp2;
-    for (let y = 0; y < R; y++) {
-      for (let x = 0; x < R; x++) {
-        let s = 0, wsum = 0;
-        for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) {
-          const wgt = (dx ? 1 : 2) * (dy ? 1 : 2);
-          const yy = (y + dy + R) % R, xx = (x + dx + R) % R;
-          s += (pass ? from[yy * R + xx] : from[(yy * R + xx) * 4 + 3]) * wgt;
-          wsum += wgt;
-        }
-        to[y * R + x] = (s / wsum) | 0;
-      }
-    }
-  }
-  for (let i = 0; i < R * R; i++) data[i * 4 + 3] = tmp[i];
-  const t = new THREE.DataTexture(data, R, R, THREE.RGBAFormat);
-  t.wrapS = t.wrapT = THREE.RepeatWrapping;
-  t.magFilter = THREE.LinearFilter;
-  t.minFilter = THREE.LinearFilter;      // no chain, so no per-triangle level selection
-  t.generateMipmaps = false;
-  t.needsUpdate = true;
-  return t;
+/* The march, shared by the shell and by the ground-shade injection. uv is equirectangular and
+   matches js/textures.js (v = 0 is the south pole); each sample gets its uv by projecting its
+   displacement onto local east and north — a linear shift, so no atan or acos per sample.
+   NOTE for whoever edits this: it lives inside a JS template literal, so a backtick in a comment
+   ends the shader. */
+const MARCH_FN = /* glsl */`
+vec2 tangentUv( vec2 uv0, vec3 disp, vec3 n, vec3 east, vec3 north, float cosLat ) {
+  return vec2( uv0.x + dot( disp, east ) / ( PI2 * SHELL_R * cosLat ),
+               uv0.y + dot( disp, north ) / ( PI * SHELL_R ) );
 }
 
-function makePlate(material, order, seg) {
-  const cols = seg + 1;
-  const n = cols * cols;
-  const geo = new THREE.BufferGeometry();
-  geo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(n * 3), 3));
-  geo.setAttribute('uv', new THREE.BufferAttribute(new Float32Array(n * 2), 2));
-  // itemSize 4 so the alpha channel multiplies the tile's own alpha (USE_COLOR_ALPHA)
-  geo.setAttribute('color', new THREE.BufferAttribute(new Float32Array(n * 4), 4));
-  const idx = new Uint16Array(seg * seg * 6);
-  let t = 0;
-  for (let y = 0; y < seg; y++) {
-    for (let x = 0; x < seg; x++) {
-      const a = y * cols + x, b = a + 1, c = a + cols, d = c + 1;
-      idx[t++] = a; idx[t++] = c; idx[t++] = b;
-      idx[t++] = b; idx[t++] = c; idx[t++] = d;
-    }
+/* The segment of the ray inside the cloud band. Three regimes: eye outside the shell (orbit), eye
+   below the cloud base (the pad), eye inside the band (flying through it).
+   TWO out-scalars, deliberately: this once handed back a float array, and a GLSL ES parameter is
+   IN unless it says otherwise — an array written through an in parameter is a local copy, so the
+   caller kept its zeros, every column came back empty, and the whole shell discarded itself with
+   no error anywhere (a magenta probe at 6/km extinction produced not one magenta pixel). */
+void bandSegment( vec3 o, vec3 d, out float tA, out float tB ) {
+  float A = dot( o, d );
+  float C = dot( o, o );
+  float dO = A * A - ( C - SHELL_R * SHELL_R );
+  if ( dO <= 0.0 ) { tA = 0.0; tB = 0.0; return; }
+  float sO = sqrt( dO );
+  float dI = A * A - ( C - BAND_IN * BAND_IN );
+  if ( dI <= 0.0 ) { tA = max( -A - sO, 0.0 ); tB = -A + sO; return; }   // never dips below the base
+  float sI = sqrt( dI );
+  if ( C > SHELL_R * SHELL_R )      { tA = -A - sO; tB = -A - sI; }      // down through the deck
+  else if ( C < BAND_IN * BAND_IN ) { tA = -A + sI; tB = -A + sO; }      // up from the ground
+  else                              { tA = 0.0; tB = A < 0.0 ? -A - sI : -A + sO; }   // eye in the band
+  if ( tB < tA ) { tA = 0.0; tB = 0.0; }
+}
+
+/* Optical depth along the ray, composited front to back. tau is the total; lightH is the mean
+   height (0 base .. 1 top) of the cloud the ray actually SEES, weighted by what is still
+   unoccluded — from above that is the tops, from the pad it is the bases, which is the whole of
+   the lit/shaded cue and costs nothing. */
+void marchCloud( vec3 o, vec3 d, vec2 uv0, vec3 n, out float tau, out float lightH ) {
+  tau = 0.0; lightH = 0.5;
+  float cosLat = max( length( n.xz ), 0.2 );
+  vec3 east = vec3( n.z, 0.0, -n.x ) / max( length( n.xz ), 1e-4 );   // direction of increasing u
+  vec3 north = cross( n, east );                                      // toward the pole
+  float tA, tB;
+  bandSegment( o, d, tA, tB );
+  float len = tB - tA;
+  if ( len <= 0.0 ) return;
+  float step = len / float( MARCH_SAMPLES );
+  vec2 uvM = tangentUv( uv0, ( tA + 0.5 * len ) * d + o - uvOrigin, n, east, north, cosLat );
+  // the systems are hundreds of km wide: one macro sample per column is enough
+  float m = smoothstep( 0.08, 0.85, texture2D( cloudMacro, uvM ).a );
+  float veil = texture2D( cloudVeil, uvM ).a;
+  /* coverage -> threshold on the mean of two rank-uniform fields (triangular distribution) */
+  /* A third, slower look at the same lattice (800 km per tile, 80 km blobs) bunches the cover into
+     fields and gaps. Without it every square kilometre of a belt carried the same odds and the
+     ocean from orbit was an evenly spaced polka dot. */
+  float bunch = texture2D( cloudCells, uvM * BUNCH_REPEAT + 0.2 * driftA ).g;
+  float c = clamp( mix( COVER_CLEAR, COVER_STORM, m ) * ( 0.25 + 1.6 * bunch ), 0.0, 0.92 );
+  float thr = c < 0.5 ? 1.0 - sqrt( 0.5 * c ) : sqrt( 0.5 * ( 1.0 - c ) );
+  /* Texels of the cell lattice under one pixel. Past a few, the sampler's mips have averaged the
+     rank field to 0.5 everywhere and a threshold on it is a coin that always lands the same way:
+     measured from 4000 km as storm belts gone solid white and everything else gone bare. There the
+     density becomes the coverage itself — the exact mean of what the threshold would have drawn. */
+  float minif = smoothstep( 1.5, 5.0, length( fwidth( uvOrigin ) ) / TEXEL_KM );
+  float T = 1.0, hSum = 0.0, wSum = 0.0;
+  /* Each pixel starts its samples at a different phase (interleaved gradient noise). With a fixed
+     phase every ray cuts the band at the same eight heights and a slanted view draws each puff as
+     a stack of plates — measured as visible terraces from 100 km up. The jitter trades them for a
+     sub-pixel grain the eye integrates. */
+  float jit = fract( 52.9829189 * fract( dot( gl_FragCoord.xy, vec2( 0.06711056, 0.00583715 ) ) ) );
+  for ( int i = 0; i < MARCH_SAMPLES; i++ ) {
+    float t = tA + ( float( i ) + mix( jit, 0.5, minif ) ) * step;   // unresolved cloud has no terraces to hide
+    vec3 q = o + t * d;
+    float h = clamp( ( length( q ) - BAND_IN ) / BAND_THICK, 0.0, 1.0 );
+    vec2 uvC = tangentUv( uv0, q - uvOrigin, n, east, north, cosLat ) * CELL_REPEAT;
+    float f = 0.5 * ( texture2D( cloudCells, uvC + driftA ).r + texture2D( cloudCells, uvC + driftB ).g );
+    /* The threshold climbs with height, so only the strongest cores reach the top of the band:
+       every cloud is a dome with a flat base, taller where it is denser. */
+    float rise = thr + ( 0.10 + 0.22 * ( 1.0 - m ) ) * h;
+    float tail = rise > 0.5 ? 2.0 * ( 1.0 - rise ) * ( 1.0 - rise ) : 1.0 - 2.0 * rise * rise;
+    float cu = mix( smoothstep( rise, rise + 0.035, f ), clamp( tail, 0.0, 1.0 ), minif )
+             * smoothstep( 0.0, 0.06, h );
+    float ci = veil * smoothstep( 0.72, 0.9, h );
+    float dt = ( cu * extLow + ci * extHigh ) * step;
+    float a = 1.0 - exp( -dt );
+    hSum += T * a * h; wSum += T * a;
+    T *= 1.0 - a;
+    tau += dt;
   }
-  geo.setIndex(new THREE.BufferAttribute(idx, 1));
-  const mesh = new THREE.Mesh(geo, material);
-  mesh.userData.seg = seg;
-  mesh.frustumCulled = false;      // it is re-centred under the camera, so its bounds lie
-  mesh.visible = false;
-  mesh.renderOrder = order;
+  if ( wSum > 1e-4 ) lightH = hSum / wSum;
+}
+`;
+
+const DEFINES = (samples) => `
+#define SHELL_R ${R_OUT.toFixed(1)}
+#define BAND_IN ${R_IN.toFixed(1)}
+#define BAND_THICK ${THICK.toFixed(1)}
+#define CELL_REPEAT ${CELLS}.0
+#define BUNCH_REPEAT ${CELLS / 5}.0
+#define TEXEL_KM ${(2 * Math.PI * RE / CELLS / CELL_TEX).toFixed(4)}
+#define COVER_CLEAR ${COVER_CLEAR.toFixed(3)}
+#define COVER_STORM ${COVER_STORM.toFixed(3)}
+#define MARCH_SAMPLES ${samples}
+
+uniform sampler2D cloudCells;
+uniform sampler2D cloudMacro;
+uniform sampler2D cloudVeil;
+uniform vec2 driftA;
+uniform vec2 driftB;
+uniform float extLow;
+uniform float extHigh;
+uniform vec3 sunWorld;
+`;
+
+const SHELL_VERT = /* glsl */`
+#include <common>
+#include <logdepthbuf_pars_vertex>
+
+varying vec3 vWorld;
+varying vec2 vUvC;
+
+void main() {
+  vWorld = ( modelMatrix * vec4( position, 1.0 ) ).xyz;
+  vUvC   = uv;
+  gl_Position = projectionMatrix * modelViewMatrix * vec4( position, 1.0 );
+  #include <logdepthbuf_vertex>
+}
+`;
+
+const SHELL_FRAG = /* glsl */`
+#include <common>
+#include <logdepthbuf_pars_fragment>
+` + DEFINES(MARCH) + /* glsl */`
+uniform vec3 cloudLit;
+uniform vec3 cloudShade;
+
+varying vec3 vWorld;
+varying vec2 vUvC;
+
+#define uvOrigin vWorld
+` + MARCH_FN + /* glsl */`
+void main() {
+  /* One face per regime. From outside, the near face's march already covers the whole chord and
+     the far face would run the full march only to be depth-rejected (logdepthbuf writes
+     gl_FragDepth, so there is no early-z to save it). From underneath, only the inside face is
+     the sky. */
+  bool outside = dot( cameraPosition, cameraPosition ) > SHELL_R * SHELL_R;
+  if ( outside != gl_FrontFacing ) discard;
+
+  vec3 n = normalize( vWorld );
+  float tau, lightH;
+  marchCloud( cameraPosition, normalize( vWorld - cameraPosition ), vUvC, n, tau, lightH );
+  float alpha = 1.0 - exp( -tau );
+  if ( alpha < 0.01 ) discard;
+
+  /* Cel tone in three bands by the height the eye lands on: shaded base, body, lit top. The step
+     is softened by its own screen-space width so the bands have an edge without a stair. */
+  float band = lightH * 3.0;
+  float w = max( fwidth( band ), 0.02 );
+  float tone = ( smoothstep( 1.0 - w, 1.0 + w, band ) + smoothstep( 2.0 - w, 2.0 + w, band ) ) * 0.5;
+  float day = smoothstep( -0.12, 0.30, dot( n, sunWorld ) );
+  vec3 col = mix( cloudShade, cloudLit, 0.35 + 0.65 * tone ) * ( 0.10 + 0.90 * day );
+  gl_FragColor = vec4( col, alpha );
+  #include <logdepthbuf_fragment>
+}
+`;
+
+/* Ground shade: the same march aimed up the sun ray from the surface point. Injected into the globe
+   and the near patch so the darkening on the ground is the cloud column above it. */
+const SHADE_FRAG = DEFINES(MARCH_SHADE) + /* glsl */`
+uniform float shadeStrength;
+
+varying vec3 vShadeW;
+
+#define uvOrigin vShadeW
+` + MARCH_FN + /* glsl */`
+void cloudDarken() {
+  vec3 n = normalize( vShadeW );
+  if ( dot( n, sunWorld ) < 0.02 ) return;                // night side: nothing to shade
+  // two-argument atan: GLSL ES has no atan2, and asking for one fails the whole program
+  vec2 uv0 = vec2( atan( n.z, -n.x ) / PI2, 1.0 - acos( clamp( n.y, -1.0, 1.0 ) ) / PI );
+  float tau, lightH;
+  marchCloud( vShadeW, sunWorld, uv0, n, tau, lightH );
+  gl_FragColor.rgb *= mix( 1.0, exp( -tau ), shadeStrength );
+}
+`;
+
+export function makeWeather() {
+  return {
+    cloudCells: { value: cellTex() },
+    cloudMacro: { value: cumulusTex() },
+    cloudVeil: { value: cirrusTex() },
+    driftA: { value: new THREE.Vector2(0, 0) },
+    driftB: { value: new THREE.Vector2(0, 0) },
+    cloudLit: { value: CLOUD_LIT },
+    cloudShade: { value: CLOUD_SHADE },
+    extLow: { value: EXT_LOW },
+    extHigh: { value: EXT_HIGH },
+    shadeStrength: { value: SHADE },
+    sunWorld: { value: new THREE.Vector3(0, 1, 0) },
+  };
+}
+
+export function makeCloudShell(U) {
+  const mesh = new THREE.Mesh(
+    new THREE.SphereGeometry(R_OUT, SEG_W, SEG_H),
+    new THREE.ShaderMaterial({
+      uniforms: U,
+      vertexShader: SHELL_VERT,
+      fragmentShader: SHELL_FRAG,
+      transparent: true,
+      depthWrite: false,
+      side: THREE.DoubleSide,     // the sky above the pad is the inside of this shell
+      fog: false,                 // planet-scale body: FogExp2 measured from the camera would
+                                  // erase it in the system view 20 000 km out
+    })
+  );
+  mesh.renderOrder = 1;           // after terrain and vehicle, before the plume
+  mesh.castShadow = false;        // a 7 km sheet at a low sun drags its silhouette hundreds of km
   return mesh;
 }
 
-export function makeCloudLayer(body, groundKm) {
-  const tex = tileTexture();
-  const cloudMat = new THREE.MeshBasicMaterial({
-    map: tex, color: 0xffffff, transparent: true, depthWrite: false,
-    side: THREE.DoubleSide, vertexColors: true, fog: false,
-  });
-  const shadeMat = new THREE.MeshBasicMaterial({
-    map: shadeTile(tex), color: 0x172033, transparent: true, depthWrite: false,
-    side: THREE.DoubleSide, vertexColors: true, fog: false,
-    polygonOffset: true, polygonOffsetFactor: -4, polygonOffsetUnits: -4,
-  });
-  /* Two cel steps on the ground shade: shadow or no shadow, hard-edged. The tile's bilinear
-     shoulder is exactly the photographic penumbra-smear the cel direction rejects — a puff's
-     shadow wants the puff's silhouette. Safe where a hard step usually isn't: this texture has
-     NO mip chain (see shadeTile — that absence is what keeps per-triangle mip selection, and
-     with it the wedge failure, unreachable), and the step is AA'd by its own derivative width,
-     so the boundary is a line, never a block staircase. The radial vertex fade (× SHADE_ALPHA)
-     still rides in diffuseColor.a, so the cap dissolves smoothly at its rim regardless. */
-  shadeMat.onBeforeCompile = (sh) => {
-    sh.fragmentShader = sh.fragmentShader.replace('#include <map_fragment>',
-      '#include <map_fragment>\n' +
-      '  float sm = texture2D( map, vMapUv ).a;\n' +
-      '  float sf = max(fwidth( sm ), 1.0 / 255.0);\n' +
-      '  diffuseColor.a *= smoothstep(0.5 - sf, 0.5 + sf, sm);');
-  };
-  const cloud = makePlate(cloudMat, 4, SEG);            // after the decks and the terrain
-  const shadow = makePlate(shadeMat, 2, SEG_SHADE);     // over the ground, under the clouds
-  body.add(cloud);
-  body.add(shadow);
-  return {
-    body, groundKm, cloud, shadow,
-    ready: false, has: false, dirty: true,
-    gx: 0, gy: 0, gz: 1,
-    uKm: 0, vKm: 0,
-    sx: 0, sy: 0, sz: 1,
-  };
+/* Add the weather shade to an already-built material's program. three keys its program cache on
+   onBeforeCompile.toString(), so one material carries exactly ONE onBeforeCompile: world.js
+   composes this with the haze and the coastline ink inside a single function. The uniforms are
+   bound at compile time, so no customProgramCacheKey is needed — see the magenta-probe note in
+   AGENTS.md for what happens when they are not. */
+export function cloudShadeInject(sh, U) {
+  for (const key of ['cloudCells', 'cloudMacro', 'cloudVeil', 'driftA', 'driftB',
+    'extLow', 'extHigh', 'shadeStrength', 'sunWorld']) sh.uniforms[key] = U[key];
+  sh.vertexShader = sh.vertexShader
+    .replace('#include <common>', '#include <common>\nvarying vec3 vShadeW;')
+    .replace('#include <project_vertex>',
+      '#include <project_vertex>\n  vShadeW = ( modelMatrix * vec4( transformed, 1.0 ) ).xyz;');
+  sh.fragmentShader = sh.fragmentShader
+    .replace('#include <common>', '#include <common>\n' + SHADE_FRAG)
+    /* before fog_fragment: the shade darkens the ground, and any haze laid over it afterwards is
+       unshadowed air. The include is in the template whether or not the material uses fog. */
+    .replace('#include <fog_fragment>', '  cloudDarken();\n#include <fog_fragment>');
 }
 
-/* Deterministic tangent frame, the same construction js/terrain.js uses. */
-function basis(gx, gy, gz) {
-  _g.set(gx, gy, gz).normalize();
-  if (Math.abs(_g.y) < 0.9) _e1.set(0, 1, 0).cross(_g).normalize();
-  else _e1.set(1, 0, 0).cross(_g).normalize();
-  _e2.copy(_g).cross(_e1).normalize();
-}
-
-/* Writes one cap: geometry anchored to (cx,cy,cz) in body-local space, uv anchored to (offU,offV)
-   so that every texel keeps the same ground position as the centre moves. */
-function fill(mesh, cx, cy, cz, offU, offV, isShade, radius, fade0, sunX, sunY, sunZ, groundKm) {
-  const seg = mesh.userData.seg, cols = seg + 1;
-  basis(cx, cy, cz);
-  const g = _g, e1 = _e1, e2 = _e2;
-  const pos = mesh.geometry.attributes.position.array;
-  const uv = mesh.geometry.attributes.uv.array;
-  const col = mesh.geometry.attributes.color.array;
-  let k = 0, m = 0, c = 0;
-  for (let iy = 0; iy < cols; iy++) {
-    const oy = radius * (1 - iy / seg * 2);
-    for (let ix = 0; ix < cols; ix++, k += 3, m += 2, c += 4) {
-      const ox = radius * (ix / seg * 2 - 1);
-      let vx = g.x + (e1.x * ox + e2.x * oy) / RE;
-      let vy = g.y + (e1.y * ox + e2.y * oy) / RE;
-      let vz = g.z + (e1.z * ox + e2.z * oy) / RE;
-      const vl = 1 / Math.sqrt(vx * vx + vy * vy + vz * vz);
-      vx *= vl; vy *= vl; vz *= vl;
-      const rr = Math.min(1, Math.hypot(ox, oy) / radius);
-      let f = THREE.MathUtils.clamp((1 - rr) / (1 - fade0), 0, 1);
-      f = f * f * (3 - 2 * f);
-      let alt = ALT;
-      if (isShade) {
-        _d.set(vx, vy, vz);
-        alt = groundKm(_d) + SHADE_LIFT;
-      }
-      const r = RE + alt;
-      pos[k] = vx * r; pos[k + 1] = vy * r; pos[k + 2] = vz * r;
-      uv[m] = offU + ox / TILE; uv[m + 1] = offV + oy / TILE;
-      if (isShade) {
-        col[c] = 1; col[c + 1] = 1; col[c + 2] = 1; col[c + 3] = f * SHADE_ALPHA;
-      } else {
-        // a soft cel on the sun: bright side flat white, night side kept visible rather than black
-        const dl = vx * sunX + vy * sunY + vz * sunZ;
-        const b = 0.40 + 0.60 * THREE.MathUtils.clamp(dl * 1.7 + 0.52, 0, 1);
-        col[c] = b; col[c + 1] = b; col[c + 2] = b; col[c + 3] = f;
-      }
-    }
-  }
-  mesh.geometry.attributes.position.needsUpdate = true;
-  mesh.geometry.attributes.uv.needsUpdate = true;
-  mesh.geometry.attributes.color.needsUpdate = true;
-  mesh.geometry.computeBoundingSphere();
-}
-
-/* Per frame, from js/world.js: ground point and sun in BODY-LOCAL space, altitude in km. */
-export function updateCloudLayer(L, gx, gy, gz, sunLocal, altKm) {
-  if (!L) return;
-  /* Hand over to the planet-scale decks instead of popping off at a threshold: opacity rides smoothly
-     to zero between FADE_ALT and SHOW_ALT, which is where one global-deck texel finally exceeds a
-     pixel and the two scales agree to within a cloud. */
-  const k = THREE.MathUtils.clamp((altKm - FADE_ALT) / (SHOW_ALT - FADE_ALT), 0, 1);
-  const vis = 1 - k * k * (3 - 2 * k);
-  const on = vis > 0.01 && Number.isFinite(gx + gy + gz);
-  L.cloud.visible = on;
-  L.cloud.material.opacity = vis;
-  L.shadow.material.opacity = vis;
-  if (!on) { L.shadow.visible = false; return; }
-
-  /* Arc travelled since the last build, and the uv shift that keeps the weather still. */
-  let moved = RECENTRE;
-  if (L.has) {
-    const dot = THREE.MathUtils.clamp(gx * L.gx + gy * L.gy + gz * L.gz, -1, 1);
-    moved = Math.acos(dot) * RE;
-    if (moved < RECENTRE && !L.dirty) {
-      L.cloud.visible = true;
-      return;
-    }
-    basis(gx, gy, gz);
-    L.uKm += ((gx - L.gx) * _e1.x + (gy - L.gy) * _e1.y + (gz - L.gz) * _e1.z) * RE;
-    L.vKm += ((gx - L.gx) * _e2.x + (gy - L.gy) * _e2.y + (gz - L.gz) * _e2.z) * RE;
-  }
-  L.gx = gx; L.gy = gy; L.gz = gz; L.has = true; L.dirty = false; L.ready = true;
-
-  const sx = sunLocal.x, sy = sunLocal.y, sz = sunLocal.z;
-  fill(L.cloud, gx, gy, gz, L.uKm / TILE, L.vKm / TILE, false, RADIUS, FADE0, sx, sy, sz, null);
-  L.cloud.visible = true;
-
-  /* The shade: the same cap, anti-sunward by deck height over tan(elevation), draped on the ground. */
-  const elev = Math.asin(THREE.MathUtils.clamp(sy, -1, 1));
-  const hsLen = Math.hypot(sx, sz);
-  if (elev > 0.03 && hsLen > 1e-6) {
-    const off = Math.min(RADIUS_SHADE * 0.7, ALT / Math.tan(Math.max(elev, 0.03)));
-    const hx = sx / hsLen, hz = sz / hsLen;
-    let cx = gx - hx * off / RE, cy = gy, cz = gz - hz * off / RE;
-    const cl = 1 / Math.sqrt(cx * cx + cy * cy + cz * cz);
-    cx *= cl; cy *= cl; cz *= cl;
-    L.sx = cx; L.sy = cy; L.sz = cz;
-    fill(L.shadow, cx, cy, cz, (L.uKm - hx * off) / TILE, (L.vKm - hz * off) / TILE,
-         true, RADIUS_SHADE, SHADE_FADE0, sx, sy, sz, L.groundKm);
-    L.shadow.visible = true;
-  } else {
-    L.shadow.visible = false;
-  }
-}
-
-export function hideCloudLayer(L) {
-  if (!L) return;
-  L.cloud.visible = false;
-  L.shadow.visible = false;
+export function updateWeather(mesh, simT, spin, sunWorld) {
+  const U = mesh.material.uniforms;
+  const ride = (spin / (2 * Math.PI)) * CELLS;    // weather rides with the ground
+  U.driftA.value.set(ride + simT * WIND_LOW, simT * 2.0e-5);
+  U.driftB.value.set(ride + simT * WIND_HIGH, -simT * 3.0e-5);
+  U.sunWorld.value.copy(sunWorld).normalize();
 }

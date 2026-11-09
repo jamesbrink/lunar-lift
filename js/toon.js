@@ -37,12 +37,6 @@ export const RAMP_EARTH = ramp([0.34, 0.72, 1.0, 1.0]);
    side and 0.34 pre-dusk on the dark. Two top texels equal keeps the noon look identical. */
 export const RAMP_MOON = ramp([0.16, 0.26, 0.34, 0.62, 0.86, 1.0, 1.0, 1.0]);
 export const RAMP_HARD = ramp([0.30, 0.72, 1.0]);     // vehicle: keep the lit side bright
-/* Cloud gets a near-continuous six-texel ramp. Two texels stepped once across the whole sphere
-   (dotNL = 0), which chorded a hard light/dark edge over the ocean at every non-noon sun and was
-   half of what read as "straight-edged architecture" on the sea from orbit. Five shallow steps are
-   imperceptible against a translucent sheet but keep the ramp honest: clouds brighten to the lit
-   side, dim to the night side, and never draw a line. */
-export const RAMP_CLOUD = ramp([0.42, 0.56, 0.72, 0.86, 1.0, 1.0]);
 export const OUTLINE = 0x0d1117;
 export const OUTLINE_W = 0.0038;                       // fraction of half-screen width, so ~px-constant
 

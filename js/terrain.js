@@ -96,16 +96,25 @@ export function makePatch(body) {
   const mesh = new THREE.Mesh(geo, toon({
     vertexColors: true,
     gradientMap: RAMP_EARTH,
+    /* The SAME navy floor the globe wears (js/world.js). Without it the patch sat 17/255 low in
+       BLUE across its entire footprint — measured by diffing two frames at 400 km chase distance
+       with only this mesh toggled: mean RGB where the patch drew (69,91,64) against the globe in
+       the same pixels (70,94,81). A uniform hue offset over a 440 km square is exactly what made
+       the near level read as a plate lying on the ocean; the ramp, the colour bake and the haze law
+       all agreed, this did not. */
+    emissive: 0x07182c,
     // The patch coincides with the globe's surface in the flattened pad zone and over calm
     // ocean; polygonOffset wins those ties instead of leaving it to a depth die.
     polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2,
   }));
-  /* The patch IS fogged, unlike the planet. It is not a planet-scale body: it is the ground within
-     220 km, and without aerial perspective a flat cartoon plain runs to a hard line at the horizon
-     and reads as a painted card. FogExp2 squares its term, so at the pad (density ~0.0038) the rim
-     220 km out takes about half the sky tone while the crawler 1 km away is untouched. js/world.js
-     thins the same clock as the sky, so from orbit the haze is gone with the sky. */
-  mesh.material.fog = true;
+  /* The patch is hazed, like the ground it replaces — but by js/haze.js, not by three's scene fog.
+     It is not a planet-scale body, so it wants aerial perspective: without it a flat cartoon plain
+     runs to a hard line at the horizon and reads as a painted card. What it must NOT have is a
+     DIFFERENT haze from the globe it sits on: scene fog cannot be given to the globe (FogExp2
+     measured from the camera erases the planet in the system view), so fogging only the patch made
+     its rim a colour cliff. js/haze.js carries one exp² law in true distance, injected into both
+     surfaces, on the same clock js/world.js already runs for fog and sky. */
+  mesh.material.fog = false;
   mesh.receiveShadow = true;          // and with world.js's pad discs gone, this is the pad's shadow catcher
   mesh.castShadow = false;
   mesh.visible = false;

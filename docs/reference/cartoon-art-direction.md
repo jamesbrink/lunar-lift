@@ -23,7 +23,7 @@ map, a normal map, or a noise function per pixel, it is out.
 - **Two or three tonal steps per surface**, chosen by the cel ramp, and the step boundary allowed to be
   visible. That is the look, not an artefact of it.
 - **Depth from silhouette and layering**, not from surface detail: a coastline, a shelf band, a hill range
-  drawn as a shape against the sky, cloud decks as shapes with their own edge.
+  drawn as a shape against the sky, clouds as shapes with their own edge.
 - **One dark outline** on hard-edged hardware (`toon.js` `outline()`), which is what makes the rocket read
   as drawn rather than photographed.
 - **An immersive sky**: a smooth vertical gradient from a deep blue at the zenith to pale at the horizon,
@@ -61,10 +61,12 @@ is not. What carries immersion here is **motion and coherence**, not resolution:
 
 These are the rules the frames enforced, in the order they were learned.
 
-- **The ground takes the fog; planet-scale bodies do not.** A flat cartoon plain that runs to a hard
-  line reads as a painted card laid on the world. The near patch (220 km rim) is hazed by the scene's
-  `FogExp2` on the same clock as the sky, so the rim takes about half the sky tone from the pad and the
-  haze is gone by orbit. The globe, the Moon, the stars and the dome stay unfogged.
+- **The ground takes aerial perspective, and all of the ground takes the same one.** A flat cartoon
+  plain that runs to a hard line reads as a painted card laid on the world, so distant ground fades
+  to the horizon tone. The near patch used to get that from the scene's `FogExp2` while the globe got
+  nothing, and the patch's rim became a colour cliff — the plate the zoom-out view showed. Both now
+  share `js/haze.js`, keyed to the camera's altitude, so the haze is gone by orbit. The Moon, the
+  stars, the dome and the weather shell stay unhazed.
 - **One sprite cannot be both fire and cloud.** Alpha holds a plateau to 0.62 of the radius and falls
   steeply after it: a sprite that ramps down from its centre composites into cotton wool, and a blast
   cloud needs lobes with a silhouette. Cloud discs then draw at 5.75× parcel radius against the flame's
@@ -85,7 +87,7 @@ These are the rules the frames enforced, in the order they were learned.
 | --- | --- |
 | Painted biome map from the specular land mask | Keep. This *is* the cartoon Earth. |
 | Coastline stroke, shelf band, ice caps | Keep, and make them read harder. |
-| Generated cloud decks | Keep; shapes not photographic detail. |
+| Generated weather (`js/clouds.js`) | Keep; shapes not photographic detail. |
 | Cel ramps, hard outlines on hardware | Keep. |
 | Normal maps on Earth and Moon surfaces | Remove. |
 | Vertex mottle/ripples/speckle/cracks on near terrain | Remove. |

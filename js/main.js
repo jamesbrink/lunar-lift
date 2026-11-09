@@ -20,7 +20,8 @@ renderer.setSize(innerWidth, innerHeight);
    vehicle is ±6 km at the pad — 5.9 m per texel at 2048² — so the launch tower's 2 m shadow arrived as
    a black staircase marching across the pad, worst at a low sun where it runs for kilometres. The
    thing the old comment was protecting is the *cloud* shade, which is not a shadow-map caster at all
-   (js/clouds.js projects its own alpha), so filtering the map cannot blur it away. What the cel look
+   (js/clouds.js marches its own optical depth into the ground materials), so filtering the map
+   cannot blur it away. What the cel look
    needs from the map is the terminator on the planet, and that comes from the ramp, not from the die.
 
    PCFShadowMap, not PCFSoftShadowMap: measured over 90 rAF deltas at the pad, the soft variant cost
@@ -122,7 +123,7 @@ function frame() {
   updateParticles(Math.min(1, dtReal * WARPS[getWarpIndex()]));
   updateCamera(dtReal);
   updateHUD(dtReal);
-  updateSky(S.pos);
+  updateSky(S.pos, camera.position);
   updateSunShadow(S.pos);
   drawMap();
   renderer.render(scene, camera);

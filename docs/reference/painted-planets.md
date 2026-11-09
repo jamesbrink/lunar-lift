@@ -6,8 +6,8 @@ smear, and a cel ramp only quantises the smear into bands of mud. Repainting the
 does not help — that posterises the mud rather than replacing it.
 
 So the imagery is read as **data** and no photographic pixel reaches the screen. `js/toonmap.js`
-decodes it, classifies it, and uploads authored colour; `js/textures.js` generates both cloud decks
-and the glow sprite from seeded noise. The geography stays real because it comes from the real mask.
+decodes it, classifies it, and uploads authored colour; `js/textures.js` generates the weather's macro
+sheets and the glow sprite from seeded noise. The geography stays real because it comes from the real mask.
 
 ## The land mask
 
@@ -87,39 +87,68 @@ patches become the maria and the bright ones the highlands and ray systems, whic
 Moon is drawn anyway. The Moon material carries **no colour multiplier**: the tones are the palette,
 and a multiplier scales all of them away.
 
-## Weather, and the two alphaMap traps
+## Weather: one marched shell
 
-Both cloud decks are generated. Density lives in the **alpha** channel of a white texture and the
-material reads it through `map`.
+Weather is one mesh, `js/clouds.js`: a sphere at `RE + 11 km` whose fragment shader marches the view
+ray through a band from 4 km to 11 km and returns `1 − exp(−τ)`. There are no cloud decks and no
+cloud caps any more.
 
-Three.js samples `alphaMap` from the **green** channel. That trap cost the planet twice: the shipped
-`earth_clouds_1024.png` carries its weather in alpha while painting RGB a flat grey 168, so binding it
-as `alphaMap` read density 0.66 everywhere and the Earth wore an opaque white tablecloth — which was
-also why it threw a shadow across the whole launch pad. Then, after generating a replacement, the
-cirrus deck was bound as `alphaMap` with white RGB and went opaque over the entire planet the same
-way. Anything whose density is alpha must be sampled as `map`.
+Three fields feed the march, all generated:
 
-Cumulus density is a five-octave fbm shaped by the real zonal pattern — the intertropical convergence
-zone, the dry subtropics near ±25°, the storm tracks near ±52° — pushed through `smoothstep(0.60,
-0.82)` so each cloud has a defined edge. Measured cover is **38.6 %** (mean density 0.372), by
-latitude: 0° 0.67, ±20° 0.01 and 0.00, 40° 0.25, 60° 0.45, 80° 0.44. Cirrus is stretched hard along
-longitude: mean 0.13, 26.9 % above its low threshold, a veil rather than a deck.
+- **Where** — the macro sheet from `js/textures.js` (`cumulusTex`, 2048 × 1024, 20 km per texel): a
+  six-octave fbm shaped by the real zonal pattern (ITCZ, dry subtropics near ±25°, storm tracks near
+  ±52°). Its alpha moves *coverage* between 7 % (fair weather) and 82 % (inside a system). It does
+  not scale opacity: the first version did, and the planet wore an edgeless white fog.
+- **What shape** — a 512² tileable lattice at 160 km per tile (0.3125 km per texel, 250 repeats
+  round the globe), two independent fields in R and G, stored as **rank** so it is uniform on 0..1.
+  The mean of two uniform fields is triangular, so a coverage `c` becomes the exact threshold
+  `1 − √(c/2)` (or `√((1−c)/2)` above one half) rather than a tuned guess. The two fields drift at
+  17.6 and 56 m/s on top of the planet's spin, so cells grow and dissolve as they slide past each
+  other. The same lattice read at 800 km per tile bunches the cover into fields and gaps.
+- **Cirrus** — `cirrusTex`, a thin veil in the top quarter of the band.
 
-Both decks **blend; neither alpha-tests**, and both are mipmapped — an alpha-tested mipmapped field
-carves the puffs away wherever the minification takes a texel sample out of a puff. Row 0 is south in
-all three generated sheets: a `DataTexture` samples row 0 at `v = 0`, and `SphereGeometry`'s `v = 0` is
-the south pole, so a north-first sheet renders mirrored and its weather ends up in the wrong
-hemisphere. That convention mismatch was live for a long time and is why the ITCZ's shade and the
-ITCZ itself were on opposite sides of the equator.
+The threshold climbs with height, so every cloud is a dome on a flat base and only the strongest cores
+reach 11 km. The march composites front to back and reports the mean height the ray actually *sees*:
+tops from above, bases from the pad. That one number drives a three-band cel tone, which is the whole
+lighting model.
 
-These decks are an *orbit* feature. At 1024 × 512 over 40 000 km one texel is 39 km, and the sky from
-the horizon to 30° elevation spans 0.00017 in `u` — **a fifth of one texel** — so from the ground this
-field can only ever be a uniform film or nothing at all. The sky you can actually read is
-`js/clouds.js`.
+Measured, from the macro sheet through the shipped coverage law: **26.7 %** global cumulus cover; by
+latitude 0° 0.47, ±20° 0.22 and 0.13, ±40° 0.30 and 0.22, ±60° 0.32 and 0.23, ±80° 0.16 and 0.19.
 
-Cover started at 67.5 %, which read as a dirty shell: with three ramp bands a deck spanning the sphere
-spends most of its area in the middle band, a flat mid grey. It now gets its own two-band ramp
-(`RAMP_CLOUD`, floor 0.55) so sunlit cloud is white and the underside is pale, not slate blue.
+Where the lattice is unresolved (more than ~5 of its texels under one pixel) the sampler's mips have
+averaged the rank field to 0.5 and a threshold on it is a coin that always lands the same way —
+measured from 4 000 km as storm belts gone solid white and everything else bare. There the density
+becomes the coverage fraction itself, which is the exact mean of what the threshold would have drawn.
+
+Each pixel starts its eight samples at a different phase (interleaved gradient noise). With a fixed
+phase a slanted view cut every cloud at the same eight heights and drew it as a stack of plates.
+
+Row 0 is south in every generated sheet: a `DataTexture` samples row 0 at `v = 0`, and
+`SphereGeometry`'s `v = 0` is the south pole.
+
+Three.js samples `alphaMap` from the **green** channel, which is why nothing here uses it: that trap
+put an opaque white tablecloth on the planet twice. Density that lives in alpha is read as alpha.
+
+### What the old system was, and the plate
+
+Until this change the weather was two planet-scale decks (cumulus at 2 km, cirrus at 9 km) plus two
+tangent-plane caps that re-centred under the vehicle: a 440 km cloud cap and a 64 km shade cap. A
+planet-wide texture at 20–39 km per texel cannot put a cumulus over the pad, so the caps did that —
+and a cap is a square with an edge.
+
+The "giant flat square plate around the ship" reported at maximum zoom-out was **not** the cloud cap,
+though. With the caps deleted the quadrilateral was still there, and toggling one mesh's draw range
+proved it was the near ground patch (`js/terrain.js`, ±220 km). Two mismatches against the globe it
+sits on made it read as a plate; each was measured:
+
+- **Haze.** The patch took three's `FogExp2`; the globe is exempt (camera-distance fog would erase
+  the planet from the system view). At a 400–600 km sight line the patch washed to 90–100 % sky
+  tone beside saturated ocean. Both surfaces now carry one law, `js/haze.js`: exp² in true
+  distance, on a density clock keyed to the *camera's* altitude.
+- **Emissive.** The globe has a navy emissive floor (`0x07182c`); the patch had none. Diffing two
+  frames with only the patch toggled: mean RGB where the patch drew (69, 91, 64) against the globe
+  in the same pixels (70, 94, 81), and 23.6 % of the frame changed by more than 24/765. With the
+  same floor on the patch: (77, 89, 78) against (63, 87, 80), and **2.9 %** — coastline detail.
 
 ## Cost
 
@@ -224,12 +253,11 @@ well, since the canvas is welded to the mesh.
 
 ## What does not cast shadows
 
-Neither cloud deck. They sit 2 and 9 km up, so a low sun drags their silhouettes hundreds of
-kilometres across the surface, and the shadow box — ±136 km around the vehicle, because the vehicle is
-what needs the towers to resolve — clips those streaks into hard grey slabs that read as architecture.
+Not the weather shell. It spans 4–11 km, so a low sun drags its silhouette hundreds of kilometres
+across the surface, and the vehicle-tracking shadow box clips those streaks into hard grey slabs that
+read as architecture.
 
-Cloud shade is a **projected deck-alpha texture** instead: `js/clouds.js` drapes a second cap on the
-actual terrain, sampling the same puff tile at the same uv, offset anti-sunward by deck height over
-tan(elevation) so the penumbra widens as the sun drops. It was previously a blurred composite of the
-planet-scale decks sampled by the ground shaders, and at 78 km per texel all it could produce was
-straight-edged slabs across the pad. The cel terminator does the rest of the mood work on its own.
+Cloud shade is **marched** instead: `js/clouds.js` injects the same optical-depth integral into the
+globe and the near patch, aimed up the sun ray from each ground fragment (four samples), so the dark
+shape on the ground is the column of cloud above it at every distance, with no shade mesh and no rim.
+The cel terminator does the rest of the mood work on its own.

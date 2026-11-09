@@ -155,7 +155,7 @@ const UPPER = [[86, 5.704e-6], [100, 5.08e-7], [120, 1.80e-8], [150, 1.73e-9],
 ```
 
 Re-measure the ascent drag loss after the swap (expect the loss to drop by a few tens of
-m/s) and leave `CD_AREA` as the gameplay knob. The visual cloud deck in `js/world.js` stays
+m/s) and leave `CD_AREA` as the gameplay knob. The visual weather in `js/clouds.js` stays
 cosmetic; weather is not simulated.
 
 ## Constants for the game, restated

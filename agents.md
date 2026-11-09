@@ -127,28 +127,44 @@ state differs from the ship's real trajectory by ~100 km, which would make the r
   ground must vary slower than the coarsest vertex on the cap. Check the sun table in
   `docs/reference/launch-site.md` against the boundaries before changing either.
 - **A big transparent sheet may not have triangles that span several uv repeats.** Mip derivatives are
-  computed per triangle, so a cap cell carrying a coarse tiling picks a different mip level per cell and
-  the surface fills with straight-edged wedges of the tile's mip average. The deck avoids it at 390 m per
-  texel; the ground shade cannot (a 64 km cap seen from 5 km away minifies hard no matter the texel size),
-  so `js/clouds.js` gives the shade its own 64×64 box-filtered copy of the same field with
-  `generateMipmaps = false` and keeps its radius to ground that resolves.
-- **Weather needs two scales, and they must share a uv field.** A cloud texture wrapped on the planet is
-  39 km per texel at 1024×512; the sky from horizon to 30° elevation above the pad spans 0.00017 in u,
-  i.e. **0.18 of one texel** — measured, not estimated, and it is why no blend mode, uv fix or row-order
-  fix ever put a cumulus overhead. `js/clouds.js` streams a 440 km cap at 7 km altitude with the tile
-  repeated across it, and the ground shade is the *same field at the same uv*, offset anti-sunward by deck
-  height over tan(elevation): a different scale would put shadows under clear sky. The shade cap gives up
-  at 32 km — ground beyond that is a grazing sliver — and samples a box-filtered, mip-free copy of the
-  field, because shrinking the radius is what keeps it honest where changing scale would not. Both
-  planet-scale decks keep `castShadow = false` — at 2 and 9 km a
-  low sun drags their silhouettes hundreds of kilometres, and the ±48 km vehicle-tracking shadow box
-  cuts them into slabs that read as architecture. See `docs/reference/painted-planets.md`.
+  computed per triangle, so a cell carrying a coarse tiling picks a different mip level per cell and
+  the surface fills with straight-edged wedges of the tile's mip average. The weather shell is safe
+  because its uv is rebuilt per fragment from the fragment's own position (12.5 km triangles against a
+  160 km tile); anything new that tiles across a large mesh has to pass the same test.
+- **Weather is one marched shell, and a coverage field must move coverage, not opacity.**
+  `js/clouds.js` is a sphere at RE + 11 km whose fragment shader integrates optical depth through a
+  4–11 km band; the planet-scale decks and the vehicle-following caps are gone. The macro sheet sets the
+  *fraction of sky covered* (a threshold on a rank-uniform lattice); scaling density by it instead gave
+  a planet-wide white fog with no edges. Past ~5 lattice texels per pixel the mips average the rank to
+  0.5 and the threshold is meaningless, so density falls back to the coverage fraction itself. The shell
+  keeps `castShadow = false` — a low sun drags its silhouette hundreds of kilometres through the ±48 km
+  shadow box — and ground shade is the same march aimed up the sun ray, injected into the globe and the
+  patch. See `docs/reference/painted-planets.md`.
+- **The near patch and the globe are one surface and must be shaded as one.** The "giant flat square
+  plate around the ship" at full zoom-out was the ±220 km ground patch, not weather, and it showed for
+  two reasons, each found by toggling `drawRange` on that one mesh and diffing frames: it took scene
+  fog while the globe takes none (90–100 % sky tone at a 400–600 km sight line), and it lacked the
+  globe's `emissive: 0x07182c` (17/255 low in blue across its whole footprint). After `js/haze.js`
+  on both and the same emissive, the frame difference fell from 23.6 % of pixels to 2.9 %. Any new
+  material property on one of the two belongs on the other.
+- **A shader bug can take down the GPU process, and the dev server ships it to every open tab.**
+  `for (int i = 0; i < N; i)` — no increment — hung the harness browser so hard the tab could not be
+  closed, and because every save hot-reloads, the user's own Chrome loaded the same shader and lost
+  WebGL for the session (`GL_VENDOR = Disabled`; only a browser restart clears it). Two neighbours of
+  that bug render *nothing* with no error at all: `atan2` (not GLSL; fails the link) and an array
+  function parameter written through (parameters are `in`; the caller keeps its zeros).
+  `tools/shader-lint.mjs` now rejects all three and reads shaders composed from named constants —
+  it used to match only an inline template after `vertexShader:` and passed these unread. Run it
+  before the page sees a new shader, and recover a hung harness with
+  `browser.close({ all: true, kill: true })`.
+- **A comment inside a GLSL template literal must not contain a backtick.** It ends the JS string and
+  the module stops parsing; the hot-reloaded page then has no `window.game`.
 - **A texel-sized caster cannot be filtered by the die.** `BasicShadowMap` compares one depth sample,
   so a 2 m lightning tower inside a ±6 km box at 2048² (5.9 m/texel) rendered its shadow as a black
   staircase. `js/main.js` now uses `PCFShadowMap` with a 4096² map: p90 17.1 ms against 17.9 for
   `PCFSoftShadowMap` over 90 rAF deltas at the pad, and the softer kernel sanded off the edge the drawn
   look wants. Filtering the depth map cannot hurt the cloud shade, because that shade is not a shadow-map
-  caster (js/clouds.js projects its own alpha) — the old comment claiming Basic "gives the cloud shadows
+  caster (js/clouds.js marches its own optical depth into the ground materials) — the old comment claiming Basic "gives the cloud shadows
   the soft filter blurs away" was never true, which is worth knowing before anyone reverts this to protect
   them. `logarithmicDepthBuffer` is unrelated: the compare uses `vShadowCoord` from the light's projection.
 - **A factor written on one component of three is a bug wearing a tuning knob.** `groundHit` bled the
@@ -273,11 +289,11 @@ await tab.evaluate(`(async () => {
   evidence of anything; take a screenshot instead.
 - To isolate one object in the scene, get the scene through the prediction line
   (`(await import('/js/physics.js')).predLine.parent`) and index the spheres by
-  `Math.round(o.geometry.parameters.radius)`: Earth 6371, cumulus deck 6373, cirrus deck 6380,
+  `Math.round(o.geometry.parameters.radius)`: Earth 6371, weather shell 6382,
   atmosphere shell 6435, Moon 1737. Hiding one at a time and screenshotting is how the grey-wedge
   artefact turned out to be cloud alpha rather than a shadow.
 - **`mesh.visible = false` is not a toggle for anything that re-centres.** `updatePatch` and
-  `updateCloudLayer` set `visible = true` on every frame they run (including their early-return path),
+  `updateMoonPatch` set `visible = true` on every frame they run (including their early-return path),
   so an A/B that hides a mesh silently un-hides it a frame later. Isolate with
   `mesh.geometry.setDrawRange(0, 0)`, which no update touches, and reload between cases — module state
   like `receiveShadow` survives `reset()` and contaminates the next measurement.

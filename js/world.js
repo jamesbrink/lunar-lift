@@ -2,14 +2,15 @@ import * as THREE from 'three';
 import {
   RE, RM, MOON_RATE, EARTH_SPIN, PAD_UP, PAD_EAST, PAD_SCALE, PAD_POS, SKY_DAY, SKY_NULL, moonPos
 } from './constants.js';
-import { cumulusTex, cirrusTex, moonTex, earthTex, glowTex, flareTex } from './textures.js';
-import { toon, outline, PALETTE, RAMP_EARTH, RAMP_MOON, RAMP_CLOUD } from './toon.js';
+import { moonTex, earthTex, glowTex, flareTex } from './textures.js';
+import { toon, outline, PALETTE, RAMP_EARTH, RAMP_MOON } from './toon.js';
 import {
   applyRelief, sampleGrid, reliefField, coastField, shoreDistance, fineEarth,
   padWeight, paintedCanvas,
 } from './toonmap.js';
 import { makePatch, attachEarthPatch, updatePatch, makeMoonPatch, attachMoonPatch, updateMoonPatch, hidePatch } from './terrain.js';
-import { makeCloudLayer, updateCloudLayer } from './clouds.js';
+import { makeWeather, makeCloudShell, updateWeather, cloudShadeInject } from './clouds.js';
+import { makeHaze, hazeInject, updateHaze } from './haze.js';
 
 /* distances are km, angles rad — everything here lives at real planetary scale */
 const SUN_RANGE = 1500;            // km the directional light sits off the tracked vehicle
@@ -19,7 +20,6 @@ const STAR_R = 2000000;            // km — the starfield sits well outside the
 const SKY_R = 20000;               // km — the sky dome rides the camera; small vs the moon at 384 400
 const SHADOW_MAX = 48;             // km half-extent of the vehicle-tracking shadow box
 const SHADOW_MIN = 3;              // km — 4096² over ±3 km is 1.46 m/texel: the pad zoom the user screenshotted showed ~10 m blob steps at the old ±6 km
-const CUMULUS_ALT = 2, CIRRUS_ALT = 9;          // km above the surface
 const ATMO_SHELL = 1.01;          // atmosphere glow shell: RE * 1.01
 
 /* Sun bearing, fixed in inertial space: ~37° above the pad's horizon at MET 0, off to the east, so
@@ -33,33 +33,28 @@ export const SUN_DIR = PAD_UP.clone().multiplyScalar(Math.sin(SUN_ELEV))
   .addScaledVector(PAD_EAST, Math.cos(SUN_ELEV) * 0.85)
   .addScaledVector(PAD_NORTH, Math.cos(SUN_ELEV) * 0.4).normalize();
 
-let scene = null, earth = null, pad = null, cumulus = null, cirrus = null, atmo = null, moon = null;
+let scene = null, earth = null, pad = null, weather = null, cloudMesh = null, hazeU = null, atmo = null, moon = null;
 let sun = null, sunTarget = null, flare = null, stars = null, sky = null;
-let spin = 0, cloudSpin = 0, cirrusSpin = 0, simT = 0;
+let spin = 0, simT = 0;
 /* The floodlight LENS sprites, kept for the night gate in updateSunShadow. They were ungated —
    created in buildPad and never touched again — so four additive warm discs baked daytime haze
    into the pad lenses at all hours. The lamps themselves (housing, truss) stay year-round. */
 const padLamps = [];
 
-/* Ground cloud shade is a NEAR-SCALE projected texture now (js/clouds.js): the shade cap is the
-   same 64 km tile as the deck above it, offset anti-sunward by deck height over tan(elevation) and
-   draped on the terrain, so the dark shape on the ground is the cloud that casts it.
-
-   What used to live here was an onBeforeCompile injection marching each ground fragment to the
-   planet-scale decks and sampling a blurred 512x256 composite of their alpha. It was correct in
-   principle and unusable in practice: 78 km per texel meant the shade could only ever be slabs —
-   straight-edged sawtooth wedges that staircased across the pad and read as terrain damage, not
-   weather. The decks stay out of the sun's shadow pass for the same reason they always did. */
+/* Ground cloud shade is marched, not projected: js/clouds.js injects an optical-depth integral
+   along the sun ray through the 4-11 km band into the globe and the near patch, so the darkening on
+   the ground is the same column of weather the sky shows. What used to live here was a 512x256
+   composite of the deck alphas — 78 km per texel, which could only ever produce slab-sided wedges
+   across the pad. The old near-scale shade cap (32 km, re-centred under the vehicle) is gone with
+   the caps it belonged to: it was a square, and squares are what the zoom-out view showed. */
 /* Height grids (km, body-local uv) resolved from the paint jobs — the camera colliders read these;
    null until the painting lands, and every reader below degrades to the bare sphere meanwhile. */
 let earthField = null, moonField = null, shore = null;
 let earthPatch = null;
 let moonPatch = null;
-let clouds = null;
 let _sky = new THREE.Color();
 const _moon = new THREE.Vector3();
 const _ld = new THREE.Vector3();
-const _cs = new THREE.Vector3();
 const _uvw = { u: 0, v: 0 };
 let _skyMix = 1;
 
@@ -67,6 +62,9 @@ let _skyMix = 1;
    cloud decks, atmosphere shell, starfield and the launch pad welded to the rotating planet. */
 export function initWorld(target) {
   scene = target;
+  /* One shared aerial-perspective state for both ground surfaces; js/haze.js explains why they
+     cannot be left on different laws. Bound before either material compiles. */
+  hazeU = makeHaze();
 
   /* ---- sun: one shadow-casting light whose frustum follows the vehicle, pad liftoff to moon landing.
      Cel lighting: one hard sun, one coloured fill. Intensity 1.0 rather than 3.2 because there is no
@@ -90,8 +88,7 @@ export function initWorld(target) {
   sunTarget.updateMatrixWorld();
   scene.add(sun, sunTarget, new THREE.AmbientLight(0x39496b, 1.0));
 
-  const earthMap = earthTex(), cloudMap = cumulusTex(),
-        cirrusMap = cirrusTex(), moonMap = moonTex(), glowMap = glowTex();
+  const earthMap = earthTex(), moonMap = moonTex(), glowMap = glowTex();
   const flareMap = flareTex();
 
   /* ---- earth: the painted map under a three-band ramp. 384×192 segments (74 305 vertices) and
@@ -124,6 +121,12 @@ export function initWorld(target) {
      unaffected: this recolours diffuse before the toon lighting. */
   const coastU = { value: null };
   earth.material.onBeforeCompile = (sh) => {
+    /* ONE injection per material: three keys its program cache on onBeforeCompile.toString(), so
+       the weather shade and the coastline ink have to be composed in the same function. Both
+       uniforms are bound here, at compile time — no deferred assignment, so no customProgramCacheKey
+       is needed for the shade (see the magenta-probe note in AGENTS.md). */
+    cloudShadeInject(sh, weather);
+    hazeInject(sh, hazeU);      // the globe carries the SAME aerial perspective as the patch
     if (!coastU.value) return;
     sh.uniforms.coastMap = coastU;
     sh.uniforms.coastInk = { value: new THREE.Color(0x0e2842) };     // C.coast  [14,40,66]
@@ -192,98 +195,42 @@ export function initWorld(target) {
      discs are gone — with real authored coastline under it, the complex sits on Merritt Island. */
   earthPatch = makePatch(earth);
   attachEarthPatch(earthPatch);
-  /* The sky at human scale: a 64 km cloud tile on a cap that re-centres under the vehicle, plus its
-     own terrain-draped shade cap. The planet-scale decks below cannot show a cumulus from the pad —
-     one of their texels is 39 km and the whole visible sky spans a fraction of one. */
-  clouds = makeCloudLayer(earth, groundKmLocal);
-
-  /* ---- two cloud decks, both generated in js/textures.js, both white with the weather in alpha and
-     read through `map` — see the note on alphaMap's green channel there.
-
-     They blend; they do NOT alpha-test. That distinction is the reason clouds never appeared:
-     the field is mipmapped (a nearest-sampled minified alpha is the grazing wedge the earlier
-     attempt drew), and averaging a cloudy field into coarse mips lifts EVERY texel to around the
-     global mean (measured 0.26 after the drift-cluster pass, 0.19 before) — above any threshold
-     that could be chosen. `discard` is
-     therefore mathematically dead at distance: the deck rendered as one uniform sheet from
-     every altitude, at 0.45 before the mips existed and at 0.14 after. Blending on the other
-     hand gets the whole mip chain for free: puffs where the eye can resolve them, soft veil
-     where it cannot, and no threshold anywhere to alias against.
-
-     DoubleSide is not decoration: the camera lives on BOTH sides of a cloud layer — inside it at
-     the pad, outside it in orbit. A FrontSide shell seen from its own interior shows only the far
-     wall (which the planet occludes from the ground), so a single-sided deck is structurally
-     invisible as overhead sky from the surface. Back faces light correctly — the toon chunks flip
-     the normal by gl_FrontFacing.
-     Scale is the hard limit though: 39 km/texel means the whole pad sky is under one texel, so the
-     decks are the PLANET-SCALE layer (orbit) only — near-scale puffs live on the streamed ground
-     plate, and no deck change will ever put weather over the pad. ---- */
-  /* 512×256, was 256×128: a 256-segment sphere's silhouette chord error is r(1−cos(π/256)) ≈
-     0.48 km, and from 68 km altitude that is the wavy limb edge review2 flagged. 512 puts it at
-     0.12 km — sub-pixel at every altitude the decks are visible. The cirrus deck and the limb
-     shell below get the same value (Earth is already 384×192 = 0.21 km chord, Moon 512×256). */
-  cumulus = new THREE.Mesh(new THREE.SphereGeometry(RE + CUMULUS_ALT, 512, 256),
-    toon({
-      map: cloudMap, transparent: true, side: THREE.DoubleSide,
-      opacity: 0.95, depthWrite: false, gradientMap: RAMP_CLOUD
-    }));
-  /* Neither deck casts into the sun's shadow map. They sit 2 and 9 km up, so a low sun drags
-     their silhouettes hundreds of kilometres across the surface, and through the tower-resolution
-     box those streaks clip into hard grey slabs that read as architecture rather than weather.
-     Weather shade for the ground comes from js/clouds.js at 64 km per tile, where the shadow can
-     actually hold a puff's shape; it costs the shadow box nothing. */
-  cumulus.castShadow = false;
-  cumulus.material.fog = false;   // same reason as the ground: a deck 2 km up is a planet-scale body
-  /* Two regimes, crossed by TEXELS-PER-PIXEL (|d uv| × texture width), because no constant alpha
-     threshold survives minification and fwidth(ca) is not a valid proxy for it. Where cells
-     RESOLVE (tpp < 2) the cel steps stand: a cell above 0.34 is alpha 1 with a derivative-AA'd
-     edge, the 0.18 haze is a CONSTANT step (the round-4 fix for the ca*0.14 proportional floor's
-     ±3/255 gradient smudges). Where the texture minifies, the GPU's box mips average clear ocean
-     and cloud core into one smooth INTERMEDIATE ca (0.3–0.6 over whole belts — measured over the
-     real chain: global mean 0.263, invariant across mips; region p50s in the mid teens but the
-     grazing horizon mixes thousands of km in all directions) and fwidth(ca) of that smooth field
-     is small, so a fwidth gate never fires — the 0.34 step then decides alpha = 1 across whole
-     ocean: the uniform grey sheet this frame had at 900 km, and its mirror image (ca < 0.34 →
-     bare navy planet) at Moon distance. The uv-derivative gate measures minification directly:
-     tpp = max(|∂u/∂px|·2048, |∂v/∂px|·1024) is exactly what the sampler's LOD picks. Above it the
-     alpha rides the local mean through a contrast window (0.30→0.62: a clear mip cell ≤0.18
-     stays bare, a saturated one goes full white), so zonal structure survives from orbit and
-     intermediate blur reads as haze, not as opaque deck. The deck is a single-wrap sphere — the
-     multi-repeat mip-wedge failure of AGENTS.md cannot apply to it. */
-  cumulus.material.onBeforeCompile = (sh) => {
-    sh.fragmentShader = sh.fragmentShader.replace('#include <map_fragment>',
-      '#include <map_fragment>\n' +
-      '  float ca = diffuseColor.a;\n' +
-      '  float cw = max(fwidth(ca), 0.004);\n' +
-      '  float tpp = max(length(vec2(dFdx(vMapUv.x), dFdy(vMapUv.x))) * 2048.0, length(vec2(dFdx(vMapUv.y), dFdy(vMapUv.y))) * 1024.0);\n' +
-      '  float cell = mix(mix(0.0, 0.06, smoothstep(0.18 - cw, 0.18 + cw, ca)), 1.0, smoothstep(0.34 - cw, 0.34 + cw, ca));\n' +
-      '  float veil = smoothstep(0.30, 0.62, ca);\n' +
-      '  diffuseColor.a = mix(cell, veil, smoothstep(2.0, 8.0, tpp));');
+  /* The patch is what the eye actually resolves at the pad, so it gets the same marched shade as
+     the globe it sits on; without it the ground under a cloud would be lit while the planet around
+     it is not. */
+  earthPatch.mesh.material.onBeforeCompile = (sh) => {
+    cloudShadeInject(sh, weather);
+    hazeInject(sh, hazeU);
   };
-  scene.add(cumulus);
 
-  cirrus = new THREE.Mesh(new THREE.SphereGeometry(RE + CIRRUS_ALT, 512, 256),
-    toon({
-      color: 0xf4f8fc, map: cirrusMap, transparent: true, side: THREE.DoubleSide,
-      opacity: 0.5, depthWrite: false, gradientMap: RAMP_CLOUD
-    }));
-  cirrus.castShadow = false;        // see the cumulus note: 9 km up is enough to wreck the ground
-  cirrus.material.fog = false;
-  /* Continuous, not stepped — the round-5 correction, measured with a red canary painted into
-     the CUMULUS law at this exact view: the grey sheet that blanketed the 900 km oblique frame
-     tinted the land brown but left the ocean untouched, so it belonged to this mesh, not that
-     one. The streak field's texel alpha (mean 0.13, but region p25 0.22 / p50 0.42 through
-     mips 2–4 in the tropical–mid-latitude band) sits around the old 0.25 step almost everywhere
-     in that band, and a step there is a wash by construction. smoothstep(0.5, 0.8) answers the
-     field's upper tail — the p95 mass (0.76) and nothing else: thin white streak cores against
-     clear sky at any scale, with no gate needed because a continuous law degrades gracefully
-     where the step did not. The 0.55 keeps cirrus under the cumulus at every distance. */
-  cirrus.material.onBeforeCompile = (sh) => {
-    sh.fragmentShader = sh.fragmentShader.replace('#include <map_fragment>',
-      '#include <map_fragment>\n' +
-      '  diffuseColor.a *= 0.55 * smoothstep(0.5, 0.8, diffuseColor.a);');
-  };
-  scene.add(cirrus);
+  /* ---- the weather shell: 4 km to 11 km, one mesh, the whole planet.
+
+     It replaces three things at once — the 2 km cumulus deck, the 9 km cirrus deck, and the two
+     tangent-plane caps (220 km and 32 km) that re-centred under the vehicle. The caps were the bug
+     the user could see from 100 km up: a 45x45 grid in a plane has a square silhouette, and both
+     of them sat inside it. A sphere has no silhouette to leak; every pixel of this one is
+     translucent, so density comes from the length of the sight line through the band rather than
+     from an alpha threshold that minification can only average.
+
+     Why the march instead of a stacked alpha: opacity = 1 − exp(−τ) over the analytic chord gives a
+     base and a top for free (grazing rays accrue 7 km of cloud, overhead rays only what is actually
+     there), which is why the horizon reads as a dense deck and the zenith as sky. It also means
+     nothing here depends on texel size: the old decks' ceiling was 39 km per texel, and no change
+     to them could ever put a cumulus over the pad. The cell lattice tiles at 160 km per repeat
+     (0.3125 km per texel), so the same mesh carries zonal systems and individual towers.
+
+     DoubleSide is not decoration: the camera lives on BOTH sides of this layer — inside it at the
+     pad, outside it in orbit. A FrontSide shell seen from its own interior shows only the far wall,
+     which the planet occludes from the ground, so a single-sided deck is structurally invisible as
+     overhead sky from the surface.
+
+     It does not cast into the sun's shadow map: at 4-11 km a low sun drags its silhouette hundreds
+     of kilometres across the surface, and through the ±48 km vehicle-tracking box those streaks clip
+     into hard grey slabs that read as architecture. Ground shade is marched instead (see
+     cloudShadeInject below), from the same field, so it holds a puff's shape at every distance. */
+  weather = makeWeather();
+  cloudMesh = makeCloudShell(weather);
+  scene.add(cloudMesh);
 
   /* ---- atmosphere: back-side limb shell. Intensity comes from the optical depth still in front of
      each fragment — long tangential sight lines glow, the thin overhead shell from the ground does not. ---- */
@@ -708,20 +655,6 @@ function updateReliefPatches(pos) {
     spinLocal(moon, _ld);
     updateMoonPatch(moonPatch, _ld.x, _ld.y, _ld.z, dM - RM);
   } else hidePatch(moonPatch);
-  if (clouds) {
-    _cs.copy(SUN_DIR);
-    spinLocal(earth, _cs);
-    updateCloudLayer(clouds, _ld.x, _ld.y, _ld.z, _cs, pos.length() - RE);
-  }
-}
-
-/* body-local → world, the inverse of spinLocal: the cloud shade asks the terrain how high the ground
-   is under a shadow point, and the terrain fields are keyed in world space. */
-const _cw = new THREE.Vector3();
-function groundKmLocal(dir) {
-  const a = earth ? earth.rotation.y : 0, c = Math.cos(a), s = Math.sin(a);
-  _cw.set(dir.x * c + dir.z * s, dir.y, -dir.x * s + dir.z * c);
-  return fineGroundHeight(_cw);
 }
 
 /* rotY(−rotation.y) in place: world direction → body-local, the same inverse every uv lookup here
@@ -807,13 +740,12 @@ export function syncTime(t) {
   const ts = Number.isFinite(t) ? t : 0;
   simT = ts;
   spin = EARTH_SPIN * ts;
-  cloudSpin = EARTH_SPIN * 1.08 * ts;
-  cirrusSpin = EARTH_SPIN * 1.22 * ts;
   earth.rotation.y = spin;
-  cumulus.rotation.y = cloudSpin;
-  cirrus.rotation.y = cirrusSpin;
   moon.rotation.y = MOON_RATE * ts;
   moonPos(simT, moon.position);
+  /* Weather drift is a function of absolute time, like the angles above: a teleport or a reset that
+     re-based simT without re-based the drift would leave the clouds where the old clock put them. */
+  if (cloudMesh) updateWeather(cloudMesh, simT, spin, SUN_DIR);
 }
 
 /* the planet and its weather turn; the cloud decks drift a little faster than the ground (real
@@ -825,13 +757,15 @@ export function spinBodies(simDt) {
   const dt = Number.isFinite(simDt) ? simDt : 0;
   simT += dt;
   spin += EARTH_SPIN * dt;
-  cloudSpin += EARTH_SPIN * 1.08 * dt;
-  cirrusSpin += EARTH_SPIN * 1.22 * dt;
   earth.rotation.y = spin;
-  cumulus.rotation.y = cloudSpin;
-  cirrus.rotation.y = cirrusSpin;
   moon.rotation.y += MOON_RATE * dt;
   moonPos(simT, moon.position);
+  /* The shell never rotates — its mesh is fixed so its shader can work straight in world space —
+     and the weather moves through uv drift: the lattices ride the ground's spin plus a wind, the
+     upper lattice faster than the lower, so cells grow and dissolve as they slide past each other
+     instead of just translating. Rates are of the same order as EARTH_SPIN (real superrotation),
+     never orders of magnitude faster. */
+  if (cloudMesh) updateWeather(cloudMesh, simT, spin, SUN_DIR);
 }
 
 const HORIZON = new THREE.Color(0xb2cfe2);
@@ -841,7 +775,7 @@ const HORIZON = new THREE.Color(0xb2cfe2);
    background under it is black space. The exponential fog thins on the same clock and takes the
    dome's horizon tone, so near-field haze always matches the sky behind it. */
 const SKY_SCALE = 80;            // km — visual atmospheric depth for the sky/fog blend
-export function updateSky(pos) {
+export function updateSky(pos, camPos) {
   const alt = Math.max(0, pos.length() - RE);
   _skyMix = Math.exp(-alt / SKY_SCALE);
   /* One part in eight of pale blue MIXED IN LINEAR SPACE already renders as 30 %-grey sRGB —
@@ -865,6 +799,16 @@ export function updateSky(pos) {
   scene.background.copy(_sky);
   scene.fog.color.copy(_sky);
   scene.fog.density = 0.0038 * _skyMix * _skyMix;
+  /* The ground's haze runs the same numbers through js/haze.js, measured from the EYE and keyed to
+     the air the EYE is in: exp² in true distance with a sea-level density is a pad-scale law, and
+     applied to a 400 km sight line from a camera 100 km up it washed the whole planet to 60 % sky
+     (measured: the coastlines vanished). Vertical optical depth dies with height far faster than a
+     slant path length grows, so the clock reads camera altitude, not the vehicle's. */
+  if (hazeU) {
+    const camAlt = Math.max(0, (camPos || pos).length() - RE);
+    const kMix = Math.exp(-camAlt / SKY_SCALE);
+    updateHaze(hazeU, camPos || pos, 0.0038 * kMix * kMix, _sky);
+  }
   /* Stars come up against what the EYE measures, not the linear buffer: sRGB lightness. With
      the squared background this crosses fully visible around 300 km and is exactly zero for
      the whole pad day. */

@@ -75,10 +75,10 @@ Repo-wide convention (see `docs/reference/README.md`): **km, s, tonnes, kN**.
   vector has no direction worth steering by. The Moon moves at ~1 023 m/s through the game frame, so
   anything judged against a surface must not use the raw state vector `S.v`. Also owns `LES_ALT`
   (90 km) and the launch-escape-tower jettison, which is visual only and sheds no mass.
-- `js/world.js` (822 lines) — Earth, Moon, sky gradient, starfield, the two cloud decks (cumulus at
-  2 km, cirrus at 9 km, which deliberately **do not** cast shadows — see `agents.md`), the sun whose
-  shadow camera follows the vehicle, and the launch pad welded to the rotating planet. Drives
-  `js/clouds.js` with the ground point and the sun in body-local space. Exposes the terrain queries
+- `js/world.js` (822 lines) — Earth, Moon, sky gradient, starfield, the sun whose
+  shadow camera follows the vehicle, and the launch pad welded to the rotating planet. Mounts the
+  weather shell from `js/clouds.js` and composes the ground materials' injections (cloud shade, haze,
+  coastline ink) — one `onBeforeCompile` per material. Exposes the terrain queries
   `groundHeight`, `moonGroundHeight` and `fineGroundHeight` (km above the reference sphere), plus
   `planetCanvas` and `bodySpin` for the orbital map.
 - `js/terrain.js` (404 lines) — the near level: one 161 × 161 mesh warped radially, ~25 m spacing
@@ -123,16 +123,17 @@ Repo-wide convention (see `docs/reference/README.md`): **km, s, tonnes, kN**.
   dry/fuel/thrust/Isp), `LAND_SAFE` (0.032 km/s), `WARPS`, `DTPHYS`, the SAS pitch program `TURN`,
   and `MOON_PHASE0` — the solved launch window (the Moon's angle along its orbit at MET 0 for which
   a TLI at the first perigee after insertion arrives at the Moon).
-- `js/textures.js` (231 lines) — the generated sheets: the two cloud decks and the shared glow
+- `js/textures.js` (231 lines) — the generated sheets: the weather's macro fields (zonal cumulus cover and cirrus veil) and the shared glow
   sprite, deterministic so the weather is the same every run. The photographic diffuse/normal/specular maps
   under `assets/` are inputs to the painter in `js/toonmap.js` (mask and biome signal); the normal
   map is no longer bound to any surface, per `docs/reference/cartoon-art-direction.md`.
-- `js/clouds.js` (300 lines) — weather at human scale: a 440 km cloud cap at 7 km altitude and a
-  64 km shade cap, both re-centred under the vehicle. The deck samples one tileable puff field at 390 m
-  per texel; the shade samples the same field box-filtered to 64 × 64 with no mip chain, because a cap
-  that size minifies hard and mip selection is per triangle. Shadows land under their clouds, offset
-  anti-sunward by deck height over tan(elevation). The planet-scale decks cannot do this — one of their texels is 39 km and
-  the whole sky above the pad spans a fifth of one. Why it has to exist: `agents.md`.
+- `js/clouds.js` (349 lines) — the weather: one shell from 4 to 11 km around the whole planet, its
+  opacity marched through the view ray as optical depth. The macro sheet sets coverage, a tileable rank
+  lattice at 0.31 km per texel gives the cells their shape, and two drifting copies of it make them
+  build and dissolve. The same march, aimed up the sun ray, is injected into the globe and the near
+  patch as ground shade. Details and measurements: `docs/reference/painted-planets.md`.
+- `js/haze.js` (62 lines) — aerial perspective for the ground: one exp² law in true distance, injected
+  into both the near patch and the globe so they agree at the patch's rim.
 - `js/audio.js` (53 lines) — engine and impact audio, gated on first keypress as browsers require.
 
 `window.game` is the debugging/test handle wired in `js/main.js`: `state()` returns a full readback
