@@ -1,7 +1,8 @@
 import * as THREE from 'three';
 import * as WORLD from './world.js';
-import { RE, RM, SOI_M, PAD_SCALE, PAD_POS, PAD_UP, moonPos } from './constants.js';
-import { S, fwd, getSimTime } from './physics.js';
+import { RE, RM, SOI_M, VS, PAD_SCALE, PAD_POS, PAD_UP, moonPos } from './constants.js';
+import { S, fwd, getSimTime, activeStage } from './physics.js';
+import { stages } from './vehicle.js';
 
 /* distances are km; 1 m near plane so the 105 m rocket resolves, 3 M km far plane
    so the starfield and the lunar approach both render (logarithmic depth buffer) */
@@ -19,6 +20,18 @@ let wantYaw = 0.3, wantPitch = 0.15, wantDist = 0.35;
 let curYaw = 0.3, curPitch = 0.15, curDist = 0.35;
 
 const camPos = new THREE.Vector3(), camTgt = PAD_POS.clone(), camUp = new THREE.Vector3(0, 0, 1);
+/* The camera's place is kept as an OFFSET from what it follows, and that offset is what gets damped.
+   Damping the absolute position instead (what this did) makes the camera a first-order follower of
+   a moving point, and such a follower trails by speed x time-constant: measured in a 300 km orbit at
+   x1 with 0.12 km asked for, the camera sat 0.572 km back with the ship 32 % of the way up the frame,
+   and under warp it was left behind altogether. An offset has no velocity to lag. */
+const camOff = new THREE.Vector3();
+/* What the camera looks at: the middle of the hardware still attached, as a distance along the
+   vehicle axis from the state point S.pos (which is the middle of the FULL stack — after two
+   stagings the nearest metal is 10 m ahead of it and the command module 38 m). It glides to its new
+   value when a stage leaves instead of jumping, so staging re-frames the ship rather than cutting. */
+const NOSE_Z = 28.7;                       // build units: the command module's apex
+let focusZ = null, spanHalf = 37 * VS;
 const noseSmooth = new THREE.Vector3(0, 0, 1);
 const CAM_RANGE = { chase: [0.02, 400, 0.35], orbit: [0.01, 1000, 2.5], system: [4000, 900000, 150000] };
 const SOI_BLEND_HI = SOI_M * 1.4, SOI_BLEND_LO = SOI_M * 0.8;
@@ -33,14 +46,14 @@ const SOI_BLEND_HI = SOI_M * 1.4, SOI_BLEND_LO = SOI_M * 0.8;
    Damping alone is not enough here, because the target outruns the damping whenever warp, staging or a
    reset moves it, and that step is exactly what used to land the camera under the surface. */
 const PAD_R = 455 * PAD_SCALE, PAD_H = 150 * PAD_SCALE;      // apron edge; mast tips plus margin
-const SHIP_R = 10 * PAD_SCALE, SHIP_L = 40 * PAD_SCALE;      // stage radius; half the stack
+const SHIP_R = 10 * PAD_SCALE;                               // stage radius; the length is the live span
 const SKIN = 0.02;                                           // km of standoff so nothing z-fights
 const ORIGIN = new THREE.Vector3();
 
 // scratch, never aliased against each other
 const _up = new THREE.Vector3(), _h = new THREE.Vector3(), _dir = new THREE.Vector3();
 const _diff = new THREE.Vector3(), _target = new THREE.Vector3(), _padGround = new THREE.Vector3();
-const _shipC = new THREE.Vector3(), X_AXIS = new THREE.Vector3(1, 0, 0);
+const X_AXIS = new THREE.Vector3(1, 0, 0);
 const _ax0 = new THREE.Vector3(), _ax1 = new THREE.Vector3(), _ax2 = new THREE.Vector3();
 const _moon = new THREE.Vector3(), desired = new THREE.Vector3();
 
@@ -70,6 +83,7 @@ export function cycleCamera() {
   wantDist = THREE.MathUtils.clamp(CAM_RANGE[mode][2], lo, hi);
   wantYaw = mode === 'system' ? 0 : 0.3; wantPitch = mode === 'system' ? 0.25 : 0.15;
   lastInput = performance.now();
+  placed = false;            // a mode change is a cut: the pivots are 190 000 km apart
   addLog(`CAMERA: ${mode.toUpperCase()}`);
 }
 
@@ -86,9 +100,8 @@ export function setCamDist(d, snap = true) {
 export function resetCameraView() {
   camMode = 0; wantYaw = curYaw = 0.35; wantPitch = curPitch = 0.18; wantDist = curDist = 0.9;
   camUp.copy(PAD_UP).normalize();
-  camPos.copy(PAD_POS).addScaledVector(camUp, 0.6).addScaledVector(_ax1.crossVectors(AXIS, camUp).normalize(), -1.2);
-  camTgt.copy(PAD_POS);
-  placed = true;
+  focusZ = null;
+  placed = false;            // updateCamera places it on the first frame, from the numbers above
 }
 
 const AXIS = new THREE.Vector3(0, 1, 0);
@@ -154,8 +167,7 @@ function collide(pos, isSystem) {
     _ax1.crossVectors(_ax0, _up);
     if (!Number.isFinite(_ax1.x) || _ax1.lengthSq() < 1e-9) _ax1.copy(X_AXIS); else _ax1.normalize();
     _ax2.crossVectors(_ax0, _ax1).normalize();
-    _shipC.copy(_target).addScaledVector(_ax0, 0.5 * SHIP_L);
-    pushOut(_ax1, _ax2, _ax0, SHIP_R, SHIP_R, SHIP_L, _shipC, pos);
+    pushOut(_ax1, _ax2, _ax0, SHIP_R, SHIP_R, spanHalf + 6 * VS, _target, pos);   // +6u clears the escape tower
   }
   _ax0.copy(PAD_UP).normalize();
   _ax1.crossVectors(AXIS, _ax0).normalize();
@@ -185,7 +197,12 @@ export function updateCamera(dt) {
     _dir.set(Math.sin(curYaw) * Math.cos(curPitch), Math.sin(curPitch), Math.cos(curYaw) * Math.cos(curPitch));
     desired.copy(_target).addScaledVector(_dir, curDist);
   } else {
-    _target.copy(S.pos);                                         // the thing the camera orbits
+    const i = activeStage();
+    const tail = i >= 0 ? stages[i].tailZ : NOSE_Z - 6;          // capsule alone: its own six units
+    const wantZ = 0.5 * (tail + NOSE_Z) * VS;
+    focusZ = focusZ === null || !placed ? wantZ : focusZ + (wantZ - focusZ) * (1 - Math.exp(-2.5 * dt));
+    spanHalf = 0.5 * (NOSE_Z - tail) * VS;
+    _target.copy(S.pos).addScaledVector(fwd(), focusZ);          // the thing the camera orbits
     bodyRadial(_up);
     // horizontal heading the camera trails behind (nose, falling back to velocity, then a fixed axis)
     noseSmooth.lerp(fwd(), 1 - Math.exp(-4 * dt));
@@ -207,10 +224,14 @@ export function updateCamera(dt) {
 
   collide(desired, mode === 'system');
 
-  const k = 1 - Math.exp(-(mode === 'system' ? 7 : 15) * dt);   // snappy follow, no target lag
-  if (!placed) { camPos.copy(desired); placed = true; } else camPos.lerp(desired, k);
+  const k = 1 - Math.exp(-(mode === 'system' ? 7 : 15) * dt);
+  desired.sub(_target);                                          // now an offset
+  if (!placed) { camOff.copy(desired); placed = true; } else camOff.lerp(desired, k);
+  camPos.copy(_target).add(camOff);
+  /* Second collision pass, on the blended place: a lerp between two legal offsets is a chord, and a
+     chord can pass through the vehicle, the pad or the ground. */
   collide(camPos, mode === 'system');
-  camTgt.lerp(_target, mode === 'system' ? 1 : k);
+  camTgt.copy(_target);                                          // the ship is the centre of the frame, exactly
   camUp.lerp(_up, k).normalize();
   camera.position.copy(camPos); camera.up.copy(camUp); camera.lookAt(camTgt);
 }

@@ -212,6 +212,13 @@ state differs from the ship's real trajectory by ~100 km, which would make the r
   this the camera cut 6 019 km through the Earth whenever `reset()`, `teleport()` or `ff()` moved the
   vehicle to the far side. Measured after the fix: the closest the camera gets to the centre during a
   full crossing is `RE + 0.02`, exactly the skin.
+- **Damp the camera's offset, never its position.** A lerp of the absolute position toward a moving
+  target trails it by speed × time-constant: in a 300 km orbit at ×1 with 0.12 km asked for, the camera
+  sat 0.572 km back with the ship 32 % up the frame, and under warp it was simply left behind. The
+  camera now keeps a damped offset from its target, which is the middle of the hardware still attached
+  (`S.pos` is the middle of the FULL stack — after two stagings the command module is 38 m ahead of
+  it); the focus glides at staging. Measured after: ship at NDC (0, 0), distance 0.118 km, re-centred
+  to within 1 % of the frame 1.4 s after a stage leaves.
 - **Pad exhaust is a shape problem before it is a physics problem.** Parcels leave the F-1s at
   ~2.9 km/s, and if the tangential component of the trench hit survives whole, the deflectate paints a
   200 m field of discrete glowing domes around the pad — measured at 264 live parcels with sprites up to
