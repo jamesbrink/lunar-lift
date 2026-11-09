@@ -122,7 +122,8 @@ averaged the rank field to 0.5 and a threshold on it is a coin that always lands
 measured from 4 000 km as storm belts gone solid white and everything else bare. There the density
 becomes the coverage fraction itself, which is the exact mean of what the threshold would have drawn.
 
-Each pixel starts its twelve samples at a different phase (interleaved gradient noise). With a fixed
+Each pixel starts its samples at a different phase (white noise, which the half-resolution pass's
+tent filter removes; an ordered pattern survived it as a weave). With a fixed
 phase a slanted view cut every cloud at the same heights and drew it as a stack of plates. The price
 is a fine stipple on cloud flanks seen close; it is visible in a still at 8–30 km and is the known
 rough edge of this renderer.
@@ -132,9 +133,11 @@ The band has two surfaces. The outer sphere serves an eye above the band (front 
 the outer sphere, so a second sphere at the cloud base carries the same march for those. A ray that
 dips under the base without hitting the ground is marched straight through to the far side.
 
-Frame cost over 90 `requestAnimationFrame` deltas (Apple M4 Max, 1280 × 720): pad at full throttle
-median 16.8 ms, p90 18.8; inside the band at 8 km 16.7 / 17.4; 300 km orbit 16.6 / 18.0. The median
-is the display's vsync, so this bounds the cost on that machine and says nothing about a slower GPU.
+Cost, as GPU time from `EXT_disjoint_timer_query_webgl2` on an Apple M4 Max at a 2160 × 1250 drawing
+buffer (frame-interval numbers are vsync and say nothing): drawn at full resolution with twelve
+samples the shell alone was 6.7 ms of a 13.4 ms idle frame at the pad. It is now drawn in the
+half-resolution pass (`js/halfres.js`) with twenty samples, stops marching once opaque, and skips the
+lattice where it is unresolved; the whole idle frame is 4.4–5.2 ms. Nothing slower has been measured.
 
 Row 0 is south in every generated sheet: a `DataTexture` samples row 0 at `v = 0`, and
 `SphereGeometry`'s `v = 0` is the south pole.

@@ -82,7 +82,7 @@ state differs from the ship's real trajectory by ~100 km, which would make the r
 - It imports the real `js/*.js`. Phases: `ascent → tliwait → tli → mcc → approach → loi →
   orbitCheck → deorbit → toPeri → descend`; the launch phase is found by bisecting the first
   periselene (`probePeri` runs the mission with `capture: false, stopAtPeri: true`).
-- `stages[i].dry` is copied at import time by `js/vehicle.js`, and `resetSim()` re-syncs only
+- `stages[i].dry` is copied at import time by `js/saturn.js`, and `resetSim()` re-syncs only
   `fuel`. If you override `SPECS`, you MUST write `stages[i].dry` too, or you fly the old airframe.
 - `P.setSas(on, retro)` — the second argument is **retrograde**, not "prograde".
 - The solid first stage cannot be throttled or shut down (`physStep` forces `targetThrottle = 1`
@@ -212,6 +212,32 @@ state differs from the ship's real trajectory by ~100 km, which would make the r
   this the camera cut 6 019 km through the Earth whenever `reset()`, `teleport()` or `ff()` moved the
   vehicle to the far side. Measured after the fix: the closest the camera gets to the centre during a
   full crossing is `RE + 0.02`, exactly the skin.
+- **Frame time is not GPU time; the display hides the difference.** Ninety `requestAnimationFrame`
+  deltas read 16.7 ms whether the GPU worked for 4 ms or 14, and then jump to 33. Every "frame cost"
+  quoted before this note was vsync. Measure with `EXT_disjoint_timer_query_webgl2` around the rAF
+  callback (wrap `requestAnimationFrame` from an init script; `gl.getParameter(query, QUERY_RESULT)`
+  a few frames later) and at a retina-sized drawing buffer — `tab.emulate({ viewport: { …,
+  deviceScaleFactor: 2 } })`. That is how the weather shell (6.7 ms of 13.4 idle) and the exhaust
+  sprites (16 ms of 31.6 at full throttle) were found.
+- **Soft, fill-bound layers go in the half-resolution pass.** `js/halfres.js` draws `LAYER_FX`
+  objects (weather shell, exhaust points) into a quarter-pixel target with its own depth prepass of
+  every `LAYER_OCC` mesh, then composites through a 3×3 tent. Same views after: 13.4 → 5.2 ms idle,
+  31.6 → 8.4 ms at full throttle. Consequences to remember: a shader in that pass sees pixels twice
+  the size (screen-derivative footprints and point sizes are scaled by `RES_SCALE`); a new opaque
+  mesh must be passed through `occlude()` or smoke draws over it; ordered dither survives the tent
+  as a weave, white noise does not.
+- **Two surfaces on one plane flicker, and a vehicle standing in a slab is two.** The pad deck was a
+  solid box with a dark box inset, both tops at z 3.0, and the stack (skirt at z 1.4, bells to −1)
+  stood sunk through them: crawling stripes at the foot of the rocket. `js/pad.js` now has a real
+  opening with the bells hanging in it and the header lists the heights nothing may share.
+- **The pad's collider must let the camera onto the apron.** One 640 × 210 m dome kept the view out
+  of the towers by keeping it out of the launch site, and the only angle from which a Saturn V looks
+  110 m tall — low, close, looking up — could not be reached. Three ellipsoids in the pad's own frame
+  now (deck, tower, tank farm), via `padMatrix()`, which also follows the planet's spin.
+- **Start a damped quantity at its target.** The camera's up vector, heading and lens eased in from
+  module defaults, so each mission opened with the horizon rolling level; and "ease back behind the
+  nose" ran on the pad, where the nose's heading is a fallback axis. Measured after: 0.000° of camera
+  rotation across the first 4 s.
 - **Damp the camera's offset, never its position.** A lerp of the absolute position toward a moving
   target trails it by speed × time-constant: in a 300 km orbit at ×1 with 0.12 km asked for, the camera
   sat 0.572 km back with the ship 32 % up the frame, and under warp it was simply left behind. The
@@ -338,15 +364,15 @@ await tab.evaluate(`(async () => {
 
 ## Structure
 
-One concern per file; no god files. Current sizes: `toonmap.js` 1779, `vehicle.js` 1529,
-`world.js` 821, `terrain.js` 549, `navball.js` 498, `physics.js` 472, `hud.js` 437,
-`clouds.js` 393, `predictor.js` 275, `camera.js` 237, `textures.js` 232, `ribbon.js` 213,
-`main.js` 163, `toon.js` 138, `constants.js` 119, `targeting.js` 108, `haze.js` 62, `audio.js` 53.
-`vehicle.js` has grown past a comfortable size and clearly holds two concerns — the vehicle meshes
-and the exhaust/blast particle field; if the next change to either pushes it higher, split the
-particle system out the way `targeting.js` and `predictor.js` were: a module that owns one question.
-`physics.js` is back under 500 because the trajectory ribbon left it for `predictor.js`; keep
-display code out of it — `tools/mission-sim.mjs` imports it headless.
+One concern per file; no god files. Current sizes: `toonmap.js` 1779, `vehicle.js` 1363,
+`world.js` 687, `terrain.js` 549, `navball.js` 498, `physics.js` 472, `hud.js` 437, `clouds.js` 406,
+`camera.js` 293, `predictor.js` 275, `textures.js` 232, `saturn.js` 231, `ribbon.js` 213,
+`pad.js` 181, `main.js` 172, `toon.js` 137, `constants.js` 119, `targeting.js` 108, `halfres.js` 91,
+`audio.js` 62, `haze.js` 62. `vehicle.js` is now the exhaust and debris alone — the hardware it used
+to build is `saturn.js`, the launch complex left `world.js` for `pad.js`. It is still the largest
+behavioural module; if the particle field grows, split its renderer from its integrator.
+`physics.js` stays display-free: `tools/mission-sim.mjs` imports it headless, and `saturn.js` with
+it for the stage records (so anything there that needs a canvas must tolerate having none).
 
 `js/constants.js` holds every physical constant and the vehicle `SPECS`, each with the measurement
 that justifies it in a comment. `docs/reference/` holds the source-cited external data and the

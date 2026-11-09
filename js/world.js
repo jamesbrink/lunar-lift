@@ -476,6 +476,11 @@ function updateShadowBox(pos) {
   setShadowBox(THREE.MathUtils.clamp(SHADOW_MIN + local * 0.12, SHADOW_MIN, SHADOW_MAX));
 }
 
+/* The launch complex's local-to-world matrix (build units, z up, the vehicle's axis on the origin),
+   for anything that has to reason in the pad's own frame — the camera's colliders do. It rides the
+   planet's spin, which a frame built from the constant PAD_UP does not. */
+export function padMatrix() { return pad ? pad.matrixWorld : null; }
+
 /* main.js calls this every frame: the shadow frustum travels with the vehicle, so the same sun
    shades the pad at liftoff and the lander on the moon. The near terrain patch travels with it
    too — one distance test per frame, a rebuild only after 12 km of ground travel, no allocation. */

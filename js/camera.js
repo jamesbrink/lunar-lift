@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import * as WORLD from './world.js';
 import { RE, RM, SOI_M, VS, PAD_SCALE, PAD_POS, PAD_UP, moonPos } from './constants.js';
-import { S, fwd, getSimTime, activeStage } from './physics.js';
+import { S, fwd, getSimTime, activeStage, isBurning, getThrottle, airDensity, groundVel } from './physics.js';
 import { stages } from './saturn.js';
 
 /* distances are km; 1 m near plane so the 105 m rocket resolves, 3 M km far plane
@@ -16,8 +16,12 @@ let camMode = 0, dragging = false, lastInput = 0;
    number straight onto the transform — what this did — turns every wheel notch and mouse jerk into a
    hard cut, and it lets the viewpoint teleport through geometry between frames. Zoom is damped in log
    space so pulling from 0.35 km to 400 km takes the same pleasant half-second as 0.35 to 0.7. */
-let wantYaw = 0.3, wantPitch = 0.15, wantDist = 0.35;
-let curYaw = 0.3, curPitch = 0.15, curDist = 0.35;
+/* The opening shot: from the south-east apron, low, so the sunlit side of the stack stands in front
+   of the umbilical tower instead of behind it (measured in the pad's frame: yaw 0.5 put the camera
+   at azimuth −151°, with 123 m of red steel between it and the rocket). */
+const PAD_YAW = 2.33;
+let wantYaw = PAD_YAW, wantPitch = 0, wantDist = 0.13;
+let curYaw = PAD_YAW, curPitch = 0, curDist = 0.13;
 
 const camPos = new THREE.Vector3(), camTgt = PAD_POS.clone(), camUp = new THREE.Vector3(0, 0, 1);
 /* The camera's place is kept as an OFFSET from what it follows, and that offset is what gets damped.
@@ -32,8 +36,9 @@ const camOff = new THREE.Vector3();
    value when a stage leaves instead of jumping, so staging re-frames the ship rather than cutting. */
 const NOSE_Z = 28.7;                       // build units: the command module's apex
 let focusZ = null, spanHalf = 37 * VS;
+let wantFov = 64, placedFov = false, shakeT = 0;
 const noseSmooth = new THREE.Vector3(0, 0, 1);
-const CAM_RANGE = { chase: [0.02, 400, 0.35], orbit: [0.01, 1000, 2.5], system: [4000, 900000, 150000] };
+const CAM_RANGE = { chase: [0.02, 400, 0.13], orbit: [0.01, 1000, 2.5], system: [4000, 900000, 150000] };
 const SOI_BLEND_HI = SOI_M * 1.4, SOI_BLEND_LO = SOI_M * 0.8;
 
 /* Collision volumes. The camera may come to rest on these and may slide along them; it may not enter.
@@ -45,17 +50,24 @@ const SOI_BLEND_HI = SOI_M * 1.4, SOI_BLEND_LO = SOI_M * 0.8;
      to sit inside the S-IC
    Damping alone is not enough here, because the target outruns the damping whenever warp, staging or a
    reset moves it, and that step is exactly what used to land the camera under the surface. */
-const PAD_R = 455 * PAD_SCALE, PAD_H = 150 * PAD_SCALE;      // apron edge; mast tips plus margin
+/* The launch complex, as three ellipsoids in the pad's own build-unit frame (js/pad.js): the mobile
+   launcher's deck, the umbilical tower with its crane, the propellant farm. It used to be ONE dome
+   640 m across and 210 m high, which kept the camera out of the towers by keeping it out of the
+   whole launch site — the view from the apron looking up at the stack, which is the view that
+   makes a Saturn V big, was simply not reachable. [radii xyz, centre xyz] */
+const PAD_SOLIDS = [[42, 30, 3.5, 0, 0, 0], [9, 9, 58, -21, 0, 46], [26, 20, 15, 52, 38, 6]];
 const SHIP_R = 10 * PAD_SCALE;                               // stage radius; the length is the live span
 const SKIN = 0.02;                                           // km of standoff so nothing z-fights
 const ORIGIN = new THREE.Vector3();
 
 // scratch, never aliased against each other
 const _up = new THREE.Vector3(), _h = new THREE.Vector3(), _dir = new THREE.Vector3();
-const _diff = new THREE.Vector3(), _target = new THREE.Vector3(), _padGround = new THREE.Vector3();
+const _diff = new THREE.Vector3(), _target = new THREE.Vector3();
 const X_AXIS = new THREE.Vector3(1, 0, 0);
 const _ax0 = new THREE.Vector3(), _ax1 = new THREE.Vector3(), _ax2 = new THREE.Vector3();
 const _moon = new THREE.Vector3(), desired = new THREE.Vector3();
+const _inv = new THREE.Matrix4(), _loc = new THREE.Vector3(), _c = new THREE.Vector3(), _gv = new THREE.Vector3();
+const Y_AXIS = new THREE.Vector3(0, 1, 0), Z_AXIS = new THREE.Vector3(0, 0, 1);
 
 let addLog = () => {};
 
@@ -98,7 +110,7 @@ export function setCamDist(d, snap = true) {
 }
 
 export function resetCameraView() {
-  camMode = 0; wantYaw = curYaw = 0.35; wantPitch = curPitch = 0.18; wantDist = curDist = 0.9;
+  camMode = 0; wantYaw = curYaw = PAD_YAW; wantPitch = curPitch = 0; wantDist = curDist = 0.13;
   camUp.copy(PAD_UP).normalize();
   focusZ = null;
   placed = false;            // updateCamera places it on the first frame, from the numbers above
@@ -169,11 +181,12 @@ function collide(pos, isSystem) {
     _ax2.crossVectors(_ax0, _ax1).normalize();
     pushOut(_ax1, _ax2, _ax0, SHIP_R, SHIP_R, spanHalf + 6 * VS, _target, pos);   // +6u clears the escape tower
   }
-  _ax0.copy(PAD_UP).normalize();
-  _ax1.crossVectors(AXIS, _ax0).normalize();
-  _ax2.crossVectors(_ax0, _ax1).normalize();
-  _padGround.copy(_ax0).multiplyScalar(RE);                      // the ground under the complex
-  pushOut(_ax1, _ax2, _ax0, PAD_R, PAD_R, PAD_H, _padGround, pos);
+  const pm = typeof WORLD.padMatrix === 'function' ? WORLD.padMatrix() : null;
+  if (pm && pos.distanceToSquared(_c.setFromMatrixPosition(pm)) < 0.09) {   // within 300 m of the complex
+    _loc.copy(pos).applyMatrix4(_inv.copy(pm).invert());
+    for (const s of PAD_SOLIDS) pushOut(X_AXIS, Y_AXIS, Z_AXIS, s[0], s[1], s[2], _c.set(s[3], s[4], s[5]), _loc);
+    pos.copy(_loc).applyMatrix4(pm);
+  }
 
   _dir.copy(pos).normalize();
   keepOut(pos, ORIGIN, RE + SKIN + groundLift(WORLD.groundHeight, _dir));
@@ -181,6 +194,26 @@ function collide(pos, isSystem) {
   _diff.subVectors(pos, _moon);
   if (_diff.lengthSq() > 1e-9) _dir.copy(_diff).multiplyScalar(1 / _diff.length());
   keepOut(pos, _moon, RM + SKIN + groundLift(WORLD.moonGroundHeight, _dir));
+}
+
+/* The frame shakes with what would shake a camera: engine noise carried by air (thrust × √density —
+   violent on the pad, gone by the time the sky is black) and aerodynamic buffet (dynamic pressure,
+   normalised so max-Q ≈ 1). It is a rotation of the finished view, a fraction of a degree, built
+   from four incommensurate sines so it rumbles instead of jittering; position and aim are untouched,
+   so nothing downstream of the camera (the ribbon's gap, the colliders) sees it. A camera further
+   from the vehicle shakes less. */
+function shake(dt) {
+  shakeT += dt;
+  const altE = Math.max(0, S.pos.length() - RE);
+  const rho = airDensity(altE) / airDensity(0);
+  const sp = groundVel(_gv).length();
+  const q = Math.min(1, rho * sp * sp / 0.05);                 // 0.05 ≈ ρ/ρ0 · v² at max-Q (0.2 × 0.5² km²/s²)
+  const thrust = isBurning() ? getThrottle() * Math.sqrt(rho) : 0;
+  const amp = Math.min(1, 0.9 * thrust + 0.7 * q) / (1 + curDist / 0.5);
+  if (amp < 0.01) return;
+  const t = shakeT;
+  camera.rotateX(amp * 0.0045 * (Math.sin(t * 37.1) + Math.sin(t * 53.7 + 1.3)));
+  camera.rotateY(amp * 0.0045 * (Math.sin(t * 41.3 + 2.1) + Math.sin(t * 59.9 + 0.4)));
 }
 
 export function updateCamera(dt) {
@@ -191,6 +224,7 @@ export function updateCamera(dt) {
   curDist = Math.exp(THREE.MathUtils.lerp(Math.log(curDist), Math.log(wantDist), kDist));
 
   if (mode === 'system') {
+    wantFov = 58;
     moonPos(getSimTime(), _moon);
     _up.copy(AXIS);
     _target.set(_moon.x / 2, 0, _moon.z / 2);                    // system pivot: halfway to the Moon
@@ -205,6 +239,11 @@ export function updateCamera(dt) {
     _target.copy(S.pos).addScaledVector(fwd(), focusZ);          // the thing the camera orbits
     bodyRadial(_up);
     // horizontal heading the camera trails behind (nose, falling back to velocity, then a fixed axis)
+    /* First frame after a placement (boot, reset, setCam): start settled. The heading, the up vector
+       and the lens each used to ease in from their module defaults — up from world +z, the heading
+       from +z — so every mission opened with the horizon rolling level and the view swinging round
+       for a second, with the user's first drag fighting it. */
+    if (!placed) { noseSmooth.copy(fwd()); camUp.copy(_up); placedFov = false; }
     noseSmooth.lerp(fwd(), 1 - Math.exp(-4 * dt));
     if (noseSmooth.lengthSq() > 1e-9) noseSmooth.normalize(); else noseSmooth.copy(_up);
     _h.copy(noseSmooth).addScaledVector(_up, -noseSmooth.dot(_up));
@@ -213,10 +252,22 @@ export function updateCamera(dt) {
       if (_h.length() < 0.12) _h.crossVectors(_up, Math.abs(_up.y) < 0.9 ? AXIS : X_AXIS);
     }
     _h.normalize();
-    if (mode === 'chase' && performance.now() - lastInput > 2000) {   // ease back behind the nose
-      wantYaw *= Math.exp(-1.6 * dt); wantPitch *= Math.exp(-1.6 * dt);
+    /* Ease back behind the nose — in flight. On the pad there is no "behind": the heading is a
+       fallback axis, and easing toward it slid the opening shot sideways for its first seconds. */
+    if (mode === 'chase' && performance.now() - lastInput > 2000 && S.pos.length() - RE > 0.2) {
+      wantYaw *= Math.exp(-0.5 * dt); wantPitch *= Math.exp(-1.6 * dt);   // the yaw comes round slowly: from the pad shot it is a 130° move
     }
-    const pitch = THREE.MathUtils.clamp((mode === 'chase' ? 0.22 : 0.35) + curPitch, -1.3, 1.3);
+    /* The chase camera is a crane shot written as a function of height. On the ground it sits low
+       and looks UP the stack — a 110 m rocket seen from above its own nose is a pencil. As the
+       vehicle climbs the camera rises over it, until from the stratosphere up it looks down past
+       the ship at the ground falling away, which is the only thing in the frame that says how high
+       this is. Same law over the Moon, so the landing ends looking up at the lander. */
+    moonPos(getSimTime(), _moon);
+    const alt = Math.max(0, Math.min(S.pos.length() - RE, S.pos.distanceTo(_moon) - RM));
+    const rise = THREE.MathUtils.smoothstep(alt, 0.1, 2.5), high = THREE.MathUtils.smoothstep(alt, 2.5, 45);
+    wantFov = 64 + 12 * high;                 // and the lens widens with it: depth is what a wide lens draws
+    const basePitch = mode === 'chase' ? -0.20 + 0.42 * rise + 0.30 * high : 0.35;
+    const pitch = THREE.MathUtils.clamp(basePitch + curPitch, -1.3, 1.3);
     _dir.set(0, 0, 0).addScaledVector(_up, Math.sin(pitch)).addScaledVector(_h, -Math.cos(pitch))
       .applyAxisAngle(_up, curYaw);
     desired.copy(_target).addScaledVector(_dir, curDist);
@@ -234,4 +285,9 @@ export function updateCamera(dt) {
   camTgt.copy(_target);                                          // the ship is the centre of the frame, exactly
   camUp.lerp(_up, k).normalize();
   camera.position.copy(camPos); camera.up.copy(camUp); camera.lookAt(camTgt);
+  if (Math.abs(wantFov - camera.fov) > 0.01) {
+    camera.fov += (wantFov - camera.fov) * (placedFov ? 1 - Math.exp(-2 * dt) : 1); placedFov = true;
+    camera.updateProjectionMatrix();
+  }
+  if (mode !== 'system') shake(dt);
 }

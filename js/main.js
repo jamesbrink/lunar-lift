@@ -3,10 +3,10 @@ import { RE, RM, WARPS, DTPHYS, PAD_POS, moonPos } from './constants.js';
 import { initWorld, spinBodies, syncTime, updateSky, updateSunShadow, groundHeight, moonGroundHeight } from './world.js';
 import { stages, lesGroup } from './saturn.js';
 import { initVehicle, spawnParticle, addDebris, detachStage, setVisible, updateParticles, updateDebris, updateBurnVisuals, clearDebris, resetStages } from './vehicle.js';
-import { S, keys, initPhysics, getState, getSimTime, setSimTime, getEngineOn, getThrottle, getWarpIndex, setWarpIndex, setTargetThrottle, getSasOn, setSas, cycleWarp, toggleSas, toggleSasRetro, activeStage, fwd, isBurning, accelAt, physStep, toggleIgnite, separateStage, separateLES, addDistFlown, pushTrail, resetSim, markTeleported, omega, getControlAuthority } from './physics.js';
+import { S, keys, initPhysics, getState, getSimTime, setSimTime, getEngineOn, getThrottle, getWarpIndex, setWarpIndex, setTargetThrottle, getSasOn, setSas, cycleWarp, toggleSas, toggleSasRetro, activeStage, fwd, isBurning, accelAt, physStep, toggleIgnite, separateStage, separateLES, addDistFlown, pushTrail, resetSim, markTeleported, airDensity, groundVel, omega, getControlAuthority } from './physics.js';
 import { camera, initCamera, cycleCamera, updateCamera, resetCameraView, setCamMode, setCamDist, resizeCamera } from './camera.js';
 import { initHUD, addLog, updateHUD, drawMap, toggleMapView, endOverlay, setWarn, hideOverlay, clearLog } from './hud.js';
-import { audioInit, audioEngine, audioThud, audioExplosion, audioWin, updateEngineGain } from './audio.js';
+import { audioInit, audioEngine, audioThud, audioExplosion, audioWin, updateAudio } from './audio.js';
 import { updateAim, resetAim } from './targeting.js';
 import { initHalfRes, occlude, renderHalfRes } from './halfres.js';
 import { initPredictor, predict, updatePredictor, clearPredictor, predLine } from './predictor.js';
@@ -98,6 +98,7 @@ addEventListener('blur', () => { for (const k in keys) keys[k] = false; });
 /* ---------------- main loop ---------------- */
 let last = performance.now(), prevPos = PAD_POS.clone();
 let predTick = 0, trailTick = 0;
+const _gv = new THREE.Vector3();
 
 function frame() {
   requestAnimationFrame(frame);
@@ -121,7 +122,10 @@ function frame() {
     // visuals follow physics
     updateBurnVisuals({ pos: S.pos, quat: S.q, vel: S.v, throttle: getThrottle(), activeIdx: activeStage(), burn: isBurning(), fwd, omega });
     updateDebris(simDt, accelAt);
-    updateEngineGain(isBurning(), Math.max(0, S.pos.length() - RE));
+    {
+      const rho = airDensity(Math.max(0, S.pos.length() - RE)) / airDensity(0), sp = groundVel(_gv).length();
+      updateAudio({ burning: isBurning(), throttle: getThrottle(), rho, q: Math.min(1, rho * sp * sp / 0.05) });
+    }
     /* The path is re-integrated five times a second and DRAWN every frame (updatePredictor, below,
        once the camera has moved): the integration is the slow clock, the ribbon is not. */
     predTick += dtReal; if (predTick > .2) { predTick = 0; if (getState() === 'flying') predict(); }

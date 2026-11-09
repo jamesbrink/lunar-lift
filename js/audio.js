@@ -1,5 +1,5 @@
 /* ---------------- audio (simple, procedural) ---------------- */
-let AC = null, engGain = null, engSrc = null;
+let AC = null, engGain = null, engSrc = null, windSrc = null, windBand = null, windGain = null;
 
 export function audioInit() {
   if (AC) return;
@@ -12,6 +12,12 @@ export function audioInit() {
     const lp = AC.createBiquadFilter(); lp.type = 'lowpass'; lp.frequency.value = 320;
     engGain = AC.createGain(); engGain.gain.value = 0;
     engSrc.connect(lp).connect(engGain).connect(AC.destination); engSrc.start();
+    /* Wind: the same noise through a band that opens with dynamic pressure. It is the sound of
+       speed through air, and its absence is the sound of having left the air behind. */
+    windSrc = AC.createBufferSource(); windSrc.buffer = buf; windSrc.loop = true; windSrc.playbackRate.value = 2.3;
+    windBand = AC.createBiquadFilter(); windBand.type = 'bandpass'; windBand.frequency.value = 400; windBand.Q.value = 0.6;
+    windGain = AC.createGain(); windGain.gain.value = 0;
+    windSrc.connect(windBand).connect(windGain).connect(AC.destination); windSrc.start();
   } catch (e) { /* audio optional */ }
 }
 
@@ -45,9 +51,12 @@ export function audioWin() {
   });
 }
 
-/* engine loudness fades with altitude — the atmosphere carries the rumble */
-export function updateEngineGain(burning, alt) {
-  if (AC && engGain) {
-    engGain.gain.setTargetAtTime(burning ? .1 + .22 * Math.exp(-alt / 240) : 0, AC.currentTime, .05);
-  }
+/* What the air carries. `rho` is density over sea-level density, `q` dynamic pressure normalised to
+   max-Q. The engine is loudest on the pad and falls to a structure-borne murmur in vacuum; the wind
+   rises to max-Q and is silent by the time the sky is black. */
+export function updateAudio({ burning, throttle, rho, q }) {
+  if (!AC || !engGain) return;
+  engGain.gain.setTargetAtTime(burning ? 0.05 + 0.3 * throttle * (0.2 + 0.8 * Math.sqrt(rho)) : 0, AC.currentTime, .05);
+  windGain.gain.setTargetAtTime(0.26 * q, AC.currentTime, .12);
+  windBand.frequency.setTargetAtTime(350 + 1300 * q, AC.currentTime, .2);
 }

@@ -75,7 +75,7 @@ Repo-wide convention (see `docs/reference/README.md`): **km, s, tonnes, kN**.
   vector has no direction worth steering by. The Moon moves at ~1 023 m/s through the game frame, so
   anything judged against a surface must not use the raw state vector `S.v`. Also owns `LES_ALT`
   (90 km) and the launch-escape-tower jettison, which is visual only and sheds no mass.
-- `js/world.js` (821 lines) — Earth, Moon, sky gradient, starfield, the sun whose
+- `js/world.js` (687 lines) — Earth, Moon, sky gradient, starfield, the sun whose
   shadow camera follows the vehicle, and the launch pad welded to the rotating planet. Mounts the
   weather shell from `js/clouds.js` and composes the ground materials' injections (cloud shade, haze,
   coastline ink) — one `onBeforeCompile` per material. Exposes the terrain queries
@@ -90,15 +90,19 @@ Repo-wide convention (see `docs/reference/README.md`): **km, s, tonnes, kN**.
   desert, tundra, boreal, ice — plus the relief fields, the authored Merritt Island shore lines and the
   cloud sheets. No photographic pixel reaches the screen. Look and its limits:
   `docs/reference/painted-planets.md` and `docs/reference/cartoon-art-direction.md`.
-- `js/toon.js` (138 lines) — the cel shading itself: `toon()` materials on a quantising ramp
+- `js/toon.js` (137 lines) — the cel shading itself: `toon()` materials on a quantising ramp
   (`RAMP_EARTH` is four texels with the top two equal, so its steps sit at N·L = −0.5, 0, +0.5 — out by
   the terminator; three samples the ramp at `dotNL · 0.5 + 0.5`, see `agents.md`), `PALETTE`, and
   `outline()` for the single dark edge on hardware.
-- `js/vehicle.js` (1350 lines) — the three rocket-stage meshes, staging visuals, LES jettison, debris,
-  the gimballing flame, the thrust/velocity arrows drawn beside the vehicle (`initNavVectors` /
-  `updateNavVectors`), and the exhaust: a 1 600-slot pool of physics parcels spawned on the real bell
-  exit discs, integrated against drag, gravity and the ground/pad/hull colliders, composited in one
-  draw call so smoke can darken the sky instead of glowing at it.
+- `js/saturn.js` (231 lines) — the Saturn V as drawn hardware: three stage groups in the real paint
+  scheme, engine fairings and fins, contoured bells, the launch escape system, and one flame per engine.
+- `js/vehicle.js` (1363 lines) — what the hardware does: the pose each frame, the flames' size and
+  spread with air density, the exhaust particle field and its ground interaction, staging debris.
+- `js/pad.js` (181 lines) — Launch Complex 39: mobile launcher with a real flame opening, the red
+  umbilical tower with swing arms and crane, propellant farm, floodlights. Static geometry is merged
+  into nine meshes.
+- `js/halfres.js` (91 lines) — the half-resolution pass the weather and the exhaust are drawn in, with
+  its own depth prepass, composited over the frame.
 - `js/predictor.js` (275 lines) — where the vehicle is going. Integrates the path five times a second,
   draws it every frame from the ship's current position: it starts a short gap ahead of the ship, fades
   in, dims with time ahead, and stops after one lap of a closed orbit. Places the `Ap`/`Pe` markers
@@ -112,11 +116,14 @@ Repo-wide convention (see `docs/reference/README.md`): **km, s, tonnes, kN**.
   track and the launch site on them.
 - `js/navball.js` (498 lines) — the KSP-style attitude ball: an orthographic view of the sky from
   the nose, prograde/retrograde markers, apsis markers, the Moon as a target.
-- `js/camera.js` (237 lines) — chase, orbit and system cameras; drag/zoom input. Follows the middle of
+- `js/camera.js` (293 lines) — chase, orbit and system cameras; drag/zoom input. The chase camera is a
+  crane shot keyed to altitude — low and looking up the stack on the pad, high and looking down past
+  it from the stratosphere, the lens widening from 64° to 76° — and it shakes with thrust and dynamic
+  pressure. Follows the middle of
   the hardware still attached and damps its *offset* from it, so the ship stays centred at any speed
   or warp and re-frames smoothly at staging. Collides with the vehicle, the pad, the Earth and the
   Moon, twice per frame because a chord between two legal points can pass through a body.
-- `js/main.js` (163 lines) — renderer bootstrap, keyboard input, the render loop (warp → substeps),
+- `js/main.js` (172 lines) — renderer bootstrap, keyboard input, the render loop (warp → substeps),
   camera cycling, and the `window.game` debug handle.
 - `js/targeting.js` (108 lines) — the predicted lunar aim: propagates the live state forward through
   `gravityAt` at the game's own 0.1 s step and publishes the closest lunar approach, incrementally
@@ -132,14 +139,14 @@ Repo-wide convention (see `docs/reference/README.md`): **km, s, tonnes, kN**.
   sprite, deterministic so the weather is the same every run. The photographic diffuse/normal/specular maps
   under `assets/` are inputs to the painter in `js/toonmap.js` (mask and biome signal); the normal
   map is no longer bound to any surface, per `docs/reference/cartoon-art-direction.md`.
-- `js/clouds.js` (393 lines) — the weather: one shell from 4 to 11 km around the whole planet, its
+- `js/clouds.js` (406 lines) — the weather: one shell from 4 to 11 km around the whole planet, its
   opacity marched through the view ray as optical depth. The macro sheet sets coverage, a tileable rank
   lattice at 0.31 km per texel gives the cells their shape, and two drifting copies of it make them
   build and dissolve. The same march, aimed up the sun ray, is injected into the globe and the near
   patch as ground shade. Details and measurements: `docs/reference/painted-planets.md`.
 - `js/haze.js` (62 lines) — aerial perspective for the ground: one exp² law in true distance, injected
   into both the near patch and the globe so they agree at the patch's rim.
-- `js/audio.js` (53 lines) — engine and impact audio, gated on first keypress as browsers require.
+- `js/audio.js` (62 lines) — engine and impact audio, gated on first keypress as browsers require.
 
 `window.game` is the debugging/test handle wired in `js/main.js`: `state()` returns a full readback
 (altitude over each body, radial velocity, speed, fuel, engine/SAS/warp state), and
