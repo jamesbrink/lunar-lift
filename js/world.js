@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import {
   RE, RM, MOON_RATE, EARTH_SPIN, PAD_UP, PAD_EAST, PAD_SCALE, PAD_POS, SKY_DAY, SKY_NULL, moonPos
 } from './constants.js';
-import { cumulusTex, cirrusTex, moonTex, earthTex, glowTex } from './textures.js';
+import { cumulusTex, cirrusTex, moonTex, earthTex, glowTex, flareTex } from './textures.js';
 import { toon, outline, PALETTE, RAMP_EARTH, RAMP_MOON, RAMP_CLOUD } from './toon.js';
 import {
   applyRelief, sampleGrid, reliefField, coastField, shoreDistance, fineEarth,
@@ -51,8 +51,7 @@ let spin = 0, cloudSpin = 0, cirrusSpin = 0, simT = 0;
 let earthField = null, moonField = null, shore = null;
 let earthPatch = null;
 let clouds = null;
-const _sky = new THREE.Color();
-const _hsl = { h: 0, s: 0, l: 0 };
+let _sky = new THREE.Color();
 const _moon = new THREE.Vector3();
 const _ld = new THREE.Vector3();
 const _cs = new THREE.Vector3();
@@ -88,6 +87,7 @@ export function initWorld(target) {
 
   const earthMap = earthTex(), cloudMap = cumulusTex(),
         cirrusMap = cirrusTex(), moonMap = moonTex(), glowMap = glowTex();
+  const flareMap = flareTex();
 
   /* ---- earth: the painted map under a three-band ramp. 384×192 segments (74 305 vertices) and
      displaced by the land height field from js/toonmap.js — oceans stay the perfect sphere,
@@ -158,6 +158,18 @@ export function initWorld(target) {
      actually hold a puff's shape; it costs the shadow box nothing. */
   cumulus.castShadow = false;
   cumulus.material.fog = false;   // same reason as the ground: a deck 2 km up is a planet-scale body
+  /* The mip chain averages alpha toward the global mean (~0.37 at deep mips), which is exactly what
+     turned the deck into a uniform veil above a few hundred km. Re-steepening the sampled alpha in
+     the fragment restores the cell edges — the same bias trick every planet renderer in a game engine
+     uses — while the `ca * 0.30` floor keeps a soft haze where the threshold eats itself, so from the
+     Moon the Earth still wears weather rather than going bare. This is NOT the dead `discard`
+     threshold of the old note: it operates on the mip-averaged value, not on a texel. */
+  cumulus.material.onBeforeCompile = (sh) => {
+    sh.fragmentShader = sh.fragmentShader.replace('#include <map_fragment>',
+      '#include <map_fragment>\n' +
+      '  float ca = diffuseColor.a;\n' +
+      '  diffuseColor.a = max(smoothstep(0.42, 0.66, ca), ca * 0.14);');
+  };
   scene.add(cumulus);
 
   cirrus = new THREE.Mesh(new THREE.SphereGeometry(RE + CIRRUS_ALT, 256, 128),
@@ -199,9 +211,12 @@ export function initWorld(target) {
         float t1 = -a - sqrt(disc), t2 = -a + sqrt(disc);
         float path = max(t2 - max(t1, 0.0), 0.0);                // km of air in front of this point
         float depth = clamp(path / 400.0, 0.0, 1.0);
-        // Hard day/night cut — that edge is cel and stays cel.
-        float day = dot(n, sunDir) > 0.02 ? 1.0 : 0.16;
-        float rim = pow(grazing, 2.4) * depth;
+        /* Dusk, not a knife. A binary day-cut on a 65 km-thin shell put a hard cyan edge on the
+           terminator with nothing above it — the band switched off across an angle the eye reads
+           as a rendering error. Three degrees of smoothstep is still cel: the night side keeps a
+           cold floor rather than going dark, so the limb reads as air on both sides. */
+        float day = 0.14 + 0.86 * smoothstep(-0.06, 0.20, dot(n, sunDir));
+        float rim = pow(grazing, 3.4) * depth;
         /* Continuous. The earlier six-band quantisation (floor(rim·6)/6 mixed in near grazing)
            is what read as four broad horizontal steps in the 20 km sky — the pad view crosses
            the whole grazing range in one frame, so posterising it posterises the sky. */
@@ -220,14 +235,15 @@ export function initWorld(target) {
      reference/cartoon-art-direction.md). ShaderMaterial: logdepthbuf chunks are mandatory. ---- */
   sky = new THREE.Mesh(new THREE.SphereGeometry(SKY_R, 32, 16), new THREE.ShaderMaterial({
     uniforms: {
-      zenith: { value: new THREE.Color(0x2a6cb2) },
-      band: { value: new THREE.Color(0xb2cfe2) },
+      zenith: { value: new THREE.Color(0x1e5cab) },
+      band: { value: new THREE.Color(0x9fc4de) },
       glowC: { value: new THREE.Color(0xfff0cf) },
       sunDir: { value: SUN_DIR.clone() },
       atmoMix: { value: 1 },
     },
     vertexShader: `
       varying vec3 vP;
+      #include <common>
       #include <logdepthbuf_pars_vertex>
       void main() {
         vP = (modelMatrix * vec4(position, 1.0)).xyz;
@@ -280,34 +296,46 @@ export function initWorld(target) {
   applyRelief(moon.geometry, 'moon');
   reliefField('moon').then((f) => { moonField = f; });
 
-  /* ---- starfield, well outside the moon's orbit ---- */
+  /* ---- starfield, well outside the moon's orbit ----
+     A real sky is a magnitude pyramid: many faint, few bright, and the bright ones are BIGGER.
+     One PointsMaterial cannot say that (one size for all 6 000), which is why every star used to
+     land as the same 2 px dot — "TV static". Three layers, one per size class, share the fade
+     clock in updateSky; only their radii differ. */
   {
-    const N = 6000, pos = new Float32Array(N * 3), col = new Float32Array(N * 3);
-    for (let i = 0; i < N; i++) {
-      const v = new THREE.Vector3().randomDirection().multiplyScalar(STAR_R);
-      pos.set([v.x, v.y, v.z], i * 3);
-      const b = 0.35 + Math.pow(Math.random(), 3) * 0.65;
-      const warm = Math.random() < 0.18;
-      col.set(warm ? [b, b * 0.8, b * 0.6] : [b * 0.9, b * 0.95, b], i * 3);
-    }
-    const geo = new THREE.BufferGeometry();
-    geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
-    geo.setAttribute('color', new THREE.BufferAttribute(col, 3));
-    /* The stars are faded by js/world.js:updateSky against the measured lightness of the sky, not by
+    const layers = [[4200, 1, 0.35, 0.38], [1500, 2, 0.55, 0.55], [140, 3, 0.85, 0.15]];
+    stars = [];
+    for (const [n, px, bmin, bspread] of layers) {
+      const pos = new Float32Array(n * 3), col = new Float32Array(n * 3);
+      for (let i = 0; i < n; i++) {
+        const v = new THREE.Vector3().randomDirection().multiplyScalar(STAR_R);
+        pos.set([v.x, v.y, v.z], i * 3);
+        const b = bmin + Math.random() * bspread;
+        const warm = Math.random() < 0.18;
+        col.set(warm ? [b, b * 0.8, b * 0.6] : [b * 0.9, b * 0.95, b], i * 3);
+      }
+      const geo = new THREE.BufferGeometry();
+      geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+      geo.setAttribute('color', new THREE.BufferAttribute(col, 3));
+      /* The stars are faded by js/world.js:updateSky against the measured lightness of the sky, not by
        the exponential fog. Fog was the original mechanism and it did not hold: at the pad the factor
        over 2 000 000 km is unity, and they still speckled the daylight sky, brightest along the lit
        limb band. `transparent` is set at construction so the opacity has something to blend with. */
-    stars = new THREE.Points(geo, new THREE.PointsMaterial({
-      size: 2, vertexColors: true, sizeAttenuation: false, transparent: true, opacity: 0, fog: false
-    }));
-    scene.add(stars);
+      const pts = new THREE.Points(geo, new THREE.PointsMaterial({
+        size: px, vertexColors: true, sizeAttenuation: false, transparent: true, opacity: 0, fog: false
+      }));
+      scene.add(pts);
+      stars.push(pts);
+    }
 
+    /* The sun is a DRAWN disc, not a lantern. The soft glowTex profile made every flare frame a
+       blurry white balloon with no edge; a crisp plate with a narrow corona is the cartoon sun,
+       and the same sprite still scales with SUN_ANG so it stays 0.53° of sky from any distance. */
     flare = new THREE.Sprite(new THREE.SpriteMaterial({
-      map: glowMap, color: 0xffe9c4, transparent: true, opacity: 0.9,
+      map: flareMap, color: 0xfff3d8, transparent: true, opacity: 0.95,
       blending: THREE.AdditiveBlending, depthWrite: false, fog: false
     }));
     flare.position.copy(PAD_POS).addScaledVector(SUN_DIR, SUN_DIST);
-    flare.scale.setScalar(SUN_DIST * SUN_ANG);            // ~0.53 deg disk, like the real sun
+    flare.scale.setScalar(SUN_DIST * SUN_ANG * 2.4);
     scene.add(flare);
   }
 
@@ -343,6 +371,12 @@ function setShadowBox(extent) {
 function updateShadowBox(pos) {
   moonPos(simT, _moon);
   const local = Math.min(pos.length() - RE, pos.distanceTo(_moon) - RM);
+  /* Above the relief patch's show altitude the only shadow receivers left are the bare body
+     meshes, and the vehicle-tracking box (±48 km lateral, ±150 km in depth) stops covering the
+     ground under them: fragments outside the map then sample the clamped edge and three paints
+     them shadowed — measured as straight-edged wedges across the ocean from 150 km up. Nothing
+     above this height casts a shadow worth catching either, so the pass comes off. */
+  sun.castShadow = local < 30;
   setShadowBox(THREE.MathUtils.clamp(SHADOW_MIN + local * 0.12, SHADOW_MIN, SHADOW_MAX));
 }
 
@@ -572,19 +606,27 @@ const SKY_SCALE = 80;            // km — visual atmospheric depth for the sky/
 export function updateSky(pos) {
   const alt = Math.max(0, pos.length() - RE);
   _skyMix = Math.exp(-alt / SKY_SCALE);
+  /* One part in eight of pale blue MIXED IN LINEAR SPACE already renders as 30 %-grey sRGB —
+     that is what turned orbit into a grey poster: at 163 km the old linear mix left the whole
+     sky measured-flat (69,82,90). The dome's alpha and the background therefore fall on the
+     SQUARE of the physical mix: the pad keeps its full sky, the mesosphere goes dark fast, and
+     above ~150 km there is nothing between the eye and the stars. The fog keeps the un-squared
+     clock — near-field haze is optical depth, not mood. */
+  const vis = _skyMix * _skyMix;
   if (sky) {
     sky.position.copy(pos);
-    sky.material.uniforms.atmoMix.value = _skyMix;
+    sky.material.uniforms.atmoMix.value = vis;
   }
-  _sky.copy(SKY_NULL).lerp(HORIZON, _skyMix);
+  _sky.copy(SKY_NULL).lerp(HORIZON, vis * 0.9);
   scene.background.copy(_sky);
   scene.fog.color.copy(_sky);
   scene.fog.density = 0.0038 * _skyMix * _skyMix;
-  /* Stars in proportion to how dark the sky actually is: zero against the daylight dome, coming
-   back through the climb as the background drops below a quarter lightness. */
-  const dark = THREE.MathUtils.clamp(1 - _sky.getHSL(_hsl).l / 0.28, 0, 1);
-  stars.material.opacity = dark;
-  stars.visible = dark > 0.01;
+  /* Stars come up against what the EYE measures, not the linear buffer: sRGB lightness. With
+     the squared background this crosses fully visible around 300 km and is exactly zero for
+     the whole pad day. */
+  const per = Math.pow(0.2126 * _sky.r + 0.7152 * _sky.g + 0.0722 * _sky.b, 1 / 2.2);
+  const dark = THREE.MathUtils.clamp((0.16 - per) / 0.10, 0, 1);
+  for (const s of stars) { s.material.opacity = dark; s.visible = dark > 0.01; }
 }
 
 export function getSkyMix() { return _skyMix; }
