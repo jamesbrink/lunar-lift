@@ -16,13 +16,15 @@ import * as THREE from 'three';
    has logarithmicDepthBuffer, the outline shaders below MUST include the logdepthbuf chunks, or the
    outline is written at the wrong depth and disappears behind the planet. */
 
-/* Earth gets four texels with the top two equal, which puts the only visible step at N·L = 0.375.
-   The three-stop version put its top step at 0.667 — with the MET-0 sun 38.7° up, flat ground sits at
-   N·L = sin(38.7°) = 0.625, a hair under that boundary, so every hill of a few degrees flipped
-   between 62 % and 100 % brightness along a straight isoline and the field around the pad read as a
-   fan of dark wedges. Ground shape has to come from the silhouette, not from a step that sits on the
-   flat parts. The two lower bands stay well off black: a coloured shadow side is most of what makes
-   cel shading read as cel shading. */
+/* Four texels, top two equal. Three.js samples the ramp at `dotNL · 0.5 + 0.5` (gradientmap_pars_
+   fragment), so an N-texel nearest ramp steps at dotNL = 2k/N − 1 — NOT at k/N. Four texels therefore
+   step at −0.5, 0 and +0.5: the whole sunward hemisphere is one bright band and every step sits out by
+   the terminator, where shading is supposed to change. The old three-texel ramp stepped at ±1/3, which
+   is also above flat ground's dotNL = sin(38.7°) = 0.625 at MET 0, so neither ramp is what made the
+   field around the pad read as a fan of wedges — that was `padAuthored` thresholding a 2.2 km lattice,
+   now fixed in js/toonmap.js. Recorded here because the arithmetic was checked in the wrong scale once
+   and a wrong comment outlives every wrong fix. The two lower bands stay well off black: a coloured
+   shadow side is most of what makes cel shading read as cel shading. */
 export const RAMP_EARTH = ramp([0.34, 0.72, 1.0, 1.0]);
 export const RAMP_MOON = ramp([0.20, 0.58, 1.0]);
 export const RAMP_HARD = ramp([0.30, 0.72, 1.0]);     // vehicle: keep the lit side bright

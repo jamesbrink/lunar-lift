@@ -115,23 +115,31 @@ state differs from the ship's real trajectory by ~100 km, which would make the r
   silent GL error: the planet sampled one ocean-blue texel forever while `planetCanvas()` — the CPU
   canvas behind it — was perfect, the orbital map drawn from it was perfect, and `needsUpdate` "fixed"
   nothing. Copy into the existing surface (`drawImage`) instead of replacing `texture.image`.
-- **A cel ramp step must not sit where flat ground lands.** `RAMP_EARTH` was `[0.24, 0.62, 1.0]`, whose
-  top boundary is at N·L = 0.667, and with the MET-0 sun 38.7° up a flat field sits at
-  N·L = sin(38.7°) = 0.625 — so every hill of a few degrees flipped between 62 % and 100 % brightness
-  along a straight isoline, and the field around the pad read as a fan of dark wedges. The ramp is now
-  four texels with the top two equal, putting the only visible step at 0.375. Check the sun table in
-  `docs/reference/launch-site.md` against the ramp boundaries before changing either.
+- **Read a cel ramp in the scale three actually samples it.** `gradientmap_pars_fragment` computes
+  `coord = dotNL · 0.5 + 0.5`, so an N-texel nearest ramp steps at **N·L = 2k/N − 1**, not at k/N. The
+  old three-texel `[0.24, 0.62, 1.0]` stepped at ±1/3, and with the MET-0 sun 38.7° up a flat field sits
+  at sin(38.7°) = 0.625 — already in the top band, so the ramp was never what made the field around the
+  pad read as a fan of dark wedges. It was `padAuthored` thresholding a 2.2 km noise lattice, sampled by
+  a mesh whose vertex spacing grows from 25 m under the vehicle to 3 km at its rim: a per-sample hard
+  decision faster than the mesh aliases into straight-edged wedges. `RAMP_EARTH` is four texels with the
+  top two equal (steps at −0.5, 0, +0.5 — every step out by the terminator), and a colour source for the
+  ground must vary slower than the coarsest vertex on the cap. Check the sun table in
+  `docs/reference/launch-site.md` against the boundaries before changing either.
 - **A big transparent sheet may not have triangles that span several uv repeats.** Mip derivatives are
-  computed per triangle, so a 10 km cap cell carrying a 64 km tiling picked a different mip level per
-  cell, and the ground filled with straight-edged wedges of the tile's mip average — visually the same
-  catastrophe as the ramp. `js/clouds.js` uses 390 m per texel so the derivative stays near level 0.
+  computed per triangle, so a cap cell carrying a coarse tiling picks a different mip level per cell and
+  the surface fills with straight-edged wedges of the tile's mip average. The deck avoids it at 390 m per
+  texel; the ground shade cannot (a 64 km cap seen from 5 km away minifies hard no matter the texel size),
+  so `js/clouds.js` gives the shade its own 64×64 box-filtered copy of the same field with
+  `generateMipmaps = false` and keeps its radius to ground that resolves.
 - **Weather needs two scales, and they must share a uv field.** A cloud texture wrapped on the planet is
   39 km per texel at 1024×512; the sky from horizon to 30° elevation above the pad spans 0.00017 in u,
   i.e. **0.18 of one texel** — measured, not estimated, and it is why no blend mode, uv fix or row-order
   fix ever put a cumulus overhead. `js/clouds.js` streams a 440 km cap at 7 km altitude with the tile
-  repeated across it, and the ground shade is the *same tile at the same uv*, offset anti-sunward by deck
-  height over tan(elevation): a different scale would put shadows under clear sky. The shade cap shrinks
-  to 70 km instead of changing scale. Both planet-scale decks keep `castShadow = false` — at 2 and 9 km a
+  repeated across it, and the ground shade is the *same field at the same uv*, offset anti-sunward by deck
+  height over tan(elevation): a different scale would put shadows under clear sky. The shade cap gives up
+  at 32 km — ground beyond that is a grazing sliver — and samples a box-filtered, mip-free copy of the
+  field, because shrinking the radius is what keeps it honest where changing scale would not. Both
+  planet-scale decks keep `castShadow = false` — at 2 and 9 km a
   low sun drags their silhouettes hundreds of kilometres, and the ±136 km tower-resolution shadow box
   cuts them into slabs that read as architecture. See `docs/reference/painted-planets.md`.
 - **Camera collision is applied twice per frame** — to `desired` and again to the interpolated
@@ -139,6 +147,16 @@ state differs from the ship's real trajectory by ~100 km, which would make the r
   this the camera cut 6 019 km through the Earth whenever `reset()`, `teleport()` or `ff()` moved the
   vehicle to the far side. Measured after the fix: the closest the camera gets to the centre during a
   full crossing is `RE + 0.02`, exactly the skin.
+- **Pad exhaust is a shape problem before it is a physics problem.** Parcels leave the F-1s at
+  ~2.9 km/s, and if the tangential component of the trench hit survives whole, the deflectate paints a
+  200 m field of discrete glowing domes around the pad — measured at 264 live parcels with sprites up to
+  72 m, which is what "rocket exhaust needs tons of work" was about. Three things fixed it, and none of
+  them is the shader: bleed the tangential to 0.12 on Earth (0.8 on the Moon, where nothing bleeds it and
+  Apollo's ejecta really did run far), floor a deflected parcel to the smoke band after 0.04 s so the
+  young sheet climbing out of the trench keeps its fire while the far field goes grey, and buy density
+  from parcel count (900/s on the S-IC, entrainment ceiling 16 m) instead of from sprite size. Frame cost
+  after the change, full throttle on the pad with 1 498 live parcels over 120 rAF deltas: median 16.7 ms,
+  p90 17.7, p99 18.3.
 - **A non-finite value in a vertex colour attribute renders as a black band, and nothing else you do
   will remove it.** A NaN in `attributes.color` propagates through the toon lighting into a NaN fragment,
   so the pixel goes black and ignores material swaps, `castShadow`/`receiveShadow`, `normalScale`,

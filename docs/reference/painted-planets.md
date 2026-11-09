@@ -60,8 +60,18 @@ Checked against named places on the painted canvas — Sahara `desert`, Amazon `
 Gulf of Mexico `ocean`, Antarctic coast `shelf`. Tibet reading as desert rather than bare plateau is
 the one known lie, and at cartographic scale it is the correct colour.
 
-Resulting cover: deep ocean 46.7 %, ice 10.5 %, ocean 9.1 %, shelf 8.4 %, desert 6.4 %, forest 5.4 %,
-boreal 4.0 %, grass 3.0 %, coast stroke 3.0 %, rock 1.6 %, ice edge 0.9 %.
+**A per-texel decision is not enough, because a texel is 19.5 km.** The signals are box-blurred seven
+texels before they reach the table above, and the resulting *label* then gets a plurality vote — 5×5, then
+3×3, land texels only, ties keeping whatever the texel already was. Without the vote, wherever a value
+sits on a threshold adjacent texels flip between grass and forest, and 19.5 km flips with hard edges are
+what the ground under the vehicle is made of: the same landscape, rendered as a checkerboard. Voting on
+the label rather than the signal is what gives a biome spatial extent, which is the difference between a
+map and noise. Water is outside the vote — its edge comes from the cleaned mask, and the coastline is the
+one boundary that must stay hard.
+
+Resulting cover, counted on the painted canvas (32 distinct values, the rest being launch-site bake
+blends): deep ocean 52.0 %, ice 10.5 %, shelf 7.0 %, ocean 6.8 %, desert 6.5 %, forest 5.2 %, boreal
+4.1 %, grass 3.3 %, coast stroke 1.5 %, rock 1.3 %, tundra 1.0 %, ice edge 0.9 %.
 
 ## The Moon
 
@@ -154,7 +164,7 @@ with the dateline seam's normals welded so the seam does not catch the light.
 Close to the ground the far grid's 10-40 km texels are useless, so the Earth has a second surface that
 follows the vehicle: **one mesh, 161 × 161 vertices, fifth-power radial warp** — roughly 25 m spacing
 under the vehicle stretching out to a rim at ±220 km. Hidden above 30 km altitude; re-centred in place
-after 4 km of ground travel; otherwise the per-frame cost is one altitude test and a dot product, with
+after 12 km of ground travel; otherwise the per-frame cost is one altitude test and a dot product, with
 zero allocation.
 
 The rim is not cosmetic. The horizon from a camera 0.184 km up is `sqrt(2 · RE · alt)` = **48.4 km**,
@@ -164,6 +174,15 @@ far mesh by construction (positive-only fine octaves plus an 8 m lift), and the 
 won with `polygonOffset` rather than hope. The vertex decoration that used to sit on this mesh — a detail
 mottle fading out beyond 25 km — is gone; what is left is flat colour matching the painted biome at that
 spot (see the relief section above, and `cartoon-art-direction.md`).
+
+**Ground colour must vary slower than the mesh that samples it.** This cap goes from 25 m under the
+vehicle to 3 km at the rim, so any colour source with a hard per-sample decision at a few kilometres —
+a thresholded lattice, most commonly — aliases into a fan of straight-edged wedges radiating from the
+pad, and a *soft* decision on a value-noise lattice is worse in a subtler way: bilinear interpolation
+with a clamped threshold draws a literal straight line across the plain. Both were tried here and both
+were the "horrific" verdict. The near level therefore samples a blurred copy of the paint
+(`canvasDataSoft`: land-weighted box mean, ~160 km, built after the launch-site bake so the pad's own
+tones are inside it), and the authored site is one flat brush of grass with its zones carrying the shape.
 
 Shorelines in the near level come from a two-sided chamfer signed-distance transform on the 2048 × 1024
 mask, taken through a 60 m `smoothstep`: curve-true, and band-limited so it cannot ring.
@@ -178,8 +197,9 @@ The plate is gone. Five authored shore lines run NNE-SSW through the site — ma
 River, Merritt Island, Banana River, cape, Atlantic — blended into the global signed-distance field over
 0.6° and **baked into the painted canvas at the same weight**, so the near level and the globe from orbit
 show the same shapes in the same tones. The pad's own neighbourhood is held exactly flat (inside 90 km,
-feathered to 250 km) because a launch mount is not allowed to sit on a slope, and the pad's texel bakes
-to grass, `rgb(58, 104, 60)`.
+feathered to 250 km) because a launch mount is not allowed to sit on a slope, and the pad's texel bakes to
+grassland `rgb(120, 154, 84)` with a beach band of `rgb(212, 184, 120)` and shelf tones in the lagoons —
+measured on the canvas at 28.45° N, 80.60° W.
 
 What did *not* happen is moving the pad. `PAD_POS` is physics ground truth and
 `docs/reference/mission-design.md` quotes runs taken with it, so the coastline was corrected to the

@@ -84,16 +84,17 @@ Repo-wide convention (see `docs/reference/README.md`): **km, s, tonnes, kN**.
 - `js/terrain.js` (269 lines) — the near level: one 161 × 161 mesh warped radially, ~25 m spacing
   under the vehicle stretching to a ±220 km rim, hidden above 30 km and re-centred in place after
   ground travel, so the ground the vehicle touches is always the authored ground.
-- `js/toonmap.js` (735 lines) — where the planets are *painted*, once at boot, from data rather than
+- `js/toonmap.js` (921 lines) — where the planets are *painted*, once at boot, from data rather than
   from imagery: the specular sheet is read as a land mask and the diffuse sheet as a biome signal, and
   the result is a flat cartoon surface map — ocean, shelf, a hard coastline stroke, grass, forest,
   desert, tundra, boreal, ice — plus the relief fields, the authored Merritt Island shore lines and the
   cloud sheets. No photographic pixel reaches the screen. Look and its limits:
   `docs/reference/painted-planets.md` and `docs/reference/cartoon-art-direction.md`.
-- `js/toon.js` (117 lines) — the cel shading itself: `toon()` materials on a quantising ramp
-  (`RAMP_EARTH`'s step is placed so flat ground never straddles it — see `agents.md`), `PALETTE`, and
+- `js/toon.js` (119 lines) — the cel shading itself: `toon()` materials on a quantising ramp
+  (`RAMP_EARTH` is four texels with the top two equal, so its steps sit at N·L = −0.5, 0, +0.5 — out by
+  the terminator; three samples the ramp at `dotNL · 0.5 + 0.5`, see `agents.md`), `PALETTE`, and
   `outline()` for the single dark edge on hardware.
-- `js/vehicle.js` (941 lines) — the three rocket-stage meshes, staging visuals, LES jettison, debris,
+- `js/vehicle.js` (952 lines) — the three rocket-stage meshes, staging visuals, LES jettison, debris,
   the gimballing flame, the thrust/velocity arrows drawn beside the vehicle (`initNavVectors` /
   `updateNavVectors`), and the exhaust: a 1 600-slot pool of physics parcels spawned on the real bell
   exit discs, integrated against drag, gravity and the ground/pad/hull colliders, composited in one
@@ -126,10 +127,11 @@ Repo-wide convention (see `docs/reference/README.md`): **km, s, tonnes, kN**.
   sprite, deterministic so the weather is the same every run. The photographic diffuse/normal/specular maps
   under `assets/` are inputs to the painter in `js/toonmap.js` (mask and biome signal); the normal
   map is no longer bound to any surface, per `docs/reference/cartoon-art-direction.md`.
-- `js/clouds.js` (248 lines) — weather at human scale: a 440 km cloud cap at 7 km altitude and a
-  140 km shade cap, both re-centred under the vehicle, both sampling one tileable puff field at 390 m
-  per texel so the shadow on the ground is the shape of the cloud above it, offset anti-sunward by deck
-  height over tan(elevation). The planet-scale decks cannot do this — one of their texels is 39 km and
+- `js/clouds.js` (284 lines) — weather at human scale: a 440 km cloud cap at 7 km altitude and a
+  64 km shade cap, both re-centred under the vehicle. The deck samples one tileable puff field at 390 m
+  per texel; the shade samples the same field box-filtered to 64 × 64 with no mip chain, because a cap
+  that size minifies hard and mip selection is per triangle. Shadows land under their clouds, offset
+  anti-sunward by deck height over tan(elevation). The planet-scale decks cannot do this — one of their texels is 39 km and
   the whole sky above the pad spans a fifth of one. Why it has to exist: `agents.md`.
 - `js/audio.js` (53 lines) — engine and impact audio, gated on first keypress as browsers require.
 
