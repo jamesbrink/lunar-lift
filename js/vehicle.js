@@ -228,7 +228,8 @@ stages.forEach(st => {
 const NP = 1600;
 const MAX_SUB = 30;                       // dt/MAX_SUB ≈ 33 ms per substep at the 1 s clamp
 const BAL0 = 0.018, BAL_CAP = 0.055;      // m²/kg normalised as BAL0/r² (r = parcel radius, m)
-const R_CAP = 38;                         // m: entrainment growth ceiling (a ~75 m sprite reads at 900 m)
+const R_CAP = 16;                         // m: entrainment ceiling. Density has to come from parcel COUNT;
+                                        // at 38 m the few live parcels overlapped into soft lanterns around the pad
 const PAD_RP2 = (455 * PAD_SCALE) * (455 * PAD_SCALE);   // pad complex footprint, km²
 /* Pad ground as the exhaust actually meets it: the flame trench is a bowl (its floor is BELOW the
    map sphere — the F-1 exit plane itself sits below it), and around the trench a low berm stands
@@ -439,7 +440,7 @@ function bellA(x, y, z, dx, dy, dz, rb, th) {
   return { x, y, z, dx, dy, dz, rb, th, u1x: _bb.x, u1y: _bb.y, u1z: _bb.z, u2x: _ba.x, u2y: _ba.y, u2z: _ba.z };
 }
 const BELL_SETS = [
-  { ve: SPECS[0].isp * 9.81 / 1000, rate: 300, tailZ: -42, hullR: 3.63, bells: (() => {
+  { ve: SPECS[0].isp * 9.81 / 1000, rate: 900, tailZ: -42, hullR: 3.63, bells: (() => {
       const a = [bellA(0, 0, -42, 0, 0, -1, 1.19, 0.28)];
       for (let i = 0; i < 4; i++) {
         const an = i * Math.PI / 2 + Math.PI / 4, c = Math.cos(an), s = Math.sin(an);
@@ -449,14 +450,14 @@ const BELL_SETS = [
                      c * Math.sin(0.1), s * Math.sin(0.1), -Math.cos(0.1), 1.15, 0.28));
       }
       return a; })() },
-  { ve: SPECS[1].isp * 9.81 / 1000, rate: 170, tailZ: -11.8, hullR: 3.57, bells: (() => {
+  { ve: SPECS[1].isp * 9.81 / 1000, rate: 520, tailZ: -11.8, hullR: 3.57, bells: (() => {
       const a = [bellA(0, 0, -11.8, 0, 0, -1, 0.72, 0.21)];
       for (let i = 0; i < 4; i++) {
         const an = i * Math.PI / 2 + Math.PI / 4, c = Math.cos(an), s = Math.sin(an);
         a.push(bellA(c * 1.44, s * 1.44, -11.8, 0, 0, -1, 0.70, 0.21));
       }
       return a; })() },
-  { ve: SPECS[2].isp * 9.81 / 1000, rate: 70, tailZ: 6.8, hullR: 2.42, bells: [bellA(0, 0, 6.8, 0, 0, -1, 0.85, 0.30)] },
+  { ve: SPECS[2].isp * 9.81 / 1000, rate: 240, tailZ: 6.8, hullR: 2.42, bells: [bellA(0, 0, 6.8, 0, 0, -1, 0.85, 0.30)] },
 ];
 
 /* Emission bookkeeping. rate is parcels/s at full throttle — a visual proxy for ṁ ∝ thrust·throttle,
@@ -497,10 +498,16 @@ function groundHit(vx, vy, vz, nx, ny, nz, frx, fry, frz, moon) {
     const s = -vn;                                                  // impact speed into the surface
     const k = 1 / tl;
     const out = (moon ? 0.75 : 0.55) * s;                           // impact → outward flow
+    /* Tangential bleed. It used to survive the hit whole — `tx * (1 + out·k)` — so deflectate left
+       the trench at close to exhaust speed and painted a 200 m field of discrete glowing domes around
+       the pad. Air, the trench walls and the berm do not allow that: the flow arrives supersonic and
+       leaves as a ground-hugging sheet at a fraction of the speed. On the Moon nothing bleeds it, which
+       is exactly why Apollo's ejecta ran far. */
+    const keep = moon ? 0.8 : 0.12;
     /* Lift is bounded: real deflectate rises by entrainment, not by keeping 16% of Mach-9
        momentum — uncapped this launched the pad blast 2 km into the sky. */
     const up = Math.min(s * (moon ? 0.04 : 0.08), moon ? 0.03 : 0.05);
-    rx = tx * (1 + out * k) + nx * up;                              // tangential survives + re-aimed impact + lift
+    rx = tx * (keep + out * k) + nx * up;                           // bled tangential + re-aimed impact + lift
     ry = ty * (1 + out * k) + ny * up;
     rz = tz * (1 + out * k) + nz * up;
     _hit = 1;
@@ -531,9 +538,9 @@ function spawnPlume(set, pos, quat, vel, throttle, simDt) {
   moonPos(getSimTime(), _mo);     // so a burn right after an ff() jump picks the right body underneath
   const onMoon = pos.distanceToSquared(_mo) < SOI2;
   const veEff = set.ve * (0.45 + 0.55 * throttle);     // throttle sets exit velocity, not sprite size
-  emitAcc += set.rate * throttle * simDt;              // ... and mass flow
+  emitAcc += set.rate * throttle * simDt;              // parcels/s: the mass flow at rendering resolution
   let n = emitAcc | 0; emitAcc -= n;
-  if (n > 70) n = 70;
+  if (n > 240) n = 240;                     // 240 = the busiest set × the warp clamp's frame budget
   const jit = veEff * (onMoon ? 0.02 : 0.05);
   const bells = set.bells, nb = bells.length;
   for (let c = 0; c < n; c++) {
@@ -732,7 +739,11 @@ function fillBuffers() {
          touches "ground" within one step of birth (that is what a flame trench is), and the old
          fixed 0.12 s floor erased the whole deflected flame sheet, leaving the pad with a puddle.
          The bright sheet climbing out of the trench is heat, and heat now decides. */
-      if (pSmoke[i] && q < 0.35) b = pMoon[i] ? 4 : (b < 3 ? 3 : b);
+      if (pSmoke[i] && pAge[i] > 0.04 && q < 0.62) b = pMoon[i] ? 4 : (b < 3 ? 3 : b);
+      /* The age gate is what separates the two: the sheet climbing out of the trench is young and
+         stays flame, anything that has had a tenth of a second to mix with air is smoke. Without it the
+         pad has no fire at all; with the old 0.35 threshold it had nothing but fire, because ember
+         glows and the far field read as a ring of lanterns. */
       const c = BAND_C[b]; cr = c[0]; cg = c[1]; cb = c[2];
       const fade = Math.min(1, pAge[i] * 8 + 0.05) * Math.min(1, pLife[i] * pInv[i] * 2.5 + 0.05);
       a = BAND_A[b] * fade; ad = BAND_G[b] * fade;
