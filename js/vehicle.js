@@ -587,7 +587,10 @@ function spawnPlume(set, pos, quat, vel, throttle, simDt) {
     pVel[i3] = _svv.x + vel.x + (Math.random() - .5) * jit;
     pVel[i3 + 1] = _svv.y + vel.y + (Math.random() - .5) * jit;
     pVel[i3 + 2] = _svv.z + vel.z + (Math.random() - .5) * jit;
-    pR[i] = 0.8 + Math.random() * 0.8;
+    /* `rate` is a rendering-resolution knob, not mass flow (that lives in js/physics.js), so dropping
+       the throttle drops the parcel count and the trail came out as separated beads at 40 %. Give the
+       survivors proportionally more radius: the same exhaust column, drawn with fewer sprites. */
+    pR[i] = (0.8 + Math.random() * 0.8) * (1 + (1 - throttle) * 1.3);
     /* low throttle also shortens the parcel's life — slow flow does not carry soot to orbit.
        On the Moon the multiplier buys the long, bright, lingering spray of Apollo 11's ascent. */
     const life = (1.1 + Math.random() * 1.2) * (0.6 + 0.4 * throttle) * (onMoon ? 2.2 : 1);
