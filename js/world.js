@@ -404,7 +404,17 @@ export function initWorld(target) {
     }));
   moon.material.fog = false;      // ground haze must not eat the moon or the stars
   moon.position.copy(_moon);
-  moon.castShadow = true; moon.receiveShadow = true;
+  /* Round 6: the Moon no longer CASTS shadow. With castShadow on, the relief-displaced sphere and
+     the +4 m patch are both caster and receiver inside the ±48 km vehicle box, and at the 23 m
+     shadow texel (4096² over ±48 km) plus a 28° sun, every lit surface inside the box compared as
+     self-shadowed: measured 2026-11-09 at site (−0.536,−0.841,−0.065) t=2980800 — the whole
+     near field rendered dark navy (the RAMP_MOON 0.16–0.26 band over grey regolith) inside the
+     box edge while the far sphere beyond it lit to 0.86, a hard diagonal boundary across the
+     frame at pitch −32. Clearing castShadow on the moon (A/B: only toggle that survived the fix)
+     restores the lit read. Vehicle→moon and Earth→moon (eclipse) shadows are unaffected: their
+     casters are the vehicle and the Earth, not the moon. Relief self-shading lives in the vertex
+     normals and the ramp, which is what the cartography is anyway. */
+  moon.castShadow = false; moon.receiveShadow = true;
   scene.add(moon);
   applyRelief(moon.geometry, 'moon');
   reliefField('moon').then((f) => { moonField = f; });
@@ -419,6 +429,24 @@ export function initWorld(target) {
      land as the same 2 px dot — "TV static". Three layers, one per size class, share the fade
      clock in updateSky; only their radii differ. */
   {
+    /* The point sprite is a painted 32×32 radial falloff, not the default square. Review 5 flagged
+       "a few star sprites render as hard squares" — the 2 px and 3 px layers at 600 km, where a
+       6 px square with hard edges reads as a glitch and not a star. The falloff (α 1 → 0 at r 15,
+       linear-ish with a soft knee) keeps the core near-solid so faint stars do not lose half their
+       flux; the corners, which are what looked square, are gone. Created at final size once — the
+       placeholder-swap trap in AGENTS.md does not apply, and SRGBColorSpace matches every other
+       painted texture here. */
+    const sc = document.createElement('canvas'); sc.width = sc.height = 32;
+    {
+      const g = sc.getContext('2d');
+      const rg = g.createRadialGradient(16, 16, 0, 16, 16, 15.5);
+      rg.addColorStop(0, 'rgba(255,255,255,1)');
+      rg.addColorStop(0.55, 'rgba(255,255,255,0.92)');
+      rg.addColorStop(1, 'rgba(255,255,255,0)');
+      g.fillStyle = rg; g.fillRect(0, 0, 32, 32);
+    }
+    const starTex = new THREE.CanvasTexture(sc);
+    starTex.colorSpace = THREE.SRGBColorSpace;
     const layers = [[4200, 1, 0.35, 0.38], [1500, 2, 0.55, 0.55], [140, 3, 0.85, 0.15]];
     stars = [];
     for (const [n, px, bmin, bspread] of layers) {
@@ -434,11 +462,12 @@ export function initWorld(target) {
       geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
       geo.setAttribute('color', new THREE.BufferAttribute(col, 3));
       /* The stars are faded by js/world.js:updateSky against the measured lightness of the sky, not by
-       the exponential fog. Fog was the original mechanism and it did not hold: at the pad the factor
-       over 2 000 000 km is unity, and they still speckled the daylight sky, brightest along the lit
-       limb band. `transparent` is set at construction so the opacity has something to blend with. */
+         the exponential fog. Fog was the original mechanism and it did not hold: at the pad the factor
+         over 2 000 000 km is unity, and they still speckled the daylight sky, brightest along the lit
+         limb band. `transparent` is set at construction so the opacity has something to blend with. */
       const pts = new THREE.Points(geo, new THREE.PointsMaterial({
-        size: px, vertexColors: true, sizeAttenuation: false, transparent: true, opacity: 0, fog: false
+        size: px, map: starTex, vertexColors: true, sizeAttenuation: false,
+        transparent: true, opacity: 0, fog: false
       }));
       scene.add(pts);
       stars.push(pts);

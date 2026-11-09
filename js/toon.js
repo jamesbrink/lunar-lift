@@ -26,11 +26,16 @@ import * as THREE from 'three';
    and a wrong comment outlives every wrong fix. The two lower bands stay well off black: a coloured
    shadow side is most of what makes cel shading read as cel shading. */
 export const RAMP_EARTH = ramp([0.34, 0.72, 1.0, 1.0]);
-/* Six texels so a band edge lands exactly on dotNL = 0 (steps at 2k/6 − 1): the terminator gets a
-   0.62 dusk strip on the lit side and a 0.34 pre-dusk on the dark side, so the Moon's day/night
-   line sweeps visibly across the painted bowls instead of hiding inside one mid tone the way the
-   old three-texel ramp did. */
-export const RAMP_MOON = ramp([0.16, 0.26, 0.34, 0.62, 1.0, 1.0]);
+/* Eight texels, steps at dotNL = 2k/8 − 1 = −0.75, −0.5, −0.25, 0, +0.25, +0.5. The old six-texel
+   ramp ([0.16 .26 .34 .62 1 1], steps at ±1/3 and ±2/3) put flat ground under the 28° skim-frame
+   sun at dotNL = sin 28° = 0.469 INSIDE the top 1.0 band: a wall had to tilt 22° off flat to cross
+   a step, and 3 km bowls with 300 m rims tilt ~11°, so every crater sat in one band and the whole
+   foreground read as smooth smoke (review 5, frame 12 "featureless smooth gradient"). The eighth-
+   texel ramp steps every 0.25 dotNL ≈ 14° of tilt: sunward rims reach the 1.0 band, lee walls drop
+   to 0.62, and bowls shade in silhouette. The terminator behaviour the six-texel ramp was built
+   for survives untouched — dotNL = 0 is still exactly a step, with the 0.62 dusk strip on the lit
+   side and 0.34 pre-dusk on the dark. Two top texels equal keeps the noon look identical. */
+export const RAMP_MOON = ramp([0.16, 0.26, 0.34, 0.62, 0.86, 1.0, 1.0, 1.0]);
 export const RAMP_HARD = ramp([0.30, 0.72, 1.0]);     // vehicle: keep the lit side bright
 /* Cloud gets a near-continuous six-texel ramp. Two texels stepped once across the whole sphere
    (dotNL = 0), which chorded a hard light/dark edge over the ocean at every non-noon sun and was

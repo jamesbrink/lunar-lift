@@ -26,7 +26,13 @@ import {
    clamps every index, and the stores guard with Number.isFinite as the last line of defence. */
 
 const HALF = 220;                     // km to the rim: horizon is covered to alt = HALF²/2RE ≈ 3.8 km, and beyond that the rim is sub-pixel
-const SEG = 160;                      // 161×161 vertices, radial warp: ~25 m centre, ~3 km rim
+/* Round 6: 320. At 160 the mid-field of a 2.6 km skim was mush — step reaches 1.2 km at 10 km
+   downrange and 2.6 km at 20 km, so every 3 km bowl past ~12 km was sampled by fewer than two
+   vertices and smeared (review 5 frames 11/12 "featureless"; the blur wall is visible at exactly
+   that radius). Doubling SEG halves every step: 1.5 km craters resolve to ~25 km downrange, the
+   rebuild cost quadruples (~1.2 ms → ~5 ms measured below) and only fires every RECENTER = 12 km
+   of ground travel. */
+const SEG = 320;                      // 321×321 vertices, radial warp: ~12 m centre, ~1.4 km rim
 const COLS = SEG + 1;
 const FINE_FROM = 8, FINE_TO = 30;    // km: fine octaves exist inside this radius
 const LIFT = 0.008;                   // km above the globe mesh, constant — never negative, polygonOffset wins the ties
@@ -207,21 +213,41 @@ function rebuildMoon(p) {
       const g = p.rel ? sampleGrid(p.rel, u, v) : 0;
       pxColor(p.px, u, v, _c1);
       const lum = 0.2126 * _c1.r + 0.7152 * _c1.g + 0.0722 * _c1.b;
-      /* Pit attenuation by local mesh spacing. The nano-pit lattice (250 m, js/toonmap.js) is
-         sampled by a mesh whose step grows from 25 m under the vehicle to 3 km at the 220 km rim
-         (2·HALF/SEG·warp′ = 0.0256 + 13.6·t⁴ km): a sub-lattice vertex samples white noise, and
-         the radial warp draws that noise as radial streaks — measured in the first skim capture,
-         the starburst across the whole far field. Full amplitude while the step is below ~140 m
-         (t ≤ 0.30, where 250 m pitting resolves), zero by ~880 m (t ≥ 0.50), smoothstep between;
-         the 700 m octave follows it down rather than keep its own gate, because at 880 m vertices
-         both octaves alias along the same radial lines. The mid-tier craters are NOT faded —
-         3 km bowls outlive any of this. (2026-11-09, skim frame at 2.6 km: before the ramp the
-         far field read as a spoke starburst; the near 8 km kept its pockmarked regolith.) */
+      /* Pit attenuation by local mesh spacing. Per-vertex step of this mesh (SEG = 320):
+         2·HALF/SEG·d/dt[t·(A + (1−A)t⁴)] = 0.0128 + 6.81·t⁴ km; distance from centre
+         220·(0.0093t + 0.9907t⁵) km. A noise octave may only live where the step resolves it
+         (lattice ≥ 2·step); below that a vertex samples white noise and the radial warp draws it
+         as radial streaks. FINE octaves (250 m + 700 m lattices): full to step 140 m (t 0.371,
+         r 2.5 km), zero at 880 m (t 0.598, r 20.1 km). COARSE octave (2.2 km lattice,
+         js/toonmap.js round 6): full to 1.1 km (t 0.632, r 25.0 km), zero at 2.2 km (t 0.753,
+         r 65.7 km) — its own ramp, so pitting still covers the visible foreground of the 2.6 km
+         skim (horizon 95 km), which review 5 measured as featureless, and it dies exactly where
+         it would alias. Mid-tier craters (≥3 km bowls) are not faded at all. (2026-11-09: before,
+         whole-frame starburst; round-5 fix, featureless foreground; this is the resolved middle.) */
       const wt = Math.max(Math.abs(ix / SEG * 2 - 1), Math.abs(1 - iy / SEG * 2));
-      const pa = wt <= 0.30 ? 1 : wt >= 0.50 ? 0
-        : (1 - ((wt - 0.30) / 0.20) ** 2 * (3 - 2 * (wt - 0.30) / 0.20));
-      const d = moonPatchDetail(u, v, lum, sun, pa);
-      const h = g + d.h + 0.004;                 // a hair above the far mesh; polygonOffset wins ties
+      const smooth = (a, x, b) => { const s = (x - a) / (b - a); return s <= 0 ? 1 : s >= 1 ? 0 : 1 - s * s * (3 - 2 * s); };
+      const pa = smooth(0.371, wt, 0.517);     // zero at 500 m step (r 9.2 km): the ±27 % octave must die before the 250 m lattice aliases into the starburst
+      const pa2 = smooth(0.591, wt, 0.703);    // 1.6 km lattice: full ≤ 800 m step (r 18.7 km), zero at 1.6 km (r 38.5 km)
+      const d = moonPatchDetail(u, v, lum, sun, pa, pa2);
+      /* Vertical relief exaggeration ×2.6, tapered to ×1 over the outer 20 % of the cap. A 3 km bowl
+         with a 300 m rim tilts ~11° — under a 28° sun that is 0.28 ≤ dotNL ≤ 0.65, inside ONE ramp
+         band, and it renders as an albedo smudge (review 5 frames 11/12, "flat polygon patches").
+         At ×2.6 the lee wall tilts 28°, crosses the 0.25 step and self-shadows; the taper to ×1
+         across wt 0.8→1.0 kills the seam against the far mesh, whose baked relief excludes these
+         small bowls (34 km/texel cannot hold them) and whose vertices physics lands on — physics
+         never touches the patch, so this is a display-only exaggeration. */
+      const exag = 1 + 1.6 * (1 - smooth(0.8, wt, 1.0));
+      /* Round 6: the lift is 80 m, not 4 m — the 4 m patch was BURIED almost everywhere. The far
+         mesh is the relief grid displaced at its own ~10.7 km vertices and chorded between them;
+         over 34 km-scale grid cells with up to 2 km amplitude the chord overshoots the true field
+         by up to ~A·(10.7/34)²·π²/8 ≈ 20–40 m in every concave region. Wherever the chord beat
+         g + 4 m the sphere drew IN FRONT of the patch and the foreground rendered as one magnified
+         canvas texel — measured pixel sd 0.0001 over an 800×170 px near-ground box (zero variance:
+         not flat lighting, a buried mesh), and a ray through pixel (700,800) hit the SPHERE before
+         the patch at the same 0.8 km. This is why every skim frame ever captured read as smooth
+         smoke — none of them ever showed the patch. 80 m clears the worst chord sag; the physics
+         never touches the patch (it lands on RM exactly), so the extra lift is display-only. */
+      const h = g + d.h * exag + 0.08;
       pos[k] = vx * (RM + h); pos[k + 1] = vy * (RM + h); pos[k + 2] = vz * (RM + h);
       /* Deviation gain (measured 2026-11-09, round 5): the old 1 + 1.6·(tone−1) ran against a base
          that itself sat at sRGB 0.80 under the day ramp — 34 % of vertices clipped above 0.90, so

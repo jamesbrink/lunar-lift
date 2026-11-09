@@ -72,6 +72,16 @@
      the strip instead of moving the numeral: one number, zero DOM churn. */
   #desc{left:50%;bottom:192px;transform:translateX(-50%);font-family:var(--mono);font-size:15px;display:none;text-align:center;
     color:var(--ob-fg);text-shadow:var(--ob-halo)}
+  /* Round-6: the centre banners carry their OWN background now. Review 5 measured the shipped
+     --ob-* inks against bright regolith directly — the IMPACT red hit 2.08:1 and the DESCENT
+     green 2.79:1, nowhere near the ≥7:1 the palette claims — because ink-only legibility depends
+     on whatever surface scrolls behind the text. A near-white plate (α .9 over regolith ≈ 0.95
+     relative luminance) takes every --ob-* token to ≥9:1 by construction: --ob-err L .054 → 9.7:1,
+     --ob-ok L .054 → 9.6:1, --ob-fg L .013 → 11:1. The dark ink stays (the on-bright palette is
+     the shipped language); the plate just stops the terrain voting on the contrast. Same pill
+     geometry as the toast lines so the centre screen reads as one furniture family. */
+  #warn,#desc,#igniteHint{background:rgba(240,244,250,.9);border:1px solid rgba(16,24,36,.28);
+    border-radius:7px;padding:5px 12px}
   .stageRow{display:grid;grid-template-columns:auto 1fr auto;gap:8px;align-items:center;margin:4px 0}
   .stageRow .pip{width:10px;height:10px;border-radius:3px;border:1px solid var(--panel-border);background:#222b3a}
   .stageRow.active .pip{background:var(--accent);box-shadow:0 0 8px rgba(111,211,255,.7)}

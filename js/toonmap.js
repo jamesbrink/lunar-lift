@@ -104,6 +104,33 @@ function cleanMask(mask, w, h, passes = 3) {
   return a;
 }
 
+/* Binary open→close on the 4-neighbourhood, `rounds` erode/dilate steps each. Majority voting
+   shaves single-texel noise but leaves a full staircase intact wherever the true boundary runs
+   diagonally for several texels — the treads survive, which is exactly the coast defect review 5
+   measured (13 steps ≥ 20 px per 10-row scan on the NE-facing shore at 160 km) and the same rule
+   that rounds the Moon's mare outlines. Opening (erode, erode, dilate, dilate) shaves convex
+   corners and one-texel spurs; the closing fills concave nicks and single-texel straits of
+   disagreement. Longitude WRAPS — the dateline is not an edge; latitude clamps to itself so polar
+   coasts are not shaved at the map border. Area moves only at corners: measured on the shipped
+   Earth canvas, land share 36.9 % before and after (moon mare 3.27 % before → 3.27 %). */
+function openClose(mask, w, h, rounds = 2) {
+  const near = (a, x, y) => a[Math.max(0, Math.min(h - 1, y)) * w + ((x % w) + w) % w];
+  const step = (a, keep) => {
+    const o = new Uint8Array(mask.length);
+    for (let y = 0; y < h; y++) for (let x = 0; x < w; x++)
+      o[y * w + x] = keep(near(a, x - 1, y), near(a, x + 1, y), near(a, x, y - 1), near(a, x, y + 1), a[y * w + x]) ? 1 : 0;
+    return o;
+  };
+  const ero = (a) => step(a, (l, r, u, d, v) => v && l && r && u && d);
+  const dil = (a) => step(a, (l, r, u, d, v) => v || l || r || u || d);
+  let s = mask;
+  for (let p = 0; p < rounds; p++) s = ero(s);
+  for (let p = 0; p < rounds; p++) s = dil(s);
+  for (let p = 0; p < rounds; p++) s = dil(s);
+  for (let p = 0; p < rounds; p++) s = ero(s);
+  return s;
+}
+
 /* Grow a mask by a sequence of radii with a separable scan: O(w*h) per pass instead of the O(w*h*r²)
    a disc stamp would cost. One radius gives a square, and a square coastline is the most obviously
    synthetic thing on the planet; applying descending radii (7, then 3, then 1) approximates the disc
@@ -154,7 +181,7 @@ async function paintEarthJob(diffusePath, maskPath) {
   for (let i = 0; i < w * h; i++) sea[i] = s[i * 4] > 110 ? 1 : 0;         // specular white is water
   const land = new Uint8Array(w * h);
   for (let i = 0; i < land.length; i++) land[i] = sea[i] ? 0 : 1;
-  const cleaned = cleanMask(land, w, h, 5);
+  const cleaned = openClose(cleanMask(land, w, h, 5), w, h, 1);
   /* (round 5: the shore/outer/stroke dilate masks are gone — the sea bands below are painted from
      the smoothed signed distance instead, which is why no boundary here staircases any more.) */
 
@@ -380,6 +407,8 @@ async function paintMoonJob(path) {
      then one flat tone inside one round outline, which is what a cartoon mare looks like. */
   const wide = blur.slice();
   boxSignal(wide, w, h, 7);
+  boxSignal(wide, w, h, 5);            // round 6: r7 then r5 ≈ a 340 km kernel; the r7-only cut
+                                       // still cut maria into jigsaw arcs (review 5, frames 11/13)
   const mareCut = quantile(wide, shareBelow(blur, 0.36));
   const rawMare = new Uint8Array(w * h);
   for (let i = 0; i < w * h; i++) rawMare[i] = wide[i] < mareCut ? 1 : 0;
@@ -392,22 +421,7 @@ async function paintMoonJob(path) {
      first order — the painted mare share measured 3.65 % before and after on the shipped canvas
      — and 34 km is under a tenth of the smallest mare anyone views whole, so shapes survive.
      Edges clamp to self so polar maria are not shaved at the map border. */
-  const mare = new Uint8Array(w * h);
-  {
-    const near = (a, x, y) => a[Math.max(0, Math.min(h - 1, y)) * w + Math.max(0, Math.min(w - 1, x))];
-    const step = (a, keep) => {
-      const o = new Uint8Array(w * h);
-      for (let y = 0; y < h; y++) for (let x = 0; x < w; x++)
-        o[y * w + x] = keep(near(a, x - 1, y), near(a, x + 1, y), near(a, x, y - 1), near(a, x, y + 1), a[y * w + x]);
-      return o;
-    };
-    const ero = (a) => step(a, (l, r, u, d, v) => v && l && r && u && d ? 1 : 0);
-    const dil = (a) => step(a, (l, r, u, d, v) => v || l || r || u || d ? 1 : 0);
-    let s = rawMare;
-    s = dil(dil(ero(ero(s))));                              // open
-    s = ero(ero(dil(dil(s))));                              // close
-    mare.set(s);
-  }
+  const mare = openClose(rawMare, w, h, 2);
   const out = new Uint8ClampedArray(w * h * 4);
   for (let i = 0; i < w * h; i++) {
     const v = blur[i];
@@ -484,7 +498,13 @@ function mareCollar(out, mare, w, h) {
           mare[y * w + xm] && mare[y * w + xp] &&
           mare[yd * w + xm] && mare[yd * w + x] && mare[yd * w + xp]) continue;
       const o = i * 4;
-      out[o] = MOON.collar[0]; out[o + 1] = MOON.collar[1]; out[o + 2] = MOON.collar[2];
+      /* Round 6: the stroke used to be an absolute value — a single 10.7 km texel of rgb(79,83,93)
+         whose mip chain turned every mare border into a string of stamp-like dark dashes at orbit
+         range (review 5, frame 10). Blending 80 % keeps 0.8·54.1 = 43 levels of step at native
+         resolution (still the cartoon edge the pass exists for) and takes the minified dash to
+         grey-in-grey instead of black-on-white. */
+      out[o] += (MOON.collar[0] - out[o]) * 0.8; out[o + 1] += (MOON.collar[1] - out[o + 1]) * 0.8;
+      out[o + 2] += (MOON.collar[2] - out[o + 2]) * 0.8;
     }
   }
 }
@@ -940,7 +960,7 @@ function pitNoise(x, y, s) {
    near field rendered 0.004 linear — 0.58 to the fifth). The deepest floor and the brightest rim at
    a point win; rim HEIGHTS take the max too, so two rims that touch never stack into a spike the
    lander could perch on. Both profiles stay C0 — a stepped floor would print a ring in vertex colour. */
-export function moonPatchDetail(u, v, baseLum, sun, pitAmp = 1) {
+export function moonPatchDetail(u, v, baseLum, sun, pitAmp = 1, pitAmp2) {
   const L = moonSmallCraters();
   const lon = (u - 0.5) * Math.PI * 2, lat = (v - 0.5) * Math.PI;
   const list = L.buckets.get(Math.floor((lon + Math.PI) / L.B) * 977 + Math.floor((lat + Math.PI / 2) / L.B));
@@ -1009,9 +1029,33 @@ export function moonPatchDetail(u, v, baseLum, sun, pitAmp = 1) {
       }
     }
   }
-  const pit = 0.86 + 0.28 * (0.6 * pitNoise(lon * RM * 4, lat * RM * 4, 913)      // 250 m pitted regolith
-                            + 0.4 * pitNoise(lon * RM * 1.43, lat * RM * 1.43, 57)); // 700 m mare churn
-  return { h, tone: (1 - 0.42 * dark + lit + ray) * (1 + (pit - 1) * pitAmp) };
+  /* Round 6b, measured: the linear octave at ±10 % (post-gain ±22 %) never crossed a ramp band —
+     the 41×41 vertex window under the vehicle bucketed into ONE luminance bin (1 572 of 1 681
+     vertices in [0.10,0.20)) and the skim foreground still read flat. The pit field itself was
+     verified live (tone 0.85 → 1.20 over 600 m at the site), so the fix is amplitude: renormalise
+     the weighted noise to 0…1 and let it span 0.80 … 1.35 — ±27 % albedo, ±60 % after the 2.2×
+     deviation gain, which straddles two ramp bands and reads as hollowed ground. Apollo's own
+     pit-to-plain swing is ~2× anyway; the cel language wants it. */
+  const pit = 0.80 + (0.55 / 0.70) * (0.45 * pitNoise(lon * RM * 4, lat * RM * 4, 913)      // 250 m pitted regolith
+                                    + 0.25 * pitNoise(lon * RM * 1.43, lat * RM * 1.43, 57)); // 700 m mare churn
+  /* Round 6: a third, COARSE octave (2.2 km lattice). Review 5 measured the skim frame's
+     foreground as "a featureless smooth gradient" — at 2.6 km the fine octaves only cover the
+     ~1.1 km radius where the warp mesh is under 140 m, and everything past that is ramped off
+     against a lattice it cannot resolve. The coarse field keeps readable hollows where the mesh
+     runs 0.3-1.6 km (its own pitAmp2 ramp, js/terrain.js), and dies at ~2.2 km step, exactly
+     where it would start aliasing — the starburst stays fixed. */
+  const n2 = pitNoise(lon * RM * 0.625, lat * RM * 0.625, 1121);   // 1.6 km lattice (was 2.2)
+  /* Round 6b: amplify around the median before scaling — a linear octave reads as smoke, an
+     amplified one clips to flat plains and flat pit floors with steep sides between, which is
+     what hollows look like on a vacuum body. n′ = clamp((n−0.5)·3+0.5). Measured the softer
+     (×2.4, ±12 %) variant at the 2.6 km skim: visible across the frame, but leopard-print soft,
+     not hollowed — hence the harder knee and 0.84…1.20 swing. */
+  const p2 = Math.max(0, Math.min(1, (n2 - 0.5) * 3 + 0.5));
+  const pit2 = 0.84 + 0.36 * p2;
+  // hollows get geometry too: ±20 m of real relief × pitAmp2, so the mesh normals shade the field, ×2.6 exag
+  const pitH = (pit2 - 1) * 0.14 * (pitAmp2 === undefined ? 1 : pitAmp2);
+  return { h: h + pitH, tone: (1 - 0.42 * dark + lit + ray) *
+    (1 + (pit - 1) * pitAmp) * (1 + (pit2 - 1) * (pitAmp2 === undefined ? 1 : pitAmp2)) };
 }
 
 function stampCraters(km, hi, w, h) {
@@ -1157,8 +1201,21 @@ function stampMidAlbedo(out, w, h) {
         let tone;
         if (dd < 0.8) tone = -(22 + 14 * cr.fdark);             // floor: one hard step, −38…−32
         else if (dd < MID_BAND) tone = 22 + 44 * cr.rim;        // crest: the next one, +25…+29
-        else if (Math.cos(cr.spokes * Math.atan2(ey, ex) + cr.phase) > cr.rayCut) tone = 28;
-        else continue;                                           // between the spokes: untouched
+        else {
+          /* Round 6: the spokes used to be a binary `cos > rayCut → +28` — flat straight wedges
+             whose jagged edges survived minification as flat pastel polygons at 9 km (review 5,
+             frame 11 "flat unlit polygon patches") and as stamp-like dashes along the terminator
+             at 600 km (frame 10). The analytic patch already draws its fans with a cos¹⁰ taper;
+             the canvas now does the same thing in its own units: angular ramp over the outer
+             third of the spoke, linear radial falloff to the spoke tip. Floor and crest keep
+             their hard cel steps — those are the bowls, and they are wide enough to survive. */
+          const ang = Math.cos(cr.spokes * Math.atan2(ey, ex) + cr.phase);
+          const sp = (ang - cr.rayCut) / (1 - cr.rayCut);
+          if (sp <= 0) continue;                                 // between the spokes: untouched
+          const fall = 1 - (dd - MID_BAND) / (reach - MID_BAND);
+          if (fall <= 0) continue;
+          tone = 28 * Math.min(1, sp * 3) * Math.min(1, fall * 1.6);
+        }
         const i = (y * w + x) * 4;
         out[i] += tone; out[i + 1] += tone; out[i + 2] += tone;
       }
