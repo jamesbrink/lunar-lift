@@ -24,10 +24,13 @@ export const PAD_EAST = new THREE.Vector3().crossVectors(SPIN_AXIS, PAD_UP).norm
 export const MOON_PLANE_N = new THREE.Vector3().crossVectors(PAD_UP, PAD_EAST).normalize();
 export const MOON_U = PAD_EAST.clone();
 export const MOON_V = new THREE.Vector3().crossVectors(MOON_PLANE_N, MOON_U).normalize();
-export const MOON_PHASE = 1.7595;                        // Moon ~101° along its orbit at MET 0: launch window
+export const MOON_PHASE0 = 1.7595;                        // Moon ~101° along its orbit at MET 0: launch window
+let moonPhase = MOON_PHASE0;
+export const getMoonPhase = () => moonPhase;
+export function setMoonPhase(p) { moonPhase = p; }
 
 export function moonPos(t, out = new THREE.Vector3()) {
-  const a = MOON_PHASE + MOON_RATE * t;
+  const a = moonPhase + MOON_RATE * t;
   return out.copy(MOON_U).multiplyScalar(Math.cos(a)).addScaledVector(MOON_V, Math.sin(a)).multiplyScalar(MOON_DIST);
 }
 
@@ -40,6 +43,11 @@ export const PAD_ANGULAR = new THREE.Vector3().crossVectors(SPIN_AXIS, PAD_POS).
 /* atmosphere: exponential density with an 8.5 km scale height */
 export const ATMO_H = 8.5, RHO0 = 1.225, CD_AREA = 28;   // kg/m³, m²
 export const DTPHYS = 0.1, WARPS = [1, 2, 4, 8, 16, 32, 64, 128, 256, 512, 1000];
+
+/* SAS pitch program. A real launch vehicle does not chase "prograde" off the pad: it
+   holds the local vertical, then sweeps the nose toward the launch-plane east direction
+   (the plane that contains the Moon's orbit), then trims to the inertial velocity. */
+export const TURN = { t0: 55, ramp: 190, max: 1.15 };
 
 export const LAND_SAFE = 0.032;          // km/s — 32 m/s touchdown limit
 export const SAFE_EARTH = 0.12;          // km/s — splashdown is survivable below this

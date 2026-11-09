@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { RE, MU_E, RM, MU_M, SOI_M, PAD_UP, PAD_POS, PAD_ANGULAR, RHALF, ATMO_H, RHO0, CD_AREA, WARPS, LAND_SAFE, SAFE_EARTH, SPECS, CAPSULE_MASS, EARTH_SPIN, SPIN_AXIS, MOON_DIST, moonPos } from './constants.js';
+import { RE, MU_E, RM, MU_M, SOI_M, PAD_UP, PAD_POS, PAD_ANGULAR, RHALF, ATMO_H, RHO0, CD_AREA, WARPS, LAND_SAFE, SAFE_EARTH, SPECS, CAPSULE_MASS, EARTH_SPIN, SPIN_AXIS, PAD_EAST, MOON_DIST, TURN, moonPos } from './constants.js';
 
 /* ---------------- injected dependencies (see initPhysics) ----------------
    hooks:      addLog(msg, cls), showEndOverlay(title, body, btn), setWarn(textOrNull)
@@ -139,7 +139,7 @@ export function gravityAt(p, out, t = simTime) {
   out.addScaledVector(_md, -MU_M / Math.pow(_md.length(), 3));
   return out;
 }
-const _g = new THREE.Vector3(), _d = new THREE.Vector3(), _moon = new THREE.Vector3(), _md = new THREE.Vector3(), _sv = new THREE.Vector3();
+const _g = new THREE.Vector3(), _d = new THREE.Vector3(), _moon = new THREE.Vector3(), _md = new THREE.Vector3(), _sv = new THREE.Vector3(), _up = new THREE.Vector3();
 const _spinQ = new THREE.Quaternion();
 export function accelAt(p, v, mass, thrustAcc, t = simTime) {
   gravityAt(p, _d, t);
@@ -175,14 +175,16 @@ export function physStep(dt) {
   simTime += dt;
   if (state === 'pad') {
     /* The vehicle is welded to LC-39, and LC-39 is a child of the spinning Earth mesh.
-       Without carrying the rocket around with the planet the pad sweeps out from under it
-       while the vehicle sits still in the inertial frame — it visibly slides off the mount. */
-    _spinQ.setFromAxisAngle(SPIN_AXIS, EARTH_SPIN * dt);
-    S.pos.applyQuaternion(_spinQ);
-    S.q.premultiply(_spinQ);
-    S.v.crossVectors(SPIN_AXIS, S.pos).multiplyScalar(EARTH_SPIN);
-    omega.set(0, 0, 0);
-    if (i < 0 || !burning || SPECS[i].thrust * throttle / totalMass() <= 9.81) return;
+       While hold-down clamps the rocket it must ride the planet's rotation, otherwise the
+       pad sweeps out from under it and the vehicle visibly slides off the mount. */
+    if (i < 0 || !burning || SPECS[i].thrust * throttle / totalMass() <= 9.81) {
+      _spinQ.setFromAxisAngle(SPIN_AXIS, EARTH_SPIN * dt);
+      S.pos.applyQuaternion(_spinQ);
+      S.q.premultiply(_spinQ);
+      S.v.crossVectors(SPIN_AXIS, S.pos).multiplyScalar(EARTH_SPIN);
+      omega.set(0, 0, 0);
+      return;
+    }
   }
   if (burning) {
     const sp = SPECS[i];
@@ -223,8 +225,34 @@ export function physStep(dt) {
 
   if (sasOn && !manual) {                                          // SAS: rate servo toward the reference
     sasHoldTime = Math.min(6, sasHoldTime + dt);
-    const dir = sasRetro ? _md.copy(_sv).negate() : _sv;
-    if (dir.lengthSq() > 1e-4) {                                   // below ~10 m/s ground speed there is no prograde to hold
+    /* Below a few km the ground-relative velocity is a few m/s and is dominated by the
+       attitude error itself, so chasing "prograde" is a self-reinforcing loop: the nose
+       tips, the velocity tips with it, SAS chases it further. Real launch vehicles hold
+       the local vertical until the gravity turn has something to work with. */
+    /* Prograde SAS must be the *inertial* velocity vector. Ground-relative "prograde"
+       is meaningless at liftoff (the pad is moving 408 m/s) and drags the trajectory
+       out of the launch plane as the vehicle climbs out of the rotating atmosphere. */
+    let dir;
+    if (sasRetro) dir = _md.copy(S.v).negate();
+    else if (simTime < TURN.t0) dir = _up.copy(S.pos);            // hold the local vertical
+    else if (simTime < TURN.t0 + TURN.ramp) {                     // programmed gravity turn
+      /* The nose is swept from vertical toward the launch-plane east direction, but never
+         faster than the remaining radial acceleration allows: pitching over before the
+         horizontal speed is near orbital just spends fuel holding the vehicle up, and the
+         trajectory falls back. thMax is where the radial acceleration goes to zero. */
+      const thProg = TURN.max * Math.min(1, (simTime - TURN.t0) / TURN.ramp);
+      _up.copy(S.pos).normalize();
+      const r = S.pos.length();
+      const vRad = S.v.dot(_up);
+      const vTan2 = S.v.lengthSq() - vRad * vRad;
+      const tacc = thrustAcc ? thrustAcc.length() : 0;             // km/s²
+      const radAcc = MU_E / (r * r) - vTan2 / r;                   // km/s²
+      const thMax = tacc > 1e-3 ? Math.acos(THREE.MathUtils.clamp(radAcc / tacc, 0, 1)) : 0;
+      const th = Math.min(thProg, thMax);
+      _md.copy(PAD_EAST).addScaledVector(_up, -PAD_EAST.dot(_up)).normalize();
+      dir = _up.clone().multiplyScalar(Math.cos(th)).addScaledVector(_md, Math.sin(th));
+    } else dir = _md.copy(S.v);
+    if (dir.lengthSq() > 1e-4) {
       const tq = new THREE.Quaternion().setFromUnitVectors(UP_Z, dir.normalize());
       const errB = S.q.clone().invert().multiply(tq);              // pointing error in body frame
       if (errB.w < 0) errB.set(-errB.x, -errB.y, -errB.z, -errB.w);  // Quaternion has no multiplyScalar
