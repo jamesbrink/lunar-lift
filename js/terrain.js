@@ -382,6 +382,16 @@ function gridNormals(p) {
    said "horrific"; docs/reference/cartoon-art-direction.md retired per-vertex detail entirely. */
 function colour(p, u, v, sd, f, k, col) {
   pxColor(p.px, u, v, _c1);                          // the painted map right here (ocean tone at sea)
+  /* Round 6b: the authored pad geography goes onto the BASE colour, not only onto the biome
+     blend below. That blend is gated by f — the land fraction — so on texels the 20 km mask
+     still calls ocean (which is most of the launch site: the 20 km texel cannot see a 5 km
+     barrier island) the authored island tones never reached the near mesh, and the ground under
+     the pad wore the canvas lottery. padShoreWeight fades out by 67 km, matching the bake. */
+  const wtp = padShoreWeight(u, v);
+  if (wtp > 0.02) {
+    const a = padAuthored(u, v, 1);
+    if (a) { _c1.r += (a[0] / 255 - _c1.r) * wtp; _c1.g += (a[1] / 255 - _c1.g) * wtp; _c1.b += (a[2] / 255 - _c1.b) * wtp; }
+  }
   if (f > 0) {
     // inland walk in KILOMETRES with the spherical metric, hard-bounded: the gradient comes from
     // probes 3 km out, is normalised, and moves at most 24 km — never past the waterline. An

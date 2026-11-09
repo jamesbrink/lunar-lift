@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { RE, RM, WARPS, DTPHYS, PAD_POS, moonPos } from './constants.js';
-import { initWorld, spinBodies, syncTime, updateSky, updateSunShadow } from './world.js';
+import { initWorld, spinBodies, syncTime, updateSky, updateSunShadow, groundHeight, moonGroundHeight } from './world.js';
 import { stages, initVehicle, initNavVectors, updateNavVectors, spawnParticle, addDebris, detachStage, setVisible, updateParticles, updateDebris, updateBurnVisuals, clearDebris, resetStages, lesGroup } from './vehicle.js';
 import { S, keys, initPhysics, getState, getSimTime, setSimTime, getEngineOn, getThrottle, getWarpIndex, setWarpIndex, setTargetThrottle, getSasOn, setSas, cycleWarp, toggleSas, toggleSasRetro, activeStage, fwd, isBurning, accelAt, physStep, predict, toggleIgnite, separateStage, separateLES, addDistFlown, pushTrail, resetSim, clearPredictor, markTeleported, predLine, omega, getControlAuthority, navVel, groundVel } from './physics.js';
 import { camera, initCamera, cycleCamera, updateCamera, resetCameraView, setCamMode, setCamDist, resizeCamera, getCamDist } from './camera.js';
@@ -63,6 +63,7 @@ initPhysics({
   hooks: { addLog, showEndOverlay: endOverlay, setWarn },
   audio: { engine: audioEngine, thud: audioThud, explosion: audioExplosion, win: audioWin },
   vehicleOps: { spawnParticle, addDebris, detachStage, setVisible, les: lesGroup },
+  groundE: groundHeight, groundM: moonGroundHeight,
 });
 initCamera(canvas, addLog);
 initHUD({ resetMission });

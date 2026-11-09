@@ -254,6 +254,18 @@ async function paintEarthJob(diffusePath, maskPath) {
         out[o] = c[0] + (206 - c[0]) * wsand;
         out[o + 1] = c[1] + (186 - c[1]) * wsand;
         out[o + 2] = c[2] + (132 - c[2]) * wsand;
+        /* Round 6b (user: "the whole Earth should be ONE continuous beautiful planet" — a 50 km
+           straight-edged slab at the launch site, 20 km checkerboards on every coast): the land
+           side of the mask was BINARY — one texel biome, the next texel sea, bilinear or not,
+           because the blend lived only in the sea's SDF bands. A texel adjacent to water now
+           finishes the blend itself: its biome fades to the coastal water tone over the last
+           ~16 km of SDF, so across the boundary the two sides arrive at the same colour and the
+           boundary stops being a staircase. The coast still reads hard from orbit (16 km at
+           400 km is a few pixels); it only stops being a lottery. */
+        const wsea = ss(-18, -2, sdl) * 0.9;
+        out[o] += (C.coast[0] - out[o]) * wsea;
+        out[o + 1] += (C.coast[1] - out[o + 1]) * wsea;
+        out[o + 2] += (C.coast[2] - out[o + 2]) * wsea;
       } else {
         const sd = sdf[i];
         const wo = 1 - ss(175 - H, 175 + H, sd), ws = 1 - ss(95 - H, 95 + H, sd), wc = 1 - ss(25 - H, 25 + H, sd);
@@ -263,7 +275,13 @@ async function paintEarthJob(diffusePath, maskPath) {
         const TAU = 6.2831853;
         const dw = 0.5 + 0.5 * Math.sin(TAU * 24 * u) * Math.sin(TAU * 14 * v2 + 1.7)
                  + 0.35 * Math.sin(TAU * 11 * u + 0.6) * Math.sin(TAU * 8 * v2);
-        const tf = 1 + (sd > 175 ? (-0.06 + 0.06 * ((dw > 0.42 ? 1 : 0) + (dw > 0.62 ? 1 : 0))) : 0);
+        /* Round 6b: the three open-ocean tones are a GRADED field now. The binary thresholds
+           (dw > 0.42, dw > 0.62, hard at sd = 175) printed iso-contours of the sine product as
+           black ribbons across the sea — measured at 695 km as a ~200 km-wide lens stepping
+           12 % darker with a hard edge, the "seam tear" of review 5 and of the first 06 shot.
+           Two smoothsteps: the modulation itself ramps with dw, and it fades in with distance
+           from the coast instead of switching on at the 175 km iso-line. */
+        const tf = 1 + ss(140, 210, sd) * (-0.06 + 0.12 * ss(0.35, 0.72, dw));
         for (let ch = 0; ch < 3; ch++) {
           let v = C.deep[ch];
           v += (C.ocean[ch] - v) * wo;
@@ -355,10 +373,27 @@ function bakePadCoast(out, w, h) {
       const lon = ((x + 0.5) / w) * 360 - 180;
       if (Math.abs(lon - PAD_LON) > R) continue;
       const u = (x + 0.5) / w, v = 1 - (y + 0.5) / h;   // rows count south, uv.v counts north
-      const wt = padShoreWeight(u, v);
-      if (wt <= 0.02) continue;
-      const col = padAuthored(u, v);
-      if (!col) continue;
+      /* Round 6b: 3×3 coverage per texel. The authored geography is 5–13 km wide (barrier
+         island, lagoons) and the canvas texel is 20 km: sampled once, every texel drew ONE
+         zone's full colour, and the Merritt Island coast became a per-texel lottery — the
+         "big square" of alternating lagoon-blue and island-green the user pointed at. Nine
+         sub-samples average the coverage, so a texel the island crosses a third of the way
+         through goes a third of the way to island green: continuous at orbit scale, and the
+         near level draws the true shape analytically anyway (js/terrain.js colour()). */
+      let ar = 0, ag = 0, ab = 0, aw = 0;
+      for (let sy = -1; sy <= 1; sy++) {
+        for (let sx = -1; sx <= 1; sx++) {
+          const uu = u + sx / (3 * w), vv = v - sy / (3 * h);
+          const wts = padShoreWeight(uu, vv);
+          if (wts <= 0.02) continue;
+          const c2 = padAuthored(uu, vv);
+          if (!c2) continue;
+          ar += c2[0] * wts; ag += c2[1] * wts; ab += c2[2] * wts; aw += wts;
+        }
+      }
+      if (aw <= 0) continue;
+      const col = [ar / aw, ag / aw, ab / aw];
+      const wt = aw / 9;
       const o = (y * w + x) * 4;
       out[o] += (col[0] - out[o]) * wt;
       out[o + 1] += (col[1] - out[o + 1]) * wt;
@@ -1436,9 +1471,11 @@ function padTangent(u, v, out) {
 
 const _tp = { x: 0, y: 0, a: 0 };
 function lineX(k, yKm) {
-  // authored NNE trend (tan 20° drift) plus a 40 km wobble so the shore is not ruled-straight
+  // authored NNE trend (tan 20° drift) plus a 150 km-scale wobble so the shore CURVES: the old
+  // 3.2 km/90 km wobble was too small to bend a coast seen across the whole island, and five
+  // ruler-straight parallel bands 5 km apart is exactly the painted-stripe look round 5 rejected
   return SHORE_LINES[k] + 0.34 * yKm
-    + (noise((yKm + 50 * k) / 90, 0.5, 4, 400 + k) - 0.5) * 3.2;
+    + (noise((yKm + 50 * k) / 150, 0.5, 4, 400 + k) - 0.5) * 7.5;
 }
 
 /* Signed distance to the nearest authored shore line (negative = land), NaN-free everywhere;
@@ -1476,21 +1513,25 @@ export function padAuthored(u, v, near = 0) {
        deleted: 560 m wide against a cap whose spacing widens to >1 km, it aliased into dashes —
        the exact "faster than the mesh" failure this file's rules already name. */
     const r = Math.hypot(_tp.x, _tp.y);
-    /* Hard-edged plate + drawn rim. The old 0.3 km feather lerp onto grass read as a soft radial
-       haze blob from the pad-wide view (measured: dead-flat concrete core with a continuous
-       80 px gradient rim, review3/02). The boundary is a chamfered square — an exact iso-contour
-       of max(|x|,|y|), so where it crosses the mesh the level set runs ALONG grid lines instead
-       of chopping the circle into staircase pixels (measured: the round iso-contour at ~200 m
-       vertex spacing at 0.85 km rasterised into jagged 1-vertex teeth). Quarters round the plate
-       to a 1 km corner radius; the 0.11 km edge band is the painted slab stroke, ≥1 vertex wide
-       out to 2 km from the pad centre where the cap spacing is still under 400 m. */
+    /* Round 6b (user: "the whole planet should be ONE continuous beautiful planet"): the 1.5 km
+       chamfered plate with its 0.11 km dark stroke was a grey slab that dominated every pad view
+       — from 1 km back the perspective turned it into a parallelogram bigger than the horizon.
+       The real LC-39 pad area is a circle a few hundred metres across. The core is now 340 m;
+       the 340–620 m ring is 40 % worn concrete over whatever zone lies there (the whole ring is
+       inside the island — nearest shore is 3.6 km out); there is NO dark stroke any more. The
+       chamfered-square geometry is kept because at the plate's radius the cap spacing is ~260 m
+       and a round iso-contour rasterises into octagon teeth (the failure measured in review3). */
     const sq = Math.max(Math.abs(_tp.x), Math.abs(_tp.y));
     const rr = Math.hypot(_tp.x, _tp.y);
-    if (sq < 0.74) return C.concrete.slice();
-    if (sq < 0.95 && rr < 1.25) return C.concrete.slice();
-    if (sq < 1.06 && rr < 1.36) {
-      const k = C.concrete, o = [92, 90, 84];            // dark edge stroke — the slab boundary
-      return [k[0] + (o[0] - k[0]) * 0.6, k[1] + (o[1] - k[1]) * 0.6, k[2] + (o[2] - k[2]) * 0.6];
+    if (sq < 0.34 || (sq < 0.44 && rr < 0.56)) return C.concrete.slice();
+    /* The transition is a GRADIENT, not a second plate: concrete 340 m → zero by 1.25 km. A hard
+       ring of any width is a contour, and every contour at this radius has straight grid-following
+       edges at 150–300 m vertex spacing — the slab. A ramp spread over four or five vertex cells
+       reads as the same thing the real LC-39 reads as: a pad area worn into the grassland. */
+    if (rr < 1.25) {
+      const t = (1 - smoothS(0.30, 1.25, rr)) * 0.9;
+      const k = C.concrete, o = C.grass;
+      return [k[0] + (o[0] - k[0]) * (1 - t), k[1] + (o[1] - k[1]) * (1 - t), k[2] + (o[2] - k[2]) * (1 - t)];
     }
   }
   if (zone === 'lagoon' || zone === 'river') return C.shelf;

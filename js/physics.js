@@ -10,10 +10,17 @@ import { RE, MU_E, RM, MU_M, SOI_M, PAD_UP, PAD_POS, PAD_ANGULAR, RHALF, ATMO_H,
    scene:      target for the trajectory-prediction line                                        */
 let stages = null, scene = null;
 let hooks = null, audio = null, vehicleOps = null;
+/* Injected surface getters (world.js groundHeight / moonGroundHeight). The prediction ribbon needs
+   them because a trajectory line published at the reference sphere flies THROUGH the painted
+   relief whenever it passes a hill — and a line grazing a surface under a logarithmic depth
+   buffer flickers. The user named both symptoms on 2026-11-09. Display-only: physics never reads
+   these. */
+let groundE = null, groundM = null;
 
 export function initPhysics(deps) {
   stages = deps.stages; scene = deps.scene;
   hooks = deps.hooks; audio = deps.audio; vehicleOps = deps.vehicleOps;
+  groundE = deps.groundE || null; groundM = deps.groundM || null;
   predLine.frustumCulled = false; scene.add(predLine);
 }
 
@@ -481,8 +488,45 @@ export function predict() {
      this has nothing to warn about either way — the test is where the prediction *starts*, not where
      it ends. */
   const onSurface = S.pos.length() - RE <= RHALF || S.pos.distanceTo(moonPos(simTime, m)) - RM <= RHALF;
+  /* Parked and quiet: the ribbon used to publish a stub that sat inside the hull and scraped the
+     pad deck — the reported flicker "on the launch pad or at the base of the vehicle". Nothing
+     about a pad sit has anything to predict; impact() settles the arrival. */
+  if (onSurface && !burning) {
+    predLine.clear();
+    if (impactWarn) impactWarn = '';
+    hooks.setWarn(null);
+    return;
+  }
   let n = 0, impactType = null, impactT = 0;
   let t = simTime;
+  const _lq = new THREE.Vector3(), _mq = new THREE.Vector3(), _lq2 = new THREE.Vector3();
+  /* The ribbon starts at the nose, not at the state point in the ship's middle: a line whose first
+     vertex is inside the hull pokes out of the fairing wherever attitude yaws (user: "penetrate
+     through the spacecraft"). 90 m along the axis clears the 110 m stack's front half. */
+  {
+    const nose = _lq.copy(p).addScaledVector(fwd(), 0.09);
+    predPos.set([nose.x, nose.y, nose.z], 0);
+    predCol.set([0.30, 0.85, 0.5], 0); n = 1;
+  }
+  /* Every published point is lifted to just above whatever surface it flies over. The old points
+     rode the reference sphere, so any painted hill over which the trajectory passed put the
+     ribbon *inside* terrain, and a line grazing a surface z-fights: that is the "very flickery"
+     orbit line. +100 m is invisible at every distance the ribbon is legible, and the impact
+     marker lands where the sim says, at the lifted shell it will actually hit. */
+  const lift = (q) => {
+    const rE = q.length();
+    if (rE - RE < 4) {
+      const need = RE + Math.max(0, groundE ? groundE(q) : 0) + 0.10;
+      if (rE < need) q.multiplyScalar(need / rE);
+    }
+    moonPos(t, _mq);
+    _lq2.subVectors(q, _mq);
+    const rM = _lq2.length();
+    if (rM - RM < 4) {
+      const needM = RM + Math.max(0, groundM ? groundM(_lq2) : 0) + 0.10;
+      if (rM < needM) q.copy(_mq).addScaledVector(_lq2, needM / rM);
+    }
+  };
   for (let s = 0; s < 20000 && n < PRED_MAX - 1; s++) {
     const alt = Math.min(p.length() - RE, p.distanceTo(moonPos(t, m)) - RM);
     const speed = v.length();
@@ -502,7 +546,8 @@ export function predict() {
     if (thAcc) g.add(thAcc);
     v.addScaledVector(g, dt); p.addScaledVector(v, dt); t += dt;
     if (s % 2 === 0) {
-      predPos.set([p.x, p.y, p.z], n * 3);
+      const q = _lq.copy(p); lift(q);
+      predPos.set([q.x, q.y, q.z], n * 3);
       predCol.set([0.30, 0.85, 0.5], n * 3); n++;
     }
     const rM = p.distanceTo(m);
@@ -519,8 +564,9 @@ export function predict() {
     predCol[i * 3] *= f; predCol[i * 3 + 1] *= f; predCol[i * 3 + 2] *= f;
   }
   if (!onSurface && impactType && (impactT < 3000 || impactType === 'moon')) {
-    predPos.set([p.x, p.y, p.z], n * 3); predCol.set([1, .22, .18], n * 3); n++;
-    predPos.set([p.x, p.y, p.z], n * 3); predCol.set([1, .22, .18], n * 3); n++;
+    const q = _lq.copy(p); lift(q);
+    predPos.set([q.x, q.y, q.z], n * 3); predCol.set([1, .22, .18], n * 3); n++;
+    predPos.set([q.x, q.y, q.z], n * 3); predCol.set([1, .22, .18], n * 3); n++;
     const msg = `IMPACT PREDICTED: ${impactType === 'moon' ? 'MOON' : 'EARTH'} IN ${Math.round(impactT / 60)} min`;
     if (msg !== impactWarn) impactWarn = msg;
     hooks.setWarn(msg);
