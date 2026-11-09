@@ -22,7 +22,7 @@ export const PAD_LAT = 28.4469, PAD_LON = -80.6041;       // degrees, geocentric
 const LATR = PAD_LAT * Math.PI / 180, LONR = PAD_LON * Math.PI / 180;
 
 /* three's SphereGeometry (x = -R cos(phi) sin(theta), y = R cos(theta), z = R sin(phi) sin(theta),
-   u = (lon+180)/360, v = (90-lat)/180) puts north at +Y, so the surface normal at (lat, lon) is: */
+   u = (lon+180)/360, v = (lat+90)/180) puts north at +Y, so the surface normal at (lat, lon) is: */
 export const PAD_UP = new THREE.Vector3(Math.cos(LATR) * Math.cos(LONR), Math.sin(LATR), -Math.cos(LATR) * Math.sin(LONR)).normalize();
 export const SPIN_AXIS = new THREE.Vector3(0, 1, 0);
 export const PAD_EAST = new THREE.Vector3().crossVectors(SPIN_AXIS, PAD_UP).normalize();
