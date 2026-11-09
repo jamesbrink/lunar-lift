@@ -24,7 +24,14 @@ export const PAD_EAST = new THREE.Vector3().crossVectors(SPIN_AXIS, PAD_UP).norm
 export const MOON_PLANE_N = new THREE.Vector3().crossVectors(PAD_UP, PAD_EAST).normalize();
 export const MOON_U = PAD_EAST.clone();
 export const MOON_V = new THREE.Vector3().crossVectors(MOON_PLANE_N, MOON_U).normalize();
-export const MOON_PHASE0 = 1.7595;                        // Moon ~101° along its orbit at MET 0: launch window
+/* Launch window: the Moon's angle along its orbit at MET 0 for which a transfer burned at the
+   first perigee after insertion arrives at the Moon instead of 12,000 km past it. Solved
+   numerically by tools/mission-sim.mjs (bisecting the first periselene altitude): the encounter is
+   brutally sensitive, ~460 km of periselene per 1e-3 rad, and the last 5 km of aim is 2.6e-6 rad,
+   which is why the number carries six digits and why the HUD needs a predicted-periselene readout
+   before a human can fly this reliably. Waiting on the pad and warping advances the Moon at
+   MOON_RATE, so any other start time can still reach a window. */
+export const MOON_PHASE0 = 4.955920;                      // rad — 283.9° along the lunar orbit
 let moonPhase = MOON_PHASE0;
 export const getMoonPhase = () => moonPhase;
 export function setMoonPhase(p) { moonPhase = p; }
@@ -53,7 +60,13 @@ export const DTPHYS = 0.1, WARPS = [1, 2, 4, 8, 16, 32, 64, 128, 256, 512, 1000]
 
 /* SAS pitch program. A real launch vehicle does not chase "prograde" off the pad: it
    holds the local vertical, then sweeps the nose toward the launch-plane east direction
-   (the plane that contains the Moon's orbit), then trims to the inertial velocity. */
+   (the plane that contains the Moon's orbit), then trims to the inertial velocity.
+   Verified with the stack below: a 150 x 784 km parking orbit at 7.36 km/s, and 7.6 t of CSM
+   propellant left on the Moon. The pitch-over here reaches 66° rather than horizontal; a steeper
+   table (t0 60, ramp 200, max pi/2) also completes the mission and saves ~60 m/s, so the exact
+   shape is not what makes the mission fly — the propellant load is. MOON_PHASE0 is solved for
+   whichever table is in here, so changing one without re-running tools/mission-sim.mjs mis-aims
+   the translunar injection by tens of thousands of km. */
 export const TURN = { t0: 55, ramp: 190, max: 1.15 };
 
 export const LAND_SAFE = 0.032;          // km/s — 32 m/s touchdown limit
@@ -61,10 +74,29 @@ export const SAFE_EARTH = 0.12;          // km/s — splashdown is survivable be
 
 export const SKY_DAY = new THREE.Color(0x79b1de), SKY_NULL = new THREE.Color(0x04060b);
 
-/* stage specs: dry/fuel in tonnes, thrust in kN, isp in seconds */
+/* stage specs: dry/fuel in tonnes, thrust in kN, isp in seconds.
+   Verified by tools/mission-sim.mjs, which flies the whole mission through this file's own physics
+   and the controls a player has: ideal staged budget 17,090 m/s against the 15,142 m/s one-way
+   requirement (1.13x), 16,232 m/s actually spent, 7.6 t of CSM propellant left after a 20.5 m/s
+   touchdown on 3.449 days of mission clock. Full breakdown in docs/reference/mission-design.md.
+   What the sizing is actually doing:
+     - pad thrust-to-weight 1.37 g. The previous stack's 1.24 g also reaches orbit, so this is
+       margin, not a cliff; drag is never the problem (mission-math.py section 8 puts it at
+       <= 109 m/s for CD_AREA 28, and the game models no structural load at all).
+     - stage 2 over 0.95 g at ignition (1.09 g here) so the vehicle is still accelerating when it
+       takes over from stage 1.
+     - stage 3 is deliberately *over*-powered against Apollo's 45 kN descent propulsion system:
+       400 kN is 4.2 g_moon at the 59 t LOI mass and 6.9 g_moon at the 36 t landing mass, so
+       hovering takes 15% throttle and no setting balances lunar gravity exactly. That is
+       survivable only because the descent guidance commands a velocity envelope bounded by altitude
+       instead of trying to hover. Throttle granularity, not thrust level, is what limits a soft
+       landing.
+   The 2,400/700/400 t stack this replaced had 16,303 m/s of ideal budget (1.08x) and still failed:
+   it reached lunar orbit, then ran the tank dry on the descent and hit the surface at 1,233 m/s.
+   Margin on paper is not margin; the descent has to be flown. */
 export const SPECS = [
-  { name: 'S-1 SATURN I', dry: 130, fuel: 2400, thrust: 46000, isp: 263 },
-  { name: 'S-2 SATURN II', dry: 120, fuel: 700, thrust: 12000, isp: 340 },
-  { name: 'CSM ENGINE', dry: 20, fuel: 400, thrust: 3000, isp: 420 },
+  { name: 'S-1 SATURN I', dry: 130, fuel: 1800, thrust: 46000, isp: 304 },
+  { name: 'S-2 SATURN II', dry: 90, fuel: 1200, thrust: 16000, isp: 415 },
+  { name: 'CSM ENGINE', dry: 18, fuel: 185, thrust: 400, isp: 420 },
 ];
 export const CAPSULE_MASS = 10;
