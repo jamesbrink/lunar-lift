@@ -142,6 +142,31 @@ export function toggleIgnite() {
   else hooks.addLog('ENGINE FLAMEOUT');
 }
 
+/* Launch escape tower. SP-4029's Apollo 11 timeline puts the jettison at GET 000:03:17.9, high above
+   the atmosphere; this keys on altitude instead of the clock so it stays correct under time warp and
+   whatever throttle line the player flies. It waits for the S-IC to be gone, because the tower stops
+   being useful only once the stage it was covering has fallen away.
+   Deliberately visual: no mass is shed. SPECS is quoted ground truth in docs/reference/spacecraft.md
+   and the tower is ~0.14% of the stack, so moving it would perturb the certified mission for nothing. */
+export const LES_ALT = 90;                                      // km, Apollo 11 jettison is near 95 km
+let lesSeparated = false;
+export const isLESGone = () => lesSeparated;
+
+export function separateLES() {
+  if (state !== 'flying' || lesSeparated || !stages[0].separated || !vehicleOps.les) return;
+  lesSeparated = true;
+  const worldPos = S.pos.clone();
+  const up = fwd();
+  vehicleOps.detachStage(vehicleOps.les, S.pos, S.q);
+  vehicleOps.addDebris({ mesh: vehicleOps.les, vel: S.v.clone().addScaledVector(up, 0.012),
+    angVel: new THREE.Vector3(0.5, 0.15, 0.15), age: 0 });
+  for (let k = 0; k < 16; k++) vehicleOps.spawnParticle(worldPos,
+    S.v.clone().addScaledVector(up, 0.008 + Math.random() * 0.03)
+      .add(new THREE.Vector3().randomDirection().multiplyScalar(0.012)), 0.9 + Math.random() * 0.9, [0.92, 0.93, 0.98]);
+  hooks.addLog('LAUNCH ESCAPE TOWER JETTISONED', 'good');
+  audio.thud();
+}
+
 export function separateStage() {
   if (state !== 'flying') return;
   const i = activeStage();
@@ -241,6 +266,7 @@ export function physStep(dt) {
   if (!I0) I0 = { py: I.py, roll: I.roll };
   const ratio = I0.py / I.py, ratioR = I0.roll / I.roll;
   const altE = S.pos.length() - RE;
+  if (!lesSeparated && altE > LES_ALT) separateLES();
   const surf = surfaceVel(_sv);        // the air moves with the planet: aero and prograde are ground-relative
   const surfMps = surf.length() * 1000;
   let qNorm = 0;
@@ -432,6 +458,12 @@ export function predict() {
   const sp = burning ? SPECS[i] : null;
   let fuel = burning ? stages[i].fuel : 0;
   const p = S.pos.clone(), v = S.v.clone(), g = new THREE.Vector3(), m = new THREE.Vector3();
+  /* Parked or already down: the first integration step of a vehicle sitting on a body reaches that
+     body's contact shell immediately, which used to publish "IMPACT PREDICTED: EARTH IN 0 min" over
+     a rocket waiting for ignition on the pad. A real arrival is settled by impact() in physStep, so
+     this has nothing to warn about either way — the test is where the prediction *starts*, not where
+     it ends. */
+  const onSurface = S.pos.length() - RE <= RHALF || S.pos.distanceTo(moonPos(simTime, m)) - RM <= RHALF;
   let n = 0, impactType = null, impactT = 0;
   let t = simTime;
   for (let s = 0; s < 20000 && n < PRED_MAX - 1; s++) {
@@ -461,7 +493,7 @@ export function predict() {
     if (p.length() <= RE + RHALF) { impactType = 'earth'; impactT = t - simTime; break; }
     if (p.length() > 900000 || rM > 900000) break;
   }
-  if (impactType && (impactT < 3000 || impactType === 'moon')) {
+  if (!onSurface && impactType && (impactT < 3000 || impactType === 'moon')) {
     predPos.set([p.x, p.y, p.z], n * 3); predCol.set([1, .22, .18], n * 3); n++;
     predPos.set([p.x, p.y, p.z], n * 3); predCol.set([1, .22, .18], n * 3); n++;
     const msg = `IMPACT PREDICTED: ${impactType === 'moon' ? 'MOON' : 'EARTH'} IN ${Math.round(impactT / 60)} min`;
@@ -477,6 +509,7 @@ export function resetSim() {
   stages.forEach((st, idx) => {
     st.separated = false; st.fuel = SPECS[idx].fuel; loggedStageOut[idx] = false;
   });
+  lesSeparated = false;
   S.pos.copy(PAD_POS); S.v.copy(PAD_ANGULAR); S.q.setFromUnitVectors(UP_REF, PAD_UP);
   engineOn = false; throttle = targetThrottle = 0;
   sasOn = false; sasRetro = false; simTime = 0; warpIdx = 0; maxQ = 0;

@@ -17,6 +17,7 @@ like these numbers, phase by phase.
 | S-IC CECO | 00:02:15.2 | 44.01 km | 1,979.0 m/s | 22.957° | 76.315 |
 | S-IC OECO (burn 168.03 s) | 00:02:41.63 | **66.10 km** | **2,764.1 m/s** | 19.114° | 75.439 |
 | S-IC/S-II separation | 00:02:42.30 | 66.71 km | 2,773.9 m/s | 19.020° | — |
+| **Launch escape tower jettison** | **00:03:17.9** | — | — | — | — |
 | S-II CECO | 00:07:40.62 | 180.14 km | 5,707.5 m/s | 0.897° | — |
 | S-II OECO (burn 384.22 s) | 00:09:08.22 | 187.28 km | 6,916.2 m/s | 0.619° | — |
 | S-II/S-IVB separation | 00:09:09.00 | 187.34 km | 6,919.0 m/s | 0.611° | — |
@@ -24,6 +25,16 @@ like these numbers, phase by phase.
 | **Earth orbit insertion** | 00:11:49.33 | 191.08 km | **7,793.4 m/s** | 0.012° | 88.848 |
 
 Liftoff position: geocentric 28.4470° N, 80.6041° W. EOI position: 32.5027° N, 52.6491° W.
+
+**Launch escape tower jettison.** The GET is from the SP-4029 mission timeline
+(`Apollo_11i_Timeline.htm`, "Launch escape tower jettisoned.", 000:03:17.9 — the S-II aft interstage
+goes five seconds earlier). The ascent table above does not tabulate the event, so no altitude is
+asserted here; bracketing it between the two tabulated rows places it between 66.71 km and 180.14 km.
+The game drops its tower at `LES_ALT` = 90 km — near the bottom of that bracket, because above the
+sensible atmosphere the escape tower can no longer escape — and keys on altitude rather than GET so
+the event stays sane under time warp and on whatever throttle line the player flies. The separation is
+visual only: no mass is shed, since `SPECS` is the quoted ground truth in `spacecraft.md` and the
+tower is a fraction of a percent of the stack.
 
 **Note on the two low-altitude rows.** The velocities published for Mach 1 and for max-q
 cannot be reconciled with either the tabulated altitudes or the tabulated dynamic pressure
