@@ -72,7 +72,12 @@ export function makePatch(body) {
     // ocean; polygonOffset wins those ties instead of leaving it to a depth die.
     polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2,
   }));
-  mesh.material.fog = false;          // ground rule: planet-scale bodies are out of the fog
+  /* The patch IS fogged, unlike the planet. It is not a planet-scale body: it is the ground within
+     220 km, and without aerial perspective a flat cartoon plain runs to a hard line at the horizon
+     and reads as a painted card. FogExp2 squares its term, so at the pad (density ~0.0038) the rim
+     220 km out takes about half the sky tone while the crawler 1 km away is untouched. js/world.js
+     thins the same clock as the sky, so from orbit the haze is gone with the sky. */
+  mesh.material.fog = true;
   mesh.receiveShadow = true;          // and with world.js's pad discs gone, this is the pad's shadow catcher
   mesh.castShadow = false;
   mesh.visible = false;

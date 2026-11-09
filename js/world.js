@@ -579,7 +579,7 @@ export function updateSky(pos) {
   _sky.copy(SKY_NULL).lerp(HORIZON, _skyMix);
   scene.background.copy(_sky);
   scene.fog.color.copy(_sky);
-  scene.fog.density = 0.002 * _skyMix * _skyMix;
+  scene.fog.density = 0.0038 * _skyMix * _skyMix;
   /* Stars in proportion to how dark the sky actually is: zero against the daylight dome, coming
    back through the climb as the background drops below a quarter lightness. */
   const dark = THREE.MathUtils.clamp(1 - _sky.getHSL(_hsl).l / 0.28, 0, 1);
