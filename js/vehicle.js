@@ -1,7 +1,8 @@
 import * as THREE from 'three';
 import { SPECS, VS, RE, RM, MU_E, MU_M, SOI_M, EARTH_SPIN, PAD_SCALE, PAD_UP, moonPos, moonVel } from './constants.js';
 import { glowTex, flareTex } from './textures.js';
-import { toon, outline, plumeMeshes, PALETTE, RAMP_HARD } from './toon.js';
+import { PALETTE } from './toon.js';
+import { rocketGroup, stages, lesGroup } from './saturn.js';
 /* The plume is a physics consumer, so it reads the sim's own numbers instead of restating them:
    airDensity is literally the function accelAt drags the vehicle with (one exponential, no chance
    of the flame disagreeing with the flight computer about where the air runs out), and the mission
@@ -16,160 +17,7 @@ let scene = null;
    so the ember quench below normalises by the same number drag reads, never a restated one. */
 const RHO_SEA = airDensity(0);
 
-/* ---------------- rocket ---------------- */
-export const rocketGroup = new THREE.Group(); rocketGroup.scale.setScalar(VS);
-
-/* Cel materials. These were MeshStandardMaterial with metalness .3-.85, and there is no environment
-   map in this scene, so the hull rendered as a black silhouette against the pad — a metal with
-   nothing to reflect reflects nothing. Flat banded colour instead; see js/toon.js. */
-const matBody = toon({ color: PALETTE.hull, gradientMap: RAMP_HARD });
-const matDark = toon({ color: PALETTE.dark });
-const matAccent = toon({ color: PALETTE.accent });
-const matNozzle = toon({ color: PALETTE.engine });
-
-export const stages = SPECS.map(s => ({ ...s, fuel: s.fuel, separated: false, meshes: new THREE.Group(), tailZ: 0, flame: null, glow: null }));
-
 const ZERO_V = new THREE.Vector3();
-
-/* `edge` adds the inverted-hull outline. Only silhouette parts get one: outlining every ring and
-   window would draw lines through the middle of the vehicle, which is not what an outline is for. */
-function cyl(rt, rb, len, z, mat, seg = 20, edge = false) {
-  const m = new THREE.Mesh(new THREE.CylinderGeometry(rt, rb, len, seg), mat);
-  m.rotation.x = Math.PI / 2; m.position.z = z; m.castShadow = true;
-  if (edge) outline(m);
-  return m;
-}
-
-/* Build rules for the stack. The old geometry flickered ("collisions within the graphics") because
-   shells sat coplanar or interpenetrated. Two rules, enforced on every seam:
-   1. an axial joint is ALWAYS covered by a slightly larger-radius sleeve (the black bands do this),
-      so the butt faces at the joint are inside solid material and can never show or z-fight;
-   2. wherever two meshes meet axially, one is sunk ≥0.4 u (0.6 m) into the other with its junction
-      radius ≥ the neighbour's (round-5: the old 0.05..0.15 u sinks at DIFFERENT radii left 3-17 cm
-      step-slot rings that grazing below-views read as "open bucket … visible seam gaps"), so no
-      two surfaces coincide and no slot rim survives.
-   3. every shell material is single-sided — measured `side === 0` (FrontSide) on all 24 shell
-      cylinders — so interior back faces are never drawn and an inside can never darken a seam.
-   Dimensions are real Saturn V at 1 build unit = VS km = 1.4 m (NASA SP-4029,
-   docs/reference/spacecraft.md): Ø10.0 m stage (r 3.57), S-IC 42 m + 3.4 m interstage, S-II 24.8 m,
-   S-IVB 17.9 m + 0.9 m instrument unit, SLA tunnel/adapter, SM Ø3.9 m, CM, LES. Engines: 5× F-1
-   (centre fixed + 4 gimballed outboards on a bolt circle, ~6° cant), 5× J-2, and one small bell on
-   the third stage — the game's stage 3 is the combined CSM engine (SPS/DPS/TLI in one per the
-   reference doc), so its single bell rides the S-IVB tail where a single-engine stage has it and
-   where updateBurnVisuals needs the flame. Total span stays tail -42 .. LES tip 37.6 so pad
-   clearance (PAD_POS/RHALF in constants.js) and the camera framing are untouched. */
-
-// stage 0 — S-IC + its interstage: white body, black engine skirt, five F-1 bells. -42 .. -9.5
-{
-  /* Skirt/body junction, round-5: the old 4.7 u cone ENDED at -34.9 with r 3.52 while the body
-     (3.57) started at -35.0 — from below that left a 0.055 u radial step under a 0.1 u axial slot,
-     and grazing angles read the shadowed gap as "seam gaps … open bucket". The cone now runs to
-     -34.6 with its mouth (3.60) LARGER than the body: the wall surfaces cross once, transversally,
-     at r(z)=3.57 → z=-35.5, the 0.4 u overlap band (≈0.6 m) is solid sleeve over solid body, and
-     there is no rim for the eye to fall through. */
-  const g = stages[0].meshes;
-  g.add(cyl(3.60, 3.30, 5.0, -37.1, matDark, 24, true));      // conical engine skirt, -39.6 .. -34.6
-  g.add(cyl(3.57, 3.57, 25.1, -22.45, matBody, 24, true));    // booster body, -35.0 .. -9.95 (top buried in the interstage sleeve; the skirt mouth 3.60 > 3.57 so the skirt/body junction shares no surface)
-  g.add(cyl(3.63, 3.63, 2, -32, matAccent));                  // roll band
-  g.add(cyl(3.62, 3.62, 2.5, -10.75, matDark, 24, true));     // interstage sleeve -12.0 .. -9.5: shrouds the S-II bells until staging, and covers the body/sleeve butt face because it exists
-  const finShape = new THREE.Shape();                         // small swept tail fin: x = radial, y = axial z. Real Saturn V fins are stubby — the old 2.5× body-span sheets read as a model rocket
-  finShape.moveTo(3.15, -35.8); finShape.lineTo(4.05, -38.0); finShape.lineTo(4.05, -39.5); finShape.lineTo(3.15, -39.5);
-  const finGeo = new THREE.ExtrudeGeometry(finShape, { depth: .22, bevelEnabled: false }); finGeo.translate(0, 0, -.11);
-  for (let i = 0; i < 4; i++) {                               // roots buried in the skirt solid at every z (skirt r >= 3.30 > 3.15)
-    const arm = new THREE.Group(); arm.rotation.z = i * Math.PI / 2 + Math.PI / 4;
-    const fin = new THREE.Mesh(finGeo, matDark); fin.rotation.x = Math.PI / 2; fin.castShadow = true; outline(fin);
-    arm.add(fin); g.add(arm);
-  }
-  /* Five identical F-1 bells: throats hidden in the skirt solid, exits 2.4 u (3.4 m) below the rim.
-     Bolt circle r 2.35 puts the exit rims tangent — five Ø2.7..2.8 u bells would otherwise intersect
-     each other — and the outboards cant 0.1 rad outward (the real gimbal trim, so an engine that
-     quits early still thrusts through the c.g.). Exits define tailZ = -42. */
-  const f1 = (rb) => cyl(0.42, rb, 2.6, -40.7, matNozzle, 16);
-  g.add(f1(1.19));                                            // centre F-1, fixed, exit -42.0
-  for (let i = 0; i < 4; i++) {
-    const a = i * Math.PI / 2 + Math.PI / 4;
-    const b = f1(1.15);
-    b.position.x = Math.cos(a) * 2.35; b.position.y = Math.sin(a) * 2.35;  // x/y only — position.z (-40.7) is the bell centre and must survive
-    b.quaternion.setFromAxisAngle(new THREE.Vector3(-Math.sin(a), Math.cos(a), 0), -0.1);  // -z tips outward
-    g.add(b);
-  }
-  stages[0].tailZ = -42;
-}
-
-// stage 1 — S-II + forward shroud (the interstage rode with the S-II): five J-2 bells. -11.8 .. +8.6
-{
-  const g = stages[1].meshes;
-  /* S-II engine skirt, round-5: it was Ø 3.45 at the body while the body is 3.57 — from below the
-     exposed white base-cap annulus (0.12 u, 17 cm) around the dark skirt was the "broken bent
-     model" rim once stage 0 fell away. The skirt now overlaps the body by 0.45 u (0.63 m) with its
-     top radius 3.58 ≥ the body's 3.57 — and stays 0.04 u under the stage-0 sleeve's 3.62, so it
-     never shares a surface with the sleeve it rides inside. */
-  g.add(cyl(3.58, 3.50, 1.5, -10.3, matDark, 24, true));      // engine skirt -11.05 .. -9.55, top sunk into the body solid; hidden inside the stage-0 sleeve while stacked
-  g.add(cyl(3.57, 3.57, 17.0, -1.5, matBody, 24, true));      // white body -10.0 .. +7.0
-  g.add(cyl(3.63, 3.63, 2, 5.2, matAccent));                  // S-II roll-pattern band
-  g.add(cyl(2.55, 3.52, 1.9, 7.65, matDark, 24));             // forward shroud +6.7 .. +8.6: tapers 10 m → S-IVB and hides the S-IVB bell until this stage falls away
-  const j2 = (rb) => cyl(0.30, rb, 1.9, -10.85, matNozzle, 14);  // throat -9.9 buried in the body, exit -11.8: inside the stage-0 sleeve until stage 1 falls
-  g.add(j2(0.72));
-  for (let i = 0; i < 4; i++) {                               // bolt circle r 1.44 → exit rims tangent, Ø1.4 u bells never intersect
-    const a = i * Math.PI / 2 + Math.PI / 4;
-    const b = j2(0.70);
-    b.position.x = Math.cos(a) * 1.44; b.position.y = Math.sin(a) * 1.44;  // z (-10.85) is the bell centre
-    g.add(b);
-  }
-  stages[1].tailZ = -11.8;
-}
-
-/* stage 2 — S-IVB + IU + SLA tunnel/SM + CM: one vehicle to the Moon. +6.8 .. +28.7.
-   Stage 3's SPECS is the CSM engine doing TLI, LOI, deorbit and descent at once
-   (docs/reference/spacecraft.md), so it gets ONE small bell — at the S-IVB tail, where a
-   single-engine stage physically has it and where the flame must sit. */
-{
-  const g = stages[2].meshes;
-  /* S-IVB bottom, round-5: sunk 0.45 u (0.63 m) into the stage-1 shroud solid (was 0.15) — the
-     junction now reads as one continuous taper from below, at a radius (2.36) under the shroud's
-     2.63..2.78 there, so no surface is shared. */
-  g.add(cyl(2.36, 2.36, 11.5, 13.9, matBody, 20, true));      // S-IVB white body Ø6.6 m, +8.15 .. +19.65 (bottom buried in the stage-1 shroud solid)
-  g.add(cyl(0.32, 0.85, 1.7, 7.65, matNozzle, 14));           // single engine bell: throat buried in the S-IVB solid, exit +6.8 — inside the shroud while stacked, exposed once stage 1 falls
-  g.add(cyl(2.42, 2.42, 1, 18.0, matAccent));                 // S-IVB roll band
-  /* IU, round-5: extended to 0.53 u (0.74 m) overlap on the S-IVB top (was 0.1), radius 2.42 ≥ 2.36.
-     Tunnel, round-5: its old 2.40 base under the 2.42 IU was the worst near-coplanar step on the
-     stack — a 3 cm slot ring. The frustum foot is now 2.46 ≥ the IU's 2.42 and reaches to +21.05,
-     shrouding the IU top rim; the walls cross transversally and nothing from below sees a gap. */
-  g.add(cyl(2.42, 2.42, 2.18, 20.21, matDark, 20));           // black instrument unit + SLA aft ring, +19.12 .. +21.3
-  g.add(cyl(1.55, 2.46, 1.95, 22.025, matDark, 20));          // spacecraft/LM adapter tunnel, frustum from the IU deck to the SM diameter, +21.05 .. +23.0
-  g.add(cyl(1.39, 1.39, 3.45, 24.625, matBody, 20, true));    // service module Ø3.9 m, +22.9 .. +26.35 (bottom buried 0.1 into the adapter top, r 1.39 < 1.55)
-  const cm = new THREE.Mesh(new THREE.ConeGeometry(1.33, 2.4, 24), matBody);  // command module, +26.3 .. +28.7; base r < SM r and sunk 0.05 into its top so the shells never coincide
-  cm.rotation.x = Math.PI / 2; cm.position.z = 27.5; cm.castShadow = true; outline(cm); g.add(cm);
-  /* The single bell exits at +6.8 (see above) — tailZ was never set, so the mesh flame and glow
-     sat at z=-0.6, inside the S-IVB body, during every S-IVB/CSM burn while the particle plume
-     (separate table) came from the real bell. Constraint lifted by Main; the mission harness does
-     not read tailZ, so this is visual-only. */
-  stages[2].tailZ = 6.8;
-}
-
-/* Launch escape system — its own group so it can jettison as a unit (remove `lesGroup` from
-   stages[2].meshes and re-parent to the scene exactly like detachStage does). Real LES top-to-bottom
-   is nose cone / canards / motor stack / tower (enginehistory.org RPE09.10); the tower was a truss,
-   but a lattice reads as noise at game zoom and the brief rules it out, so: solid mast, tapered
-   escape-motor stack, nose cone, three canards at the top. Children carry absolute build coords and
-   the group stays at the local origin, so detach/re-attach needs no offset bookkeeping. */
-export const lesGroup = new THREE.Group(); lesGroup.name = 'les';
-stages[2].meshes.add(lesGroup);
-{
-  lesGroup.add(cyl(.50, .50, .50, 28.8, matDark, 12));        // escape seat on the CM tip, +28.55 .. +29.05 (the CM apex pokes into it; cone meets plane, never a shared surface)
-  lesGroup.add(cyl(.24, .24, 5.3, 31.6, matDark, 10, true));  // mast +28.95 .. +34.25, ends sunk into seat and motor solids
-  lesGroup.add(cyl(.34, .55, 2.4, 35.4, matDark, 14, true));  // escape-motor stack +34.2 .. +36.6, tapering up (ballast compartment + jettison motor silhouette)
-  const nose = new THREE.Mesh(new THREE.ConeGeometry(.34, 1.1, 14), matDark);  // nose cone, base buried 0.1 into the motor top, tip +37.6 = vehicle top
-  nose.rotation.x = Math.PI / 2; nose.position.z = 37.05; nose.castShadow = true; outline(nose); lesGroup.add(nose);
-  const canard = new THREE.Shape();                           // x = radial, y = axial z; roots buried in the motor solid across the whole band (motor r >= 0.366 > 0.34)
-  canard.moveTo(.34, 34.4); canard.lineTo(1.12, 35.3); canard.lineTo(1.12, 36.3); canard.lineTo(.34, 36.3);
-  const canardGeo = new THREE.ExtrudeGeometry(canard, { depth: .12, bevelEnabled: false }); canardGeo.translate(0, 0, -.06);
-  for (let i = 0; i < 3; i++) {
-    const arm = new THREE.Group(); arm.rotation.z = i * Math.PI * 2 / 3;
-    const fin = new THREE.Mesh(canardGeo, matDark); fin.rotation.x = Math.PI / 2; fin.castShadow = true; outline(fin);
-    arm.add(fin); lesGroup.add(arm);
-  }
-}
 
 /* Pad-blast light escape (review5/02: "no exhaust flame or light bloom escapes it despite 100 %
    throttle"). The plume is ONE transparent draw call whose smoke half composites source-over —
@@ -190,18 +38,6 @@ flareCore.visible = flareBloom.visible = false;
 flareCore.castShadow = flareBloom.castShadow = false;
 rocketGroup.add(flareBloom); rocketGroup.add(flareCore);
 const _flAlt = new THREE.Vector3();
-
-stages.forEach(st => {
-  /* Two-tone plume: a saturated outer cone with a pale core parented inside it, so scaling the
-     outer (which updateBurnVisuals does every frame, for length and flicker) carries the core. */
-  const { outer: flame } = plumeMeshes(st.meshes);
-  flame.rotation.order = 'YXZ'; // gimbal yaw term must rotate the already-pitched plume; see updateBurnVisuals
-  flame.rotation.x = -Math.PI / 2; flame.position.z = st.tailZ - 0.6; flame.visible = false; flame.castShadow = false;
-  const glow = new THREE.Sprite(new THREE.SpriteMaterial({ map: glowTex(), color: 0xffb060, transparent: true, opacity: .8, blending: THREE.AdditiveBlending, depthWrite: false }));
-  glow.position.z = st.tailZ; glow.visible = false; glow.castShadow = false;
-  st.meshes.add(glow); st.flame = flame; st.glow = glow;
-  rocketGroup.add(st.meshes);
-});
 
 /* ---------------- volumetric exhaust plume ----------------
    Every sprite here is a gas parcel with a life, a radius and a velocity. Nothing about the shape
@@ -1464,38 +1300,30 @@ export function resetStages() {
 export function updateBurnVisuals({ pos, quat, vel, throttle, activeIdx, burn, fwd, omega }) {
   rocketGroup.position.copy(pos); rocketGroup.quaternion.copy(quat);
   const om = omega || ZERO_V;   // body-frame angular velocity (rad/s)
+  /* Flames. One per engine, sized by that engine, and shaped by the air: at the pad the jet is a
+     tight bright teardrop; as the density falls the same exhaust spreads into the wide pale plume
+     an under-expanded nozzle really throws, and thins as it does. The curve is the square root of
+     the density ratio from the physics module's own atmosphere — half way to vacuum by ~17 km. */
+  const vac = 1 - Math.sqrt(Math.min(1, airDensity(Math.max(0, pos.length() - RE)) / RHO_SEA));
   stages.forEach((st, idx) => {
     const on = burn && idx === activeIdx;
-    st.flame.visible = on; st.glow.visible = on;
-    if (on) {
-      /* The S-482 cone (idx 2) read as "a tiny blue smear" (review2/13): the shared length factor
-         .55 gave 8.25 u at full throttle against the 21.9 u of body hanging off the bell exit
-         (+6.8 → CM tip +28.7) — 38% — while the shared radius factor made the mouth (Ø 7.2 u)
-         nearly as wide as the cone was long: a squat stub, not exhaust. At .9 it is a 13.5 u
-         teardrop, 62% of that body; the ×1.5 radius then opens the mouth to Ø 10.8 u against the
-         apex at the bell — a ~22° half-angle plume. Stages 0/1 and the per-stage glow are
-         untouched. */
-      const L = (4 + throttle * 11) * (idx === 0 ? 1.35 : idx === 1 ? 1.0 : .9);
-      const flick = .9 + Math.random() * .2;
-      const fr = (2 + throttle * 1.6) * (idx === 2 ? 1.5 : 1);
-      /* (radius, length, radius): the cone's axis is its local +Y after the -90° pitch below, so the
-         two radial axes have to take the radius. It used to read (rx, L, L), which stretched the plume
-         along one radial direction and drew the whole flame as a diamond under the rocket. */
-      st.flame.scale.set(fr * flick, L * flick, fr * flick);
-      /* The exit-plane bloom is sized by the ENGINE, not by a shared law: at 6+13·throttle the
-         CSM's single 91 kN bell wore the same white orb as five F-1s, and a round balloon bigger
-         than the flame next to a small cone is exactly the "stub, gap, bigger triangle" the
-         review saw. Measured against each stage's cone length (L above). */
-      st.glow.scale.setScalar(((idx === 0 ? 6 + throttle * 11 : idx === 1 ? 3.5 + throttle * 6 : 2 + throttle * 4)) * flick);
-      // engine gimbal: the plume lags the turn, swinging opposite the body rate (clamped +/-0.22 rad).
-      // Euler 'YXZ': Rx pitches apex toward +Y for omega.x > 0 (nose pitches toward -Y),
-      // then Ry swings apex toward -X for omega.y > 0 (nose yaws toward +X) — both opposite the turn.
-      st.flame.rotation.set(-Math.PI / 2 + THREE.MathUtils.clamp(om.x, -1, 1) * .22, THREE.MathUtils.clamp(om.y, -1, 1) * .22, 0);
-    } else {
-      st.flame.rotation.set(-Math.PI / 2, 0, 0);
+    st.glow.visible = on;
+    for (const f of st.flames) f.visible = on;
+    if (!on) return;
+    const flick = .92 + Math.random() * .16;
+    const r = st.flame.r * (0.85 + 0.2 * throttle) * (1 + 1.9 * vac);
+    const len = st.flame.len * (0.3 + 0.7 * throttle) * (1 + 0.5 * vac) * flick;
+    // the gimbal: the flame lags the turn, swinging opposite the body rate (clamped ±0.22 rad)
+    const gx = -Math.PI / 2 + THREE.MathUtils.clamp(om.x, -1, 1) * .22, gy = THREE.MathUtils.clamp(om.y, -1, 1) * .22;
+    for (const f of st.flames) {
+      f.scale.set(r, len, r);
+      f.rotation.set(gx, gy, 0);
+      f.material.opacity = 0.55 * (1 - 0.5 * vac);
     }
+    /* The exit-plane bloom is sized by the ENGINE: a 91 kN bell must not wear the orb of five F-1s. */
+    st.glow.scale.setScalar((idx === 0 ? 7 + throttle * 12 : idx === 1 ? 4 + throttle * 6 : 2.2 + throttle * 4) * flick);
   });
-  /* The drawn two-tone cone stays as the incandescent core — a cartoon flame is part of the look,
+  /* The drawn flames stay as the incandescent core — a cartoon flame is part of the look,
      and it covers the supersonic few tens of metres no sprite budget can resolve smoothly. The
      volumetric body of the plume is the particle field below. */
   shipPos.copy(pos); shipVel.copy(vel); shipQuat.copy(quat); shipLive = true;

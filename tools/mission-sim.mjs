@@ -43,7 +43,7 @@
 import * as THREE from 'three';
 
 const P = await import('../js/physics.js');
-const { stages } = await import('../js/vehicle.js');
+const { stages } = await import('../js/saturn.js');
 const C = await import('../js/constants.js');
 
 const WHICH = ['game', 'landed', 'nova', 'retro'].includes(process.argv[2]) ? process.argv[2] : 'game';

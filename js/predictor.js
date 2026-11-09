@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { RE, RM, SOI_M, RHALF, CD_AREA, SPECS, moonPos } from './constants.js';
 import { S, getSimTime, getEngineOn, getThrottle, activeStage, totalMass, fwd, gravityAt, airDensity } from './physics.js';
-import { stages } from './vehicle.js';
+import { stages } from './saturn.js';
 import { ribbon } from './ribbon.js';
 
 /* Where the vehicle is going: the trajectory ribbon ahead of the ship and its apsis markers.

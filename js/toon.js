@@ -57,7 +57,8 @@ export function ramp(stops) {
    near-black interstages, one saturated accent, and a grey engine that is grey rather than chrome. */
 export const PALETTE = {
   hull: 0xf1f4f8, dark: 0x232932, accent: 0xe0532c, engine: 0x767d87,
-  padConcrete: 0x9aa1ab, padSteel: 0xc3cbd4, blast: 0x2b2f36,
+  silver: 0xcdd5de,
+  padConcrete: 0x9aa1ab, padSteel: 0xc3cbd4, blast: 0x2b2f36, lutRed: 0xc2452f, padDeck: 0x7f8894,
 };
 
 export function toon(opts = {}) {
@@ -114,25 +115,23 @@ export function outline(mesh, scale = 1) {
   return o;
 }
 
-/* The drawn flame: apex at the throat, widening aft — a cone flipped so its point is where the gas
-   leaves the nozzle. It used to be the stock ConeGeometry, apex aft and base at the engine, so the
-   silhouette was a spike narrowing away from the rocket, and its base cap is a flat disc that additive
-   blending turned into a glowing blob at the plume's end. Open-ended and flipped, it reads as exhaust.
-   Two tones (saturated outer, pale core parented inside) so scaling one scales both. */
-function flameCone(r, h, seg) {
-  const g = new THREE.ConeGeometry(r, h, seg, 1, true);
-  g.rotateX(Math.PI);                       // apex down to y = -h/2 …
-  g.translate(0, h / 2, 0);                 // … and the apex at the origin, mouth aft at y = h
-  return g;
+/* The drawn flame: a teardrop that leaves the bell at the bell's own width, swells a little and
+   tapers to a point. Its predecessor was a cone with its apex at the throat, widening aft to an
+   open mouth — a megaphone, and one per stage however many engines the stage had. Unit size: radius
+   1 at the root, length 1 along +y; the caller scales it per engine. Two tones, a saturated outer
+   and a pale core parented inside so scaling one scales both. */
+function flameGeo(seg) {
+  const prof = [[0.86, 0], [1.0, 0.07], [1.05, 0.18], [0.97, 0.36], [0.76, 0.58], [0.46, 0.79], [0.18, 0.93], [0, 1]];
+  return new THREE.LatheGeometry(prof.map(([r, y]) => new THREE.Vector2(r, y)), seg);
 }
 
-export function plumeMeshes(parent, outerColour = 0xff7a2a, coreColour = 0xffe9b0) {
-  const outer = new THREE.Mesh(flameCone(1, 1, 24),
-    new THREE.MeshBasicMaterial({ color: outerColour, transparent: true, opacity: 0.62, blending: THREE.AdditiveBlending, depthWrite: false }));
-  const core = new THREE.Mesh(flameCone(0.42, 0.62, 18),
-    new THREE.MeshBasicMaterial({ color: coreColour, transparent: true, opacity: 0.95, blending: THREE.AdditiveBlending, depthWrite: false }));
-  core.position.y = 0.04;                                   // start just aft of the throat
+export function flameMeshes(parent, outerColour, coreColour) {
+  const mat = (color, opacity) => new THREE.MeshBasicMaterial({ color, transparent: true, opacity, blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide, fog: false });
+  const outer = new THREE.Mesh(flameGeo(20), mat(outerColour, 0.55));
+  const core = new THREE.Mesh(flameGeo(14), mat(coreColour, 0.9));
+  core.scale.set(0.55, 0.62, 0.55);
   outer.add(core);
+  outer.castShadow = core.castShadow = false;
   parent.add(outer);
   return { outer, core };
 }

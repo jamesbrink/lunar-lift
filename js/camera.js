@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import * as WORLD from './world.js';
 import { RE, RM, SOI_M, VS, PAD_SCALE, PAD_POS, PAD_UP, moonPos } from './constants.js';
 import { S, fwd, getSimTime, activeStage } from './physics.js';
-import { stages } from './vehicle.js';
+import { stages } from './saturn.js';
 
 /* distances are km; 1 m near plane so the 105 m rocket resolves, 3 M km far plane
    so the starfield and the lunar approach both render (logarithmic depth buffer) */

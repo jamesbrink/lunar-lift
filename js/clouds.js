@@ -196,11 +196,13 @@ void marchCloud( vec3 o, vec3 d, vec2 uv0, vec3 n, out float tau, out float tSee
   /* coverage -> threshold on the mean of two rank-uniform fields (triangular distribution) */
   gThr = c < 0.5 ? 1.0 - sqrt( 0.5 * c ) : sqrt( 0.5 * ( 1.0 - c ) );
   float T = 1.0, tSum = 0.0, wSum = 0.0;
-  /* Each pixel starts its samples at a different phase (interleaved gradient noise). With a fixed
+  /* Each pixel starts its samples at a different phase. With a fixed
      phase every ray cuts the band at the same heights and a slanted view draws each puff as a
      stack of plates — measured as visible terraces from 100 km up. Unresolved cloud has no
      terraces to hide, so the jitter fades out with it. */
-  float jit = mix( fract( 52.9829189 * fract( dot( gl_FragCoord.xy, vec2( 0.06711056, 0.00583715 ) ) ) ), 0.5, gMinif );
+  /* White noise, not an ordered pattern: this pass is upsampled through a 3x3 tent, which averages
+     uncorrelated noise away but leaves an ordered dither's diagonals standing as a weave. */
+  float jit = mix( fract( sin( dot( gl_FragCoord.xy, vec2( 12.9898, 78.233 ) ) ) * 43758.5453 ), 0.5, gMinif );
   for ( int i = 0; i < MARCH_SAMPLES; i++ ) {
     float t = tA + ( float( i ) + jit ) * step;
     float h;

@@ -3,7 +3,7 @@ import {
   RE, RM, MOON_RATE, EARTH_SPIN, PAD_UP, PAD_EAST, PAD_SCALE, PAD_POS, SKY_DAY, SKY_NULL, moonPos
 } from './constants.js';
 import { moonTex, earthTex, glowTex, flareTex } from './textures.js';
-import { toon, outline, PALETTE, RAMP_EARTH, RAMP_MOON } from './toon.js';
+import { toon, RAMP_EARTH, RAMP_MOON } from './toon.js';
 import {
   applyRelief, sampleGrid, reliefField, coastField, shoreDistance, fineEarth,
   padWeight, paintedCanvas,
@@ -11,6 +11,7 @@ import {
 import { makePatch, attachEarthPatch, updatePatch, makeMoonPatch, attachMoonPatch, updateMoonPatch, hidePatch } from './terrain.js';
 import { makeWeather, makeCloudShell, updateWeather, cloudShadeInject } from './clouds.js';
 import { makeHaze, hazeInject, updateHaze } from './haze.js';
+import { buildPad } from './pad.js';
 
 /* distances are km, angles rad — everything here lives at real planetary scale */
 const SUN_RANGE = 1500;            // km the directional light sits off the tracked vehicle
@@ -435,7 +436,9 @@ export function initWorld(target) {
   /* ---- launch pad: a child of the Earth mesh, so it rides the spin and stays over the same ground.
      Local frame: +Z = PAD_UP (radial), +X = PAD_EAST, +Y = north. Build units; the crawler deck
      keeps the platform top at z = 4, the anchor physics expects, and the group scales by PAD_SCALE. ---- */
-  pad = buildPad(glowMap);
+  const built = buildPad(glowMap);
+  pad = built.group;
+  padLamps.push(...built.lamps);
   pad.position.copy(PAD_UP).multiplyScalar(RE);
   const north = new THREE.Vector3().crossVectors(PAD_UP, PAD_EAST).normalize();
   pad.quaternion.setFromRotationMatrix(new THREE.Matrix4().makeBasis(PAD_EAST, north, PAD_UP));
@@ -471,148 +474,6 @@ function updateShadowBox(pos) {
      above this height casts a shadow worth catching either, so the pass comes off. */
   sun.castShadow = local < 30;
   setShadowBox(THREE.MathUtils.clamp(SHADOW_MIN + local * 0.12, SHADOW_MIN, SHADOW_MAX));
-}
-
-/* 84 meshes + 4 lamp sprites, all in build units around the crawler deck */
-function buildPad(glowMap) {
-  const g = new THREE.Group();
-  g.scale.setScalar(PAD_SCALE);
-  /* Pad materials, cel. `steel` was metalness 0.7, which is why the towers and tanks came out black:
-     nothing to reflect. They are light grey now, and the outline is what separates them from the sky
-     at dawn. */
-  const concrete = toon({ color: PALETTE.padConcrete });
-  /* The crawler deck used to sit on three big discs — a graded slab, a foam collar, a shallow bank —
-     because the blue-marble map put LC-39 in open ocean: the real coast of Merritt Island is finer
-     than one 20 km texel and the complex read as a plate dropped on the sea. That coast is now
-     authored properly (js/toonmap.js, padShore*), the near terrain patch paints grass, marsh, beach
-     and lagoon under the pad at 32 m per vertex, and the patch is the shadow receiver — so the discs
-     are gone and the pad stands on ground that is actually land. */
-  const steel = toon({ color: PALETTE.padSteel });
-  const blast = toon({ color: PALETTE.blast });   // scorched blast surfaces
-  const box = (w, d, h, mat, x, y, z, cast = false, recv = false, edge = false) => {
-    const m = new THREE.Mesh(new THREE.BoxGeometry(w, d, h), mat);
-    m.position.set(x, y, z); m.castShadow = cast; m.receiveShadow = recv; g.add(m);
-    if (edge) outline(m);
-    return m;
-  };
-
-  // crawler platform with track skirts; deck top z = 3
-  // The skirts join the deck in carrying the dark outline: review2 — "none of the pad models
-  // carry the dark outlines the art direction promises"; the big readable shapes get edge=true.
-  /* Round 6b (user: "clickers … probably from clipping"): the deck and skirts had their BOTTOM
-     faces at exactly z = 0, the same plane the terrain patch draws — coplanar faces under a
-     logarithmic depth buffer rasterise as running dashes along every contact edge (measured as
-     a stitched black tick-mark trail the length of the deck). Every ground-touching slab now
-     sinks ≥ 0.6 m into the ground so the intersection line sits BELOW the visible silhouette;
-     tops are unchanged, so the physics anchor at z = 4 is untouched. */
-  box(64, 46, 3.6, concrete, 0, 0, 1.2, false, true, true);
-  box(64, 9, 4.2, concrete, 0, -23, 0.9, false, true, true);
-  box(64, 9, 4.2, concrete, 0, 23, 0.9, false, true, true);
-  // reinforced launch deck: four slabs ring the flame-trench opening; tops z = 4 (physics anchor)
-  box(44, 12, 1, concrete, 0, -14, 3.5, false, true);
-  box(44, 12, 1, concrete, 0, 14, 3.5, false, true);
-  box(12, 16, 1, concrete, -16, 0, 3.5, false, true);
-  box(12, 16, 1, concrete, 16, 0, 3.5, false, true);
-  // flame trench below the opening + four canted exhaust deflectors (outlined: against the dark
-  // trench the un-outlined slabs read as one black hole; the edge is what separates four plates)
-  box(21, 17, 4.4, blast, 0, 0, 0.8, false, true);
-  /* Round 6b (user: "launchpad clickers … probably from clipping"): the deflectors reached z 4.8
-     while the F-1 exits hang at z 3.5 — every bell on the bolt circle (r ≤ 3.55) was pierced by a
-     plate, and the intersection rendered as jagged black clickers around the engine cluster.
-     Lowered to z 1.2 and narrowed 7→6: the plate top now peaks at z ≈ 3.25, clearing every bell
-     by 0.25+; the trench floor is z 3.0, so the V still reads over the opening. */
-  const d1 = box(18, 6, 1.2, blast, 0, -3.5, 1.2, true, true, true); d1.rotation.x = 0.75;
-  const d2 = box(18, 6, 1.2, blast, 0, 3.5, 1.2, true, true, true); d2.rotation.x = -0.75;
-  const d3 = box(15, 6, 1.2, blast, -7, 0, 1.2, true, true, true); d3.rotation.y = 0.75;
-  const d4 = box(15, 6, 1.2, blast, 7, 0, 1.2, true, true, true); d4.rotation.y = -0.75;
-  // strongback tower (legs to z 56) with a swing arm reaching for the rocket at mid-vehicle height
-  box(1.8, 1.8, 52, steel, -16, -10, 30, true, false, true);
-  box(1.8, 1.8, 52, steel, -16, -2, 30, true, false, true);
-  for (const bz of [14, 27, 40]) box(1.8, 8, 1.2, steel, -16, -6, bz, true);
-  /* X-bracing in every strongback bay. Two legs and four rungs read as a wardrobe at pad distance;
-     the real strongback is a truss, and diagonal members are what the eye recognises as one. */
-  for (const [z0, z1] of [[6, 14], [14, 27], [27, 40], [40, 52]]) {
-    const bl = Math.hypot(8, z1 - z0), bc = (z0 + z1) / 2, ba = Math.atan2(8, z1 - z0);
-    const b1 = box(0.7, 0.7, bl, steel, -16, -6, bc, true); b1.rotation.x = ba;
-    const b2 = box(0.7, 0.7, bl, steel, -16, -6, bc, true); b2.rotation.x = -ba;
-  }
-  const swing = box(12, 1.6, 1.6, steel, -9, -2, 34, true, false, true); swing.rotation.z = 0.05;
-  // service tower: legs to z 60, a clad core between them, and a crew access arm at capsule height
-  box(1.8, 1.8, 56, steel, 16, -10, 32, true, false, true);
-  box(1.8, 1.8, 56, steel, 16, -2, 32, true, false, true);
-  box(4.6, 6.6, 50, steel, 16, -6, 29, true, false, true);   // cladding: the tower is a building, not two poles
-  box(2.2, 3.2, 6, blast, 16, -6, 57, true);                  // dark cab/crown cap under the arm pivot
-  for (const bz of [18, 44]) box(1.8, 8, 1.2, steel, 16, -6, bz, true);
-  /* Diagonal bracing: at y=-9.3 the brace CENTRE sat outboard of the leg line — the member spans
-     Δy=8 about its centre, so it ran −13.3..−5.3 while the legs are at −10 and −2, both ends
-     floating off the tower (review2: "a diagonal strut that appears to float off the structure").
-     y=-6 centres it between the legs exactly like the strongback's: occluded by the clad core
-     where the cladding exists, real truss against the sky in the bays above it. */
-  for (const [z0, z1] of [[7, 18], [18, 44], [44, 55]]) {
-    const bl = Math.hypot(8, z1 - z0), bc = (z0 + z1) / 2, ba = Math.atan2(8, z1 - z0);
-    const b1 = box(0.6, 0.6, bl, steel, 16, -6, bc, true); b1.rotation.x = ba;
-  }
-  const crewArm = box(11, 1.5, 1.5, steel, 10, -2, 56, true, false, true); crewArm.rotation.z = -0.04;
-  // two thin lightning masts; tips clear the 74-unit vehicle
-  for (const mx of [-30, 30]) {
-    const mast = new THREE.Mesh(new THREE.CylinderGeometry(0.35, 0.6, 88, 8), steel);
-    mast.position.set(mx, -26, 48); mast.rotation.x = Math.PI / 2;
-    /* No shadow: at the pad's 1.46 m/shadow-texel (±3 km box, 4096²) a 0.7 m mast is a
-       sub-texel caster, and PCF dithers its 88 m shadow into a dotted line across the apron
-       (measured in the parked chase frame — the dashes marched off toward the horizon). The
-       AGENTS rule "a texel-sized caster cannot be filtered" again: drop it rather than widen
-       a lightning mast into a silo. */
-    mast.castShadow = false; g.add(mast);
-    const tip = new THREE.Mesh(new THREE.SphereGeometry(0.8, 10, 8), steel);
-    tip.position.set(mx, -26, 92.4); tip.castShadow = false; g.add(tip);
-  }
-  // clustered LOX/LH2 tanks on a pad with a manifold header and a feed line toward the deck
-  box(34, 28, 2, concrete, 50, 36, 3, false, true, true);
-  /* White with a floor of emissive: on the shared toon ramp these spheres sat on the camera side
-     of their own terminator through the whole launch window (the sun is east, the chase camera
-     looks from the south), so the cluster read as four black donuts ringed by their own outline.
-     The real tanks are the brightest objects on the complex — a fixed lift is honest here. */
-  const tankMat = toon({ color: 0xe9eef4 });
-  tankMat.emissive = new THREE.Color(0x33383f);
-  for (const [tx, ty] of [[40, 28], [58, 30], [42, 44], [60, 46]]) {
-    const tank = new THREE.Mesh(new THREE.SphereGeometry(6, 24, 16), tankMat);
-    tank.position.set(tx, ty, 10); tank.castShadow = true; tank.receiveShadow = true; g.add(tank);
-    outline(tank);
-  }
-  const manifold = new THREE.Mesh(new THREE.CylinderGeometry(0.9, 0.9, 26, 10), steel);
-  manifold.position.set(50, 36, 7); manifold.rotation.x = Math.PI / 2; manifold.castShadow = true; g.add(manifold);
-  box(22, 1.2, 1.2, steel, 25, 36, 6.4, true);
-  /* floodlight rig: mast + cross-truss carrying four lamps on real fixtures. 1.4-unit sections
-     were hairline sticks at pad distance (review2); 2.4/2.0 reads as a rig the lamps hang from. */
-  box(2.4, 2.4, 22, steel, 0, -34, 15, true);
-  box(30, 2.0, 2.0, steel, 0, -34, 26, true);
-  for (let i = 0; i < 4; i++) {
-    /* The lamp used to be the sprite alone: a 7-unit bokeh disc hanging in the air with nothing
-       behind it, which read as floating domes — at night and against the sky especially. Now the
-       sprite is the LENS of a fixture: a housing box on a stem under the truss, the glow sitting
-       proud of the lens face. depthTest stays on (the hull occludes it — see prior note), and the
-       disc is smaller than the housing pattern it emits from. */
-    const lx = -13.5 + i * 9;
-    box(0.5, 0.5, 2.6, steel, lx, -34, 24.6, true);            // stem from the truss
-    box(2.6, 1.4, 1.6, steel, lx, -34, 22.8, true, false, true); // housing
-    const l = new THREE.Sprite(new THREE.SpriteMaterial({ map: glowMap, color: 0xfff2c9, transparent: true, opacity: 0.5, blending: THREE.AdditiveBlending, depthWrite: false }));
-    l.position.set(lx, -33.4, 22.8); l.scale.setScalar(3.4); g.add(l);
-    padLamps.push(l);
-  }
-  /* Crawler track shoes + operator cab. The deck used to be one unbroken concrete slab, and a
-     40 × 35 m crawler with no track reads as a building foundation. The shoe row rides the
-     OUTBOARD face of the +y skirt (the −y face carries the banner): a row tried inside the
-     skirt volume was simply geometry the deck swallowed. */
-  for (let i = 0; i < 12; i++) {
-    const sx = -29 + i * 5.3;
-    box(2.4, 0.8, 3.0, blast, sx, 27.85, 1.3);
-  }
-  box(8, 6.5, 4.5, steel, 26, -19, 5.6, true, false, true);   // cab
-  box(8, 0.6, 2.2, blast, 26, -22.6, 6.4, false);             // cab rear window band
-  // banner stripe painted along the outboard crawler skirt
-  const banner = new THREE.Mesh(new THREE.PlaneGeometry(64, 2.8), blast);
-  banner.position.set(0, -27.6, 1.5); banner.rotation.x = Math.PI / 2; g.add(banner);
-  return g;
 }
 
 /* main.js calls this every frame: the shadow frustum travels with the vehicle, so the same sun

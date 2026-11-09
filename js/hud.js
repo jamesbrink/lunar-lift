@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { RE, RM, MU_E, MU_M, SOI_M, MOON_DIST, PAD_UP, PAD_POS, WARPS, SPECS, moonPos } from './constants.js';
-import { stages } from './vehicle.js';
+import { stages } from './saturn.js';
 import { S, getState, getSimTime, getEngineOn, getThrottle, getWarpIndex, getSasOn, getSasRetro, getDistFlown, getMaxQ, getTrail, activeStage, orbitalElements, getControlAuthority, groundVel, bodyUp, navVel } from './physics.js';
 import { drawn } from './predictor.js';
 import * as WORLD from './world.js';
