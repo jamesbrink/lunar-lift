@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { RE } from './constants.js';
 import { cumulusTex, cirrusTex } from './textures.js';
+import { fxOnly, RES_SCALE } from './halfres.js';
 
 /* Weather is ONE field on ONE mesh, not a cap that follows the ship.
 
@@ -35,7 +36,7 @@ const THICK = BAND_TOP - BAND_BASE;     // 7 km
 const CELLS = 250;                      // tile repeats around the globe: 160 km per tile
 const CELL_TEX = 512;                   // 0.3125 km per texel
 const SEG_W = 512, SEG_H = 256;         // same chord as the decks it replaces (12.5 km)
-const MARCH = 12;                       // samples through the view column
+const MARCH = 20;                       // samples through the view column
 const MARCH_SHADE = 4;                  // samples through the sun column for ground shade
 
 /* Extinction per km of solid cloud. A cumulus core is opaque within a kilometre; the cirrus veil
@@ -145,17 +146,20 @@ vec2 gUv0;
 float gCosLat, gThr, gM, gVeil, gMinif;
 
 /* Cumulus density (0..1) at a point; h comes back as its height in the band, 0 base .. 1 top. */
-float cloudAt( vec3 q, out float h ) {
+float cloudAt( vec3 q, float edge, out float h ) {
   float hr = ( length( q ) - BAND_IN ) / BAND_THICK;
   h = clamp( hr, 0.0, 1.0 );
   if ( hr < 0.0 || hr > 1.0 ) return 0.0;
-  vec2 uvC = tangentUv( gUv0, q - uvOrigin, gN, gEast, gNorth, gCosLat ) * CELL_REPEAT;
-  float f = 0.5 * ( texture2D( cloudCells, uvC + driftA ).r + texture2D( cloudCells, uvC + driftB ).g );
+  float f = 0.5;
+  if ( gMinif < 0.999 ) {     // unresolved cloud is its coverage: two fetches per sample saved across the far field
+    vec2 uvC = tangentUv( gUv0, q - uvOrigin, gN, gEast, gNorth, gCosLat ) * CELL_REPEAT;
+    f = 0.5 * ( texture2D( cloudCells, uvC + driftA ).r + texture2D( cloudCells, uvC + driftB ).g );
+  }
   /* The threshold climbs with height, so only the strongest cores reach the top of the band:
      every cloud is a dome with a flat base, taller where it is denser. */
   float rise = gThr + ( 0.10 + 0.22 * ( 1.0 - gM ) ) * h;
   float tail = rise > 0.5 ? 2.0 * ( 1.0 - rise ) * ( 1.0 - rise ) : 1.0 - 2.0 * rise * rise;
-  return mix( smoothstep( rise, rise + 0.035, f ), clamp( tail, 0.0, 1.0 ), gMinif ) * smoothstep( 0.0, 0.06, h );
+  return mix( smoothstep( rise - 0.5 * edge, rise + 0.5 * edge, f ), clamp( tail, 0.0, 1.0 ), gMinif ) * smoothstep( 0.0, 0.06, h );
 }
 
 /* Optical depth along the ray, composited front to back. tau is the total; tSeen is where along
@@ -176,7 +180,7 @@ void marchCloud( vec3 o, vec3 d, vec2 uv0, vec3 n, out float tau, out float tSee
      rank field to 0.5 everywhere and a threshold on it is a coin that always lands the same way:
      measured from 4000 km as storm belts gone solid white and everything else gone bare. There the
      density becomes the coverage itself — the exact mean of what the threshold would have drawn. */
-  gMinif = smoothstep( 1.5, 5.0, length( fwidth( uvOrigin ) ) / TEXEL_KM );
+  gMinif = smoothstep( 1.5, 5.0, length( fwidth( uvOrigin ) ) * PIXEL_SCALE / TEXEL_KM );
   vec2 uvM = tangentUv( uv0, ( tA + 0.5 * len ) * d + o - uvOrigin, n, gEast, gNorth, gCosLat );
   /* The systems are hundreds of km wide: one macro sample per column is enough. Unresolved, it is
      read two mips down — the sheet is a hard mask, and a hard mask at 20 km per texel seen from
@@ -200,19 +204,20 @@ void marchCloud( vec3 o, vec3 d, vec2 uv0, vec3 n, out float tau, out float tSee
   for ( int i = 0; i < MARCH_SAMPLES; i++ ) {
     float t = tA + ( float( i ) + jit ) * step;
     float h;
-    float cu = cloudAt( o + t * d, h );
+    float cu = cloudAt( o + t * d, 0.05, h );
     float ci = gVeil * smoothstep( 0.72, 0.9, h );
     float dt = ( cu * extLow + ci * extHigh ) * step;
     float a = 1.0 - exp( -dt );
     tSum += T * a * t; wSum += T * a;
     T *= 1.0 - a;
     tau += dt;
+    if ( T < 0.02 ) break;      // opaque already: nothing behind this can be seen
   }
   if ( wSum > 1e-4 ) tSeen = tSum / wSum;
 }
 `;
 
-const DEFINES = (samples) => `
+const DEFINES = (samples, pixelScale) => `
 #define SHELL_R ${R_OUT.toFixed(1)}
 #define BAND_IN ${R_IN.toFixed(1)}
 #define GROUND_R ${RE.toFixed(1)}
@@ -223,6 +228,7 @@ const DEFINES = (samples) => `
 #define COVER_CLEAR ${COVER_CLEAR.toFixed(3)}
 #define COVER_STORM ${COVER_STORM.toFixed(3)}
 #define MARCH_SAMPLES ${samples}
+#define PIXEL_SCALE ${pixelScale.toFixed(2)}
 
 uniform sampler2D cloudCells;
 uniform sampler2D cloudMacro;
@@ -252,7 +258,7 @@ void main() {
 const SHELL_FRAG = /* glsl */`
 #include <common>
 #include <logdepthbuf_pars_fragment>
-` + DEFINES(MARCH) + /* glsl */`
+` + DEFINES(MARCH, RES_SCALE) + /* glsl */`
 uniform vec3 cloudLit;
 uniform vec3 cloudShade;
 
@@ -293,8 +299,11 @@ void main() {
      height-only tone made them read as plates. */
   vec3 seen = cameraPosition + tSeen * d;
   float hs;
-  float occ = 0.6 * cloudAt( seen + 0.5 * sunWorld, hs ) + 0.4 * cloudAt( seen + 1.5 * sunWorld, hs );
-  float light = 1.0 - 0.85 * occ * ( 1.0 - gMinif );
+  /* The light reads the field through a much wider edge than the march does (0.30 of rank against
+     0.05). The seen point moves by up to a sample with the march's jitter, and against a hard edge
+     that flipped the cel band pixel to pixel — hatching over every flank. */
+  float occ = 0.6 * cloudAt( seen + 0.5 * sunWorld, 0.30, hs ) + 0.4 * cloudAt( seen + 1.5 * sunWorld, 0.30, hs );
+  float light = 1.0 - 0.9 * occ * ( 1.0 - gMinif );
   /* Cel tone in three bands, each step softened by its own screen-space width so the bands have
      an edge without a stair. */
   float band = light * 3.0;
@@ -309,7 +318,7 @@ void main() {
 
 /* Ground shade: the same march aimed up the sun ray from the surface point. Injected into the globe
    and the near patch so the darkening on the ground is the cloud column above it. */
-const SHADE_FRAG = DEFINES(MARCH_SHADE) + /* glsl */`
+const SHADE_FRAG = DEFINES(MARCH_SHADE, 1) + /* glsl */`
 uniform float shadeStrength;
 
 varying vec3 vShadeW;
@@ -362,7 +371,9 @@ export function makeCloudShell(U) {
     m.castShadow = false;         // a 7 km sheet at a low sun drags its silhouette hundreds of km
   }
   mesh.add(floor);
-  return mesh;
+  /* Drawn in the half-resolution pass (js/halfres.js), which is where this shell's 6.7 ms went. The
+     march reads its own footprint from screen derivatives, hence PIXEL_SCALE above. */
+  return fxOnly(mesh);
 }
 
 /* Add the weather shade to an already-built material's program. three keys its program cache on

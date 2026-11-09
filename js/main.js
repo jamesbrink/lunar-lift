@@ -7,6 +7,7 @@ import { camera, initCamera, cycleCamera, updateCamera, resetCameraView, setCamM
 import { initHUD, addLog, updateHUD, drawMap, toggleMapView, endOverlay, setWarn, hideOverlay, clearLog } from './hud.js';
 import { audioInit, audioEngine, audioThud, audioExplosion, audioWin, updateEngineGain } from './audio.js';
 import { updateAim, resetAim } from './targeting.js';
+import { initHalfRes, occlude, renderHalfRes } from './halfres.js';
 import { initPredictor, predict, updatePredictor, clearPredictor, predLine } from './predictor.js';
 
 /* ---------------- renderer / scene ---------------- */
@@ -67,6 +68,8 @@ initPhysics({
 initPredictor({ scene, groundE: groundHeight, groundM: moonGroundHeight, setWarn });
 initCamera(canvas, addLog);
 initHUD({ resetMission });
+initHalfRes(scene);
+occlude(scene);          // every opaque mesh built so far hides the half-resolution layer
 
 addEventListener('keydown', e => {
   const k = e.key.toLowerCase();
@@ -130,6 +133,7 @@ function frame() {
   updateSky(S.pos, camera.position);
   updateSunShadow(S.pos);
   drawMap();
+  renderHalfRes(renderer, scene, camera);   // weather and exhaust, at a quarter of the pixels
   renderer.render(scene, camera);
   } catch (err) {
     if (!window.__frameErr) { window.__frameErr = true; console.error('LUNAR LIFT frame error:', err); }

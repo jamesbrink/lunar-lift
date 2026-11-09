@@ -8,6 +8,7 @@ import { toon, outline, plumeMeshes, PALETTE, RAMP_HARD } from './toon.js';
    clock drives the emission rate so the plume thins honestly at high warp instead of lying. */
 import { airDensity, getSimTime } from './physics.js';
 import * as WORLD from './world.js';
+import { LAYER_FX, RES_SCALE } from './halfres.js';
 
 let scene = null;
 
@@ -425,6 +426,7 @@ const plumeMat = new THREE.ShaderMaterial({
     varying float vA;
     varying float vAdd;
     uniform float uScale;
+    const float RES = ${RES_SCALE.toFixed(2)};   // this pass is drawn at a fraction of the screen's pixels
     void main() {
       vTint = color;
       vA = alpha;
@@ -445,7 +447,7 @@ const plumeMat = new THREE.ShaderMaterial({
          parcels get 80 px — a metre from the lens a fully additive puff otherwise blooms into a fat
          lantern a tenth of the screen, and the trench read as a dozen separate lamps instead of one
          sheet. Both caps only bite closer than ~30 m, where the plume is meant to be one body. */
-      float cap = mix(220.0, 80.0, min(vAdd, 1.0));
+      float cap = mix(220.0, 80.0, min(vAdd, 1.0)) * RES;
       gl_PointSize = clamp(size * (uScale / max(-mv.z, 1e-6)), 1.0, cap);
       gl_Position = projectionMatrix * mv;
       #include <logdepthbuf_vertex>
@@ -493,6 +495,10 @@ const plumeMat = new THREE.ShaderMaterial({
 const plume = new THREE.Points(pGeo, plumeMat);
 plume.frustumCulled = false;
 plume.castShadow = false;
+/* Fill-rate is all this draw call costs — 16 ms of a 31.6 ms frame at full throttle on the pad,
+   measured — so it is drawn in the half-resolution pass (js/halfres.js), after the weather. */
+plume.layers.set(LAYER_FX);
+plume.renderOrder = 3;
 const _dbSize = new THREE.Vector2();
 /* The same world-space attenuation PointsMaterial uses (so a parcel is its true diameter at any
    zoom, from pad camera to system view), recomputed from the live camera on render — vehicle.js
@@ -500,7 +506,7 @@ const _dbSize = new THREE.Vector2();
 plume.onBeforeRender = (renderer, sc, cam) => {
   if (!cam.isPerspectiveCamera) return;
   renderer.getDrawingBufferSize(_dbSize);
-  plumeMat.uniforms.uScale.value = _dbSize.y / (2 * Math.tan(cam.fov * Math.PI / 360));
+  plumeMat.uniforms.uScale.value = _dbSize.y * RES_SCALE / (2 * Math.tan(cam.fov * Math.PI / 360));
 };
 
 /* Relief wiring. What world.js actually exports is body-aware: groundHeight / fineGroundHeight for
