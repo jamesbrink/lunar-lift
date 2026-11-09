@@ -34,6 +34,13 @@ export function moonPos(t, out = new THREE.Vector3()) {
   return out.copy(MOON_U).multiplyScalar(Math.cos(a)).addScaledVector(MOON_V, Math.sin(a)).multiplyScalar(MOON_DIST);
 }
 
+/* d/dt of moonPos: the Moon's own travel through the game frame, ~1.02 km/s. Anything that
+   asks "how fast am I going relative to the lunar surface" needs this; the surface rides with it. */
+export function moonVel(t, out = new THREE.Vector3()) {
+  const a = moonPhase + MOON_RATE * t;
+  return out.copy(MOON_U).multiplyScalar(-Math.sin(a)).addScaledVector(MOON_V, Math.cos(a)).multiplyScalar(MOON_DIST * MOON_RATE);
+}
+
 export const VS = 0.0014;                 // vehicle visual scale: 75 build units → ~105 m, Saturn-V sized
 export const PAD_SCALE = VS;
 export const RHALF = 37 * VS;             // contact offset from the vehicle centre (~ half its height)

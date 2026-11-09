@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { RE, RM, MU_E, MU_M, SOI_M, MOON_DIST, PAD_UP, PAD_POS, WARPS, SPECS, moonPos } from './constants.js';
 import { stages } from './vehicle.js';
-import { S, getState, getSimTime, getEngineOn, getThrottle, getWarpIndex, getSasOn, getSasRetro, getDistFlown, getMaxQ, getTrail, activeStage, totalMass, orbitalElements, getControlAuthority, airDensity, surfaceVel } from './physics.js';
+import { S, getState, getSimTime, getEngineOn, getThrottle, getWarpIndex, getSasOn, getSasRetro, getDistFlown, getMaxQ, getTrail, activeStage, totalMass, orbitalElements, getControlAuthority, airDensity, groundVel, bodyUp } from './physics.js';
 import { initNavball, updateNavball } from './navball.js';
 
 const $ = id => document.getElementById(id);
@@ -57,12 +57,16 @@ export function updateHUD(dt) {
   const altM = rM - RM, altE = rE - RE;
   const nearMoon = rM < SOI_M;
   const alt = nearMoon ? altM : altE;
-  // KSP-style: inside the Earth's sphere we read speed relative to the rotating ground
-  const rel = nearMoon ? S.v : surfaceVel(new THREE.Vector3());
+  // KSP-style: the speed you read is the speed over the surface underneath — the co-rotating
+  // ground near Earth, the travelling Moon near the Moon (see groundVel in physics.js)
+  const rel = groundVel(new THREE.Vector3());
   const speed = rel.length();
   $('tAlt').textContent = `${Math.max(0, alt).toFixed(alt < 100 ? 1 : 0)} km`;
-  $('tVel').textContent = `${(speed * 1000).toFixed(0)} m/s ${nearMoon ? '' : 'ground'}`;
-  const radial = rel.dot(new THREE.Vector3().subVectors(S.pos, nearMoon ? moon : S.pos).normalize());
+  $('tVel').textContent = `${(speed * 1000).toFixed(0)} m/s ${nearMoon ? 'surface' : 'ground'}`;
+  /* Vertical speed against the surface underneath. Dotting against (pos − centre) is the
+     radial direction; the previous version passed S.pos for both arguments on Earth, which made
+     the product identically zero. */
+  const radial = rel.dot(bodyUp(new THREE.Vector3()));
   $('tVs').textContent = `${(radial * 1000).toFixed(0)} m/s`;
   const i = activeStage();
   const live = engineOn && throttle > .01 && i >= 0 && stages[i].fuel > 0;

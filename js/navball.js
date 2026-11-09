@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { RE, RM, MU_E, MU_M, SOI_M, moonPos } from './constants.js';
-import { S, getSimTime, isBurning, orbitalElements, surfaceVel, fwd } from './physics.js';
+import { S, getSimTime, isBurning, orbitalElements, navVel, fwd } from './physics.js';
 
 /* ---------------- KSP-style attitude ball ----------------
    The ball is an orthographic view of the sky as seen from the nose of the
@@ -95,8 +95,10 @@ export function drawNavball() {
   const nearMoon = rM < SOI_M;
   const centre = nearMoon ? moon : new THREE.Vector3();
   const { up, north, east } = localFrame(S.pos.clone().sub(centre));
-  const vel = nearMoon || rE > 40000 ? S.v : surfaceVel(new THREE.Vector3());
-  const nose = S.pos ? null : null;
+  /* One velocity vector, the one SAS steers by: inertial about the Earth, Moon-relative inside
+     the Moon's SOI. Both the markers and the ap/pe readouts below depend on it being the
+     velocity measured in the frame of the body being orbited. */
+  const vel = navVel(new THREE.Vector3());
 
   c.save();
   c.beginPath(); c.arc(cx, cy, R, 0, 6.283); c.clip();

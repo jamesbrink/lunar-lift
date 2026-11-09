@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { RE, MU_E, RM, MU_M, SOI_M, PAD_UP, PAD_POS, PAD_ANGULAR, RHALF, ATMO_H, RHO0, CD_AREA, WARPS, LAND_SAFE, SAFE_EARTH, SPECS, CAPSULE_MASS, EARTH_SPIN, SPIN_AXIS, PAD_EAST, MOON_DIST, TURN, moonPos } from './constants.js';
+import { RE, MU_E, RM, MU_M, SOI_M, PAD_UP, PAD_POS, PAD_ANGULAR, RHALF, ATMO_H, RHO0, CD_AREA, WARPS, LAND_SAFE, SAFE_EARTH, SPECS, CAPSULE_MASS, EARTH_SPIN, SPIN_AXIS, PAD_EAST, MOON_DIST, TURN, moonPos, moonVel } from './constants.js';
 
 /* ---------------- injected dependencies (see initPhysics) ----------------
    hooks:      addLog(msg, cls), showEndOverlay(title, body, btn), setWarn(textOrNull)
@@ -74,6 +74,32 @@ export function airDensity(alt) { return alt > 420 ? 0 : RHO0 * Math.exp(-Math.m
 /* velocity relative to the rotating ground — what the telemetry and SAS actually care about */
 export function surfaceVel(out = new THREE.Vector3()) {
   return out.copy(S.v).add(new THREE.Vector3(-EARTH_SPIN * S.pos.z, 0, EARTH_SPIN * S.pos.x));
+}
+/* Two velocity frames, because two bodies move under the vehicle.
+   navVel    — what SAS and the prograde marker steer by: the inertial velocity near Earth (an
+               orbit is inertial, and the ground-relative vector is ~0 at the pad — steering by
+               it drags the trajectory out of its own launch plane), but the Moon-relative
+               velocity inside the Moon's SOI, where the ground itself travels at 1.02 km/s and
+               the inertial vector is not the velocity an engine is fighting.
+   groundVel — velocity relative to the surface underneath: the co-rotating ground on Earth, the
+               travelling Moon on the Moon. This is the speed the HUD reads and the speed a
+               touchdown is judged by; judging contact by inertial speed would demand a vehicle
+               standing still in the game frame, i.e. 1.02 km/s faster than the lunar surface. */
+const _nv = new THREE.Vector3(), _mv = new THREE.Vector3(), _rad = new THREE.Vector3();
+function overMoon() { moonPos(simTime, _moon); return S.pos.distanceTo(_moon) < SOI_M; }
+export function navVel(out = new THREE.Vector3()) {
+  if (overMoon()) { moonVel(simTime, _mv); return out.copy(S.v).sub(_mv); }
+  return out.copy(S.v);
+}
+export function groundVel(out = new THREE.Vector3()) {
+  if (overMoon()) { moonVel(simTime, _mv); return out.copy(S.v).sub(_mv); }
+  return surfaceVel(out);
+}
+/* Unit "up" from whichever body is underneath — the attitude to hold when the velocity vector
+   has no direction worth steering by (touchdown, hovering). */
+export function bodyUp(out = new THREE.Vector3()) {
+  if (overMoon()) return out.subVectors(S.pos, _moon).normalize();
+  return out.copy(S.pos).normalize();
 }
 
 /* ---- moment of inertia from live mass distribution (build units, see vehicle.js) ---- */
@@ -233,7 +259,11 @@ export function physStep(dt) {
        is meaningless at liftoff (the pad is moving 408 m/s) and drags the trajectory
        out of the launch plane as the vehicle climbs out of the rotating atmosphere. */
     let dir;
-    if (sasRetro) dir = _md.copy(S.v).negate();
+    if (sasRetro) {
+      dir = navVel(_nv);
+      if (dir.lengthSq() < 2.5e-5) dir = bodyUp(_rad);      // terminal descent: no velocity vector worth fighting, hold the local vertical
+      else dir.negate();
+    }
     else if (simTime < TURN.t0) dir = _up.copy(S.pos);            // hold the local vertical
     else if (simTime < TURN.t0 + TURN.ramp) {                     // programmed gravity turn
       /* The nose is swept from vertical toward the launch-plane east direction, but never
@@ -251,7 +281,7 @@ export function physStep(dt) {
       const th = Math.min(thProg, thMax);
       _md.copy(PAD_EAST).addScaledVector(_up, -PAD_EAST.dot(_up)).normalize();
       dir = _up.clone().multiplyScalar(Math.cos(th)).addScaledVector(_md, Math.sin(th));
-    } else dir = _md.copy(S.v);
+    } else dir = navVel(_md);
     if (dir.lengthSq() > 1e-4) {
       const tq = new THREE.Quaternion().setFromUnitVectors(UP_Z, dir.normalize());
       const errB = S.q.clone().invert().multiply(tq);              // pointing error in body frame
@@ -311,7 +341,7 @@ function checkImpact() {
   if (S.pos.length() <= RE + RHALF) return impact(false, S.pos.length());
 }
 function impact(onMoon, dist) {
-  const speed = S.v.length();                    // km/s
+  const speed = groundVel(_nv).length();         // km/s, relative to the surface being hit
   const disp = speed * 1000;                    // m/s
   if (onMoon && speed <= LAND_SAFE) {
     state = 'won'; vehicleOps.setVisible(true);
