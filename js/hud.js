@@ -13,7 +13,9 @@ let mm = null, mg = null;
 export function addLog(msg, cls = '') {
   const el = document.createElement('div'); el.className = 'logline ' + cls; el.textContent = msg;
   const box = $('log'); box.prepend(el);
-  while (box.children.length > 5) box.lastChild.remove();
+  // dense phases (staging, LES, ignition) fire four-plus events at once; three pills is what the
+  // eye can actually read while flying, and the animation still expires every line on its own
+  while (box.children.length > 3) box.lastChild.remove();
   el.addEventListener('animationend', () => el.remove());
 }
 
