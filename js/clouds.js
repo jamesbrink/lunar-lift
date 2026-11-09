@@ -28,7 +28,7 @@ import { RE } from './constants.js';
 const SEG = 44;                       // deck cap: 45×45 vertices over 440 km, 10 km per cell
 const SEG_SHADE = 28;                 // shade cap: 29×29 over 140 km, 5 km per cell
 const RADIUS = 220;                   // km deck radius — matches the terrain patch
-const RADIUS_SHADE = 70;              // km shade radius — see the uv-budget note below
+const RADIUS_SHADE = 32;              // km shade radius — the ground beyond this is a grazing sliver
 const RECENTRE = 6;                   // km of ground travel before a rebuild
 const ALT = 7;                        // km above the reference sphere — a fair weather cumulus base
 const TILE = 200;                     // km per tile: 390 m per texel, BOTH caps, same field
@@ -41,9 +41,11 @@ const TILE = 200;                     // km per tile: 390 m per texel, BOTH caps
    The shade cap has to sample the SAME uv field as the deck or a shadow lands under clear sky, so it
    keeps TILE and shrinks instead: 70 km of shadow is more ground than the pad can resolve anyway. */
 const FADE0 = 0.52;                   // radial fade starts here (fraction of the cap's radius)
-const SHOW_ALT = 45;                  // km: above this the plate is sub-pixel and the decks take over
+const SHOW_ALT = 45;                  // km: opacity reaches zero here and the decks take over
+const FADE_ALT = 25;                  // km: the handover from the near layer starts here
 const SHADE_LIFT = 0.06;              // km above the ground for the shade cap
-const SHADE_ALPHA = 0.70;             // how dark a puff's shadow gets, before the tile's own alpha
+const SHADE_ALPHA = 0.50;             // how dark a puff's shadow gets, before the tile's own alpha
+const SHADE_FADE0 = 0.3;                // the shade gives up earlier than the deck: see updateCloudLayer
 
 const _g = new THREE.Vector3(), _e1 = new THREE.Vector3(), _e2 = new THREE.Vector3();
 const _d = new THREE.Vector3();
@@ -93,6 +95,33 @@ function tileTexture() {
   return t;
 }
 
+/* The shade's own copy of that field: the same weather, box-filtered to 64 × 64 (3 km per texel) and
+   shipped WITHOUT mipmaps. The deck wants the crisp 512 version, but a ground cap seen from 5 km away
+   minifies hard, and because mip selection is per triangle the level jumps from cell to cell — which is
+   exactly the straight-edged wedge pattern this whole layer spent an afternoon failing to avoid. With no
+   mip chain to select from, and a source already smoothed to the scale a shadow can be read at, the
+   sample is continuous and the shade still belongs to the cloud above it. */
+function shadeTile(src) {
+  const S = src.image.width, R = 64, K = S / R, data = new Uint8Array(R * R * 4);
+  for (let y = 0; y < R; y++) {
+    for (let x = 0; x < R; x++) {
+      let a = 0;
+      for (let dy = 0; dy < K; dy++) for (let dx = 0; dx < K; dx++) {
+        a += src.image.data[((((y * K + dy) % S) * S) + ((x * K + dx) % S)) * 4 + 3];
+      }
+      const i = (y * R + x) * 4;
+      data[i] = 255; data[i + 1] = 255; data[i + 2] = 255; data[i + 3] = (a / (K * K)) | 0;
+    }
+  }
+  const t = new THREE.DataTexture(data, R, R, THREE.RGBAFormat);
+  t.wrapS = t.wrapT = THREE.RepeatWrapping;
+  t.magFilter = THREE.LinearFilter;
+  t.minFilter = THREE.LinearFilter;      // no chain, so no per-triangle level selection
+  t.generateMipmaps = false;
+  t.needsUpdate = true;
+  return t;
+}
+
 function makePlate(material, order, seg) {
   const cols = seg + 1;
   const n = cols * cols;
@@ -126,7 +155,7 @@ export function makeCloudLayer(body, groundKm) {
     side: THREE.DoubleSide, vertexColors: true, fog: false,
   });
   const shadeMat = new THREE.MeshBasicMaterial({
-    map: tex, color: 0x172033, transparent: true, depthWrite: false,
+    map: shadeTile(tex), color: 0x172033, transparent: true, depthWrite: false,
     side: THREE.DoubleSide, vertexColors: true, fog: false,
     polygonOffset: true, polygonOffsetFactor: -4, polygonOffsetUnits: -4,
   });
@@ -153,7 +182,7 @@ function basis(gx, gy, gz) {
 
 /* Writes one cap: geometry anchored to (cx,cy,cz) in body-local space, uv anchored to (offU,offV)
    so that every texel keeps the same ground position as the centre moves. */
-function fill(mesh, cx, cy, cz, offU, offV, isShade, radius, sunX, sunY, sunZ, groundKm) {
+function fill(mesh, cx, cy, cz, offU, offV, isShade, radius, fade0, sunX, sunY, sunZ, groundKm) {
   const seg = mesh.userData.seg, cols = seg + 1;
   basis(cx, cy, cz);
   const g = _g, e1 = _e1, e2 = _e2;
@@ -171,7 +200,7 @@ function fill(mesh, cx, cy, cz, offU, offV, isShade, radius, sunX, sunY, sunZ, g
       const vl = 1 / Math.sqrt(vx * vx + vy * vy + vz * vz);
       vx *= vl; vy *= vl; vz *= vl;
       const rr = Math.min(1, Math.hypot(ox, oy) / radius);
-      let f = THREE.MathUtils.clamp((1 - rr) / (1 - FADE0), 0, 1);
+      let f = THREE.MathUtils.clamp((1 - rr) / (1 - fade0), 0, 1);
       f = f * f * (3 - 2 * f);
       let alt = ALT;
       if (isShade) {
@@ -200,8 +229,15 @@ function fill(mesh, cx, cy, cz, offU, offV, isShade, radius, sunX, sunY, sunZ, g
 /* Per frame, from js/world.js: ground point and sun in BODY-LOCAL space, altitude in km. */
 export function updateCloudLayer(L, gx, gy, gz, sunLocal, altKm) {
   if (!L) return;
-  const on = altKm < SHOW_ALT && Number.isFinite(gx + gy + gz);
+  /* Hand over to the planet-scale decks instead of popping off at a threshold: opacity rides smoothly
+     to zero between FADE_ALT and SHOW_ALT, which is where one global-deck texel finally exceeds a
+     pixel and the two scales agree to within a cloud. */
+  const k = THREE.MathUtils.clamp((altKm - FADE_ALT) / (SHOW_ALT - FADE_ALT), 0, 1);
+  const vis = 1 - k * k * (3 - 2 * k);
+  const on = vis > 0.01 && Number.isFinite(gx + gy + gz);
   L.cloud.visible = on;
+  L.cloud.material.opacity = vis;
+  L.shadow.material.opacity = vis;
   if (!on) { L.shadow.visible = false; return; }
 
   /* Arc travelled since the last build, and the uv shift that keeps the weather still. */
@@ -220,7 +256,7 @@ export function updateCloudLayer(L, gx, gy, gz, sunLocal, altKm) {
   L.gx = gx; L.gy = gy; L.gz = gz; L.has = true; L.dirty = false; L.ready = true;
 
   const sx = sunLocal.x, sy = sunLocal.y, sz = sunLocal.z;
-  fill(L.cloud, gx, gy, gz, L.uKm / TILE, L.vKm / TILE, false, RADIUS, sx, sy, sz, null);
+  fill(L.cloud, gx, gy, gz, L.uKm / TILE, L.vKm / TILE, false, RADIUS, FADE0, sx, sy, sz, null);
   L.cloud.visible = true;
 
   /* The shade: the same cap, anti-sunward by deck height over tan(elevation), draped on the ground. */
@@ -234,7 +270,7 @@ export function updateCloudLayer(L, gx, gy, gz, sunLocal, altKm) {
     cx *= cl; cy *= cl; cz *= cl;
     L.sx = cx; L.sy = cy; L.sz = cz;
     fill(L.shadow, cx, cy, cz, (L.uKm - hx * off) / TILE, (L.vKm - hz * off) / TILE,
-         true, RADIUS_SHADE, sx, sy, sz, L.groundKm);
+         true, RADIUS_SHADE, SHADE_FADE0, sx, sy, sz, L.groundKm);
     L.shadow.visible = true;
   } else {
     L.shadow.visible = false;
