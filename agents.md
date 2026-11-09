@@ -219,6 +219,16 @@ state differs from the ship's real trajectory by ~100 km, which would make the r
   (`S.pos` is the middle of the FULL stack — after two stagings the command module is 38 m ahead of
   it); the focus glides at staging. Measured after: ship at NDC (0, 0), distance 0.118 km, re-centred
   to within 1 % of the frame 1.4 s after a stage leaves.
+- **Integrate the trajectory on one clock, draw it on another.** `js/predictor.js` re-integrates the
+  path five times a second (0.72 ms each, measured) and stores it as data — body-relative positions
+  with their mission times. `updatePredictor` draws it every frame from where the ship is: flown
+  points dropped, a gap of 9 % of the camera distance, a five-vertex fade-in. Drawing the
+  integration's own points until the next tick put the ribbon's start 2.7 km behind an orbiting ship
+  and through its hull; measured after, the first vertex sits 0.120 km ahead on twelve consecutive
+  frames. Three more rules live there: a closed orbit stops after one lap and fades out before it
+  meets its start; lunar paths are stored Moon-relative (inertial, an orbit round a body moving
+  1 km/s is a coil); and the ribbon's vertices are offsets from a group sitting on the ship, because
+  absolute Float32 at lunar distance is a 31 m grid.
 - **Pad exhaust is a shape problem before it is a physics problem.** Parcels leave the F-1s at
   ~2.9 km/s, and if the tangential component of the trench hit survives whole, the deflectate paints a
   200 m field of discrete glowing domes around the pad — measured at 264 live parcels with sprites up to
@@ -295,7 +305,7 @@ await tab.evaluate(`(async () => {
 - `gl.readPixels` on the game canvas returns all zeros (`preserveDrawingBuffer: false`). It is never
   evidence of anything; take a screenshot instead.
 - To isolate one object in the scene, get the scene through the prediction line
-  (`(await import('/js/physics.js')).predLine.parent`) and index the spheres by
+  (`(await import('/js/predictor.js')).predLine.parent`) and index the spheres by
   `Math.round(o.geometry.parameters.radius)`: Earth 6371, weather shell 6382,
   atmosphere shell 6435, Moon 1737. Hiding one at a time and screenshotting is how the grey-wedge
   artefact turned out to be cloud alpha rather than a shadow.
@@ -328,14 +338,15 @@ await tab.evaluate(`(async () => {
 
 ## Structure
 
-One concern per file; no god files. Current sizes: `toonmap.js` 1401, `vehicle.js` 1350,
-`world.js` 822, `physics.js` 546, `navball.js` 435, `terrain.js` 404, `hud.js` 380,
-`clouds.js` 300, `camera.js` 216, `ribbon.js` 198, `textures.js` 231, `main.js` 160,
-`toon.js` 139, `constants.js` 119, `targeting.js` 108, `audio.js` 53. `vehicle.js` has grown past
-a comfortable size and now clearly holds two concerns — the vehicle meshes and the exhaust/blast
-particle field; if the next change to either pushes it higher, split the particle system out the
-way `targeting.js` was: a module that owns one question. If a change would push
-`physics.js` much past 500, apply the same rule there.
+One concern per file; no god files. Current sizes: `toonmap.js` 1779, `vehicle.js` 1529,
+`world.js` 821, `terrain.js` 549, `navball.js` 498, `physics.js` 472, `hud.js` 437,
+`clouds.js` 393, `predictor.js` 275, `camera.js` 237, `textures.js` 232, `ribbon.js` 213,
+`main.js` 163, `toon.js` 138, `constants.js` 119, `targeting.js` 108, `haze.js` 62, `audio.js` 53.
+`vehicle.js` has grown past a comfortable size and clearly holds two concerns — the vehicle meshes
+and the exhaust/blast particle field; if the next change to either pushes it higher, split the
+particle system out the way `targeting.js` and `predictor.js` were: a module that owns one question.
+`physics.js` is back under 500 because the trajectory ribbon left it for `predictor.js`; keep
+display code out of it — `tools/mission-sim.mjs` imports it headless.
 
 `js/constants.js` holds every physical constant and the vehicle `SPECS`, each with the measurement
 that justifies it in a comment. `docs/reference/` holds the source-cited external data and the

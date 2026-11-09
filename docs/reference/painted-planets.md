@@ -108,20 +108,33 @@ Three fields feed the march, all generated:
 - **Cirrus** — `cirrusTex`, a thin veil in the top quarter of the band.
 
 The threshold climbs with height, so every cloud is a dome on a flat base and only the strongest cores
-reach 11 km. The march composites front to back and reports the mean height the ray actually *sees*:
-tops from above, bases from the pad. That one number drives a three-band cel tone, which is the whole
-lighting model.
+reach 11 km. The march composites front to back and reports *where* along the ray the eye lands:
+on tops from above, on bases from the pad. Light is then how much cloud stands between that point
+and the sun — two more reads of the field, 0.5 and 1.5 km sunward — pushed through a three-band cel
+tone. A puff gets a bright flank and a dark one; a height-only tone lit every cloud like a plate.
 
-Measured, from the macro sheet through the shipped coverage law: **26.7 %** global cumulus cover; by
-latitude 0° 0.47, ±20° 0.22 and 0.13, ±40° 0.30 and 0.22, ±60° 0.32 and 0.23, ±80° 0.16 and 0.19.
+Computed from the macro sheet through the shipped coverage law, with the bunching factor at its mean
+of 1: **29.0 %** global cumulus cover; by latitude 0° 0.52, ±20° 0.23 and 0.14, ±40° 0.32 and 0.24,
+±60° 0.35 and 0.25, ±80° 0.17 and 0.20 (north first). The cover on screen has not been counted.
 
 Where the lattice is unresolved (more than ~5 of its texels under one pixel) the sampler's mips have
 averaged the rank field to 0.5 and a threshold on it is a coin that always lands the same way —
 measured from 4 000 km as storm belts gone solid white and everything else bare. There the density
 becomes the coverage fraction itself, which is the exact mean of what the threshold would have drawn.
 
-Each pixel starts its eight samples at a different phase (interleaved gradient noise). With a fixed
-phase a slanted view cut every cloud at the same eight heights and drew it as a stack of plates.
+Each pixel starts its twelve samples at a different phase (interleaved gradient noise). With a fixed
+phase a slanted view cut every cloud at the same heights and drew it as a stack of plates. The price
+is a fine stipple on cloud flanks seen close; it is visible in a still at 8–30 km and is the known
+rough edge of this renderer.
+
+The band has two surfaces. The outer sphere serves an eye above the band (front faces) or below it
+(back faces). An eye *inside* the band looks down through rays that end on the ground and never reach
+the outer sphere, so a second sphere at the cloud base carries the same march for those. A ray that
+dips under the base without hitting the ground is marched straight through to the far side.
+
+Frame cost over 90 `requestAnimationFrame` deltas (Apple M4 Max, 1280 × 720): pad at full throttle
+median 16.8 ms, p90 18.8; inside the band at 8 km 16.7 / 17.4; 300 km orbit 16.6 / 18.0. The median
+is the display's vsync, so this bounds the cost on that machine and says nothing about a slower GPU.
 
 Row 0 is south in every generated sheet: a `DataTexture` samples row 0 at `v = 0`, and
 `SphereGeometry`'s `v = 0` is the south pole.

@@ -2,11 +2,12 @@ import * as THREE from 'three';
 import { RE, RM, WARPS, DTPHYS, PAD_POS, moonPos } from './constants.js';
 import { initWorld, spinBodies, syncTime, updateSky, updateSunShadow, groundHeight, moonGroundHeight } from './world.js';
 import { stages, initVehicle, spawnParticle, addDebris, detachStage, setVisible, updateParticles, updateDebris, updateBurnVisuals, clearDebris, resetStages, lesGroup } from './vehicle.js';
-import { S, keys, initPhysics, getState, getSimTime, setSimTime, getEngineOn, getThrottle, getWarpIndex, setWarpIndex, setTargetThrottle, getSasOn, setSas, cycleWarp, toggleSas, toggleSasRetro, activeStage, fwd, isBurning, accelAt, physStep, predict, toggleIgnite, separateStage, separateLES, addDistFlown, pushTrail, resetSim, clearPredictor, markTeleported, predLine, omega, getControlAuthority } from './physics.js';
+import { S, keys, initPhysics, getState, getSimTime, setSimTime, getEngineOn, getThrottle, getWarpIndex, setWarpIndex, setTargetThrottle, getSasOn, setSas, cycleWarp, toggleSas, toggleSasRetro, activeStage, fwd, isBurning, accelAt, physStep, toggleIgnite, separateStage, separateLES, addDistFlown, pushTrail, resetSim, markTeleported, omega, getControlAuthority } from './physics.js';
 import { camera, initCamera, cycleCamera, updateCamera, resetCameraView, setCamMode, setCamDist, resizeCamera } from './camera.js';
 import { initHUD, addLog, updateHUD, drawMap, toggleMapView, endOverlay, setWarn, hideOverlay, clearLog } from './hud.js';
 import { audioInit, audioEngine, audioThud, audioExplosion, audioWin, updateEngineGain } from './audio.js';
 import { updateAim, resetAim } from './targeting.js';
+import { initPredictor, predict, updatePredictor, clearPredictor, predLine } from './predictor.js';
 
 /* ---------------- renderer / scene ---------------- */
 const canvas = document.getElementById('gl');
@@ -59,11 +60,11 @@ initVehicle(scene);
 initPhysics({
   scene,
   stages,
-  hooks: { addLog, showEndOverlay: endOverlay, setWarn },
+  hooks: { addLog, showEndOverlay: endOverlay },
   audio: { engine: audioEngine, thud: audioThud, explosion: audioExplosion, win: audioWin },
   vehicleOps: { spawnParticle, addDebris, detachStage, setVisible, les: lesGroup },
-  groundE: groundHeight, groundM: moonGroundHeight,
 });
+initPredictor({ scene, groundE: groundHeight, groundM: moonGroundHeight, setWarn });
 initCamera(canvas, addLog);
 initHUD({ resetMission });
 
@@ -117,11 +118,14 @@ function frame() {
     updateBurnVisuals({ pos: S.pos, quat: S.q, vel: S.v, throttle: getThrottle(), activeIdx: activeStage(), burn: isBurning(), fwd, omega });
     updateDebris(simDt, accelAt);
     updateEngineGain(isBurning(), Math.max(0, S.pos.length() - RE));
-    predTick += dtReal; if (predTick > .35) { predTick = 0; if (getState() === 'flying') predict(); }
+    /* The path is re-integrated five times a second and DRAWN every frame (updatePredictor, below,
+       once the camera has moved): the integration is the slow clock, the ribbon is not. */
+    predTick += dtReal; if (predTick > .2) { predTick = 0; if (getState() === 'flying') predict(); }
     updateAim();   // predicted lunar aim; spends a fixed step budget per frame and self-throttles
   }
   updateParticles(Math.min(1, dtReal * WARPS[getWarpIndex()]));
   updateCamera(dtReal);
+  if (getState() === 'flying') updatePredictor(camera); else clearPredictor();
   updateHUD(dtReal);
   updateSky(S.pos, camera.position);
   updateSunShadow(S.pos);

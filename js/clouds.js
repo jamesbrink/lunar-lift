@@ -35,7 +35,7 @@ const THICK = BAND_TOP - BAND_BASE;     // 7 km
 const CELLS = 250;                      // tile repeats around the globe: 160 km per tile
 const CELL_TEX = 512;                   // 0.3125 km per texel
 const SEG_W = 512, SEG_H = 256;         // same chord as the decks it replaces (12.5 km)
-const MARCH = 8;                        // samples through the view column
+const MARCH = 12;                       // samples through the view column
 const MARCH_SHADE = 4;                  // samples through the sun column for ground shade
 
 /* Extinction per km of solid cloud. A cumulus core is opaque within a kilometre; the cirrus veil
@@ -127,74 +127,95 @@ void bandSegment( vec3 o, vec3 d, out float tA, out float tB ) {
   float dI = A * A - ( C - BAND_IN * BAND_IN );
   if ( dI <= 0.0 ) { tA = max( -A - sO, 0.0 ); tB = -A + sO; return; }   // never dips below the base
   float sI = sqrt( dI );
-  if ( C > SHELL_R * SHELL_R )      { tA = -A - sO; tB = -A - sI; }      // down through the deck
-  else if ( C < BAND_IN * BAND_IN ) { tA = -A + sI; tB = -A + sO; }      // up from the ground
-  else                              { tA = 0.0; tB = A < 0.0 ? -A - sI : -A + sO; }   // eye in the band
+  /* A ray that dips under the cloud base without reaching the ground comes back up through the
+     band on the far side, and that far side is the horizon's cloud. Stopping at the base cut it
+     off, and the view from inside the band had a hard line where the sky's long white chord met
+     short clear ones. Such a ray is marched straight through; the stretch under the base is empty. */
+  float dG = A * A - ( C - GROUND_R * GROUND_R );
+  bool grounded = A < 0.0 && dG > 0.0;
+  if ( C > SHELL_R * SHELL_R )      { tA = -A - sO; tB = grounded ? -A - sI : -A + sO; }   // down through the deck
+  else if ( C < BAND_IN * BAND_IN ) { tA = -A + sI; tB = -A + sO; }                        // up from the ground
+  else                              { tA = 0.0; tB = grounded ? -A - sI : -A + sO; }       // eye in the band
   if ( tB < tA ) { tA = 0.0; tB = 0.0; }
 }
 
-/* Optical depth along the ray, composited front to back. tau is the total; lightH is the mean
-   height (0 base .. 1 top) of the cloud the ray actually SEES, weighted by what is still
-   unoccluded — from above that is the tops, from the pad it is the bases, which is the whole of
-   the lit/shaded cue and costs nothing. */
-void marchCloud( vec3 o, vec3 d, vec2 uv0, vec3 n, out float tau, out float lightH ) {
-  tau = 0.0; lightH = 0.5;
-  float cosLat = max( length( n.xz ), 0.2 );
-  vec3 east = vec3( n.z, 0.0, -n.x ) / max( length( n.xz ), 1e-4 );   // direction of increasing u
-  vec3 north = cross( n, east );                                      // toward the pole
+/* Column state, set once per ray by marchCloud and read by cloudAt. */
+vec3 gN, gEast, gNorth;
+vec2 gUv0;
+float gCosLat, gThr, gM, gVeil, gMinif;
+
+/* Cumulus density (0..1) at a point; h comes back as its height in the band, 0 base .. 1 top. */
+float cloudAt( vec3 q, out float h ) {
+  float hr = ( length( q ) - BAND_IN ) / BAND_THICK;
+  h = clamp( hr, 0.0, 1.0 );
+  if ( hr < 0.0 || hr > 1.0 ) return 0.0;
+  vec2 uvC = tangentUv( gUv0, q - uvOrigin, gN, gEast, gNorth, gCosLat ) * CELL_REPEAT;
+  float f = 0.5 * ( texture2D( cloudCells, uvC + driftA ).r + texture2D( cloudCells, uvC + driftB ).g );
+  /* The threshold climbs with height, so only the strongest cores reach the top of the band:
+     every cloud is a dome with a flat base, taller where it is denser. */
+  float rise = gThr + ( 0.10 + 0.22 * ( 1.0 - gM ) ) * h;
+  float tail = rise > 0.5 ? 2.0 * ( 1.0 - rise ) * ( 1.0 - rise ) : 1.0 - 2.0 * rise * rise;
+  return mix( smoothstep( rise, rise + 0.035, f ), clamp( tail, 0.0, 1.0 ), gMinif ) * smoothstep( 0.0, 0.06, h );
+}
+
+/* Optical depth along the ray, composited front to back. tau is the total; tSeen is where along
+   the ray the cloud the eye actually lands on is, weighted by what is still unoccluded — from
+   above that is the tops, from the pad it is the bases. */
+void marchCloud( vec3 o, vec3 d, vec2 uv0, vec3 n, out float tau, out float tSeen ) {
+  tau = 0.0; tSeen = 0.0;
+  gN = n; gUv0 = uv0;
+  gCosLat = max( length( n.xz ), 0.2 );
+  gEast = vec3( n.z, 0.0, -n.x ) / max( length( n.xz ), 1e-4 );   // direction of increasing u
+  gNorth = cross( n, gEast );                                     // toward the pole
   float tA, tB;
   bandSegment( o, d, tA, tB );
   float len = tB - tA;
   if ( len <= 0.0 ) return;
   float step = len / float( MARCH_SAMPLES );
-  vec2 uvM = tangentUv( uv0, ( tA + 0.5 * len ) * d + o - uvOrigin, n, east, north, cosLat );
-  // the systems are hundreds of km wide: one macro sample per column is enough
-  float m = smoothstep( 0.08, 0.85, texture2D( cloudMacro, uvM ).a );
-  float veil = texture2D( cloudVeil, uvM ).a;
-  /* coverage -> threshold on the mean of two rank-uniform fields (triangular distribution) */
-  /* A third, slower look at the same lattice (800 km per tile, 80 km blobs) bunches the cover into
-     fields and gaps. Without it every square kilometre of a belt carried the same odds and the
-     ocean from orbit was an evenly spaced polka dot. */
-  float bunch = texture2D( cloudCells, uvM * BUNCH_REPEAT + 0.2 * driftA ).g;
-  float c = clamp( mix( COVER_CLEAR, COVER_STORM, m ) * ( 0.25 + 1.6 * bunch ), 0.0, 0.92 );
-  float thr = c < 0.5 ? 1.0 - sqrt( 0.5 * c ) : sqrt( 0.5 * ( 1.0 - c ) );
   /* Texels of the cell lattice under one pixel. Past a few, the sampler's mips have averaged the
      rank field to 0.5 everywhere and a threshold on it is a coin that always lands the same way:
      measured from 4000 km as storm belts gone solid white and everything else gone bare. There the
      density becomes the coverage itself — the exact mean of what the threshold would have drawn. */
-  float minif = smoothstep( 1.5, 5.0, length( fwidth( uvOrigin ) ) / TEXEL_KM );
-  float T = 1.0, hSum = 0.0, wSum = 0.0;
+  gMinif = smoothstep( 1.5, 5.0, length( fwidth( uvOrigin ) ) / TEXEL_KM );
+  vec2 uvM = tangentUv( uv0, ( tA + 0.5 * len ) * d + o - uvOrigin, n, gEast, gNorth, gCosLat );
+  /* The systems are hundreds of km wide: one macro sample per column is enough. Unresolved, it is
+     read two mips down — the sheet is a hard mask, and a hard mask at 20 km per texel seen from
+     9000 km is a white continent with a coastline, not weather. */
+  gM = smoothstep( 0.08, 0.85 + 0.15 * gMinif, texture2D( cloudMacro, uvM, 4.0 * gMinif ).a );
+  gVeil = texture2D( cloudVeil, uvM ).a;
+  /* A third, slower look at the same lattice (800 km per tile), read two mips down so only its
+     80 km blobs survive, bunches the cover into fields and gaps. Without it every square kilometre
+     of a belt carried the same odds and the ocean from orbit was an evenly spaced polka dot. */
+  float bunch = 0.5 * ( texture2D( cloudCells, uvM * BUNCH_REPEAT + 0.2 * driftA, 2.0 ).g
+                      + texture2D( cloudCells, uvM.yx * ( 0.5 * BUNCH_REPEAT ) + 0.1 * driftB, 2.0 ).r );
+  float c = clamp( mix( COVER_CLEAR, COVER_STORM, gM ) * ( 3.4 * bunch - 0.7 ), 0.0, 0.92 );
+  /* coverage -> threshold on the mean of two rank-uniform fields (triangular distribution) */
+  gThr = c < 0.5 ? 1.0 - sqrt( 0.5 * c ) : sqrt( 0.5 * ( 1.0 - c ) );
+  float T = 1.0, tSum = 0.0, wSum = 0.0;
   /* Each pixel starts its samples at a different phase (interleaved gradient noise). With a fixed
-     phase every ray cuts the band at the same eight heights and a slanted view draws each puff as
-     a stack of plates — measured as visible terraces from 100 km up. The jitter trades them for a
-     sub-pixel grain the eye integrates. */
-  float jit = fract( 52.9829189 * fract( dot( gl_FragCoord.xy, vec2( 0.06711056, 0.00583715 ) ) ) );
+     phase every ray cuts the band at the same heights and a slanted view draws each puff as a
+     stack of plates — measured as visible terraces from 100 km up. Unresolved cloud has no
+     terraces to hide, so the jitter fades out with it. */
+  float jit = mix( fract( 52.9829189 * fract( dot( gl_FragCoord.xy, vec2( 0.06711056, 0.00583715 ) ) ) ), 0.5, gMinif );
   for ( int i = 0; i < MARCH_SAMPLES; i++ ) {
-    float t = tA + ( float( i ) + mix( jit, 0.5, minif ) ) * step;   // unresolved cloud has no terraces to hide
-    vec3 q = o + t * d;
-    float h = clamp( ( length( q ) - BAND_IN ) / BAND_THICK, 0.0, 1.0 );
-    vec2 uvC = tangentUv( uv0, q - uvOrigin, n, east, north, cosLat ) * CELL_REPEAT;
-    float f = 0.5 * ( texture2D( cloudCells, uvC + driftA ).r + texture2D( cloudCells, uvC + driftB ).g );
-    /* The threshold climbs with height, so only the strongest cores reach the top of the band:
-       every cloud is a dome with a flat base, taller where it is denser. */
-    float rise = thr + ( 0.10 + 0.22 * ( 1.0 - m ) ) * h;
-    float tail = rise > 0.5 ? 2.0 * ( 1.0 - rise ) * ( 1.0 - rise ) : 1.0 - 2.0 * rise * rise;
-    float cu = mix( smoothstep( rise, rise + 0.035, f ), clamp( tail, 0.0, 1.0 ), minif )
-             * smoothstep( 0.0, 0.06, h );
-    float ci = veil * smoothstep( 0.72, 0.9, h );
+    float t = tA + ( float( i ) + jit ) * step;
+    float h;
+    float cu = cloudAt( o + t * d, h );
+    float ci = gVeil * smoothstep( 0.72, 0.9, h );
     float dt = ( cu * extLow + ci * extHigh ) * step;
     float a = 1.0 - exp( -dt );
-    hSum += T * a * h; wSum += T * a;
+    tSum += T * a * t; wSum += T * a;
     T *= 1.0 - a;
     tau += dt;
   }
-  if ( wSum > 1e-4 ) lightH = hSum / wSum;
+  if ( wSum > 1e-4 ) tSeen = tSum / wSum;
 }
 `;
 
 const DEFINES = (samples) => `
 #define SHELL_R ${R_OUT.toFixed(1)}
 #define BAND_IN ${R_IN.toFixed(1)}
+#define GROUND_R ${RE.toFixed(1)}
 #define BAND_THICK ${THICK.toFixed(1)}
 #define CELL_REPEAT ${CELLS}.0
 #define BUNCH_REPEAT ${CELLS / 5}.0
@@ -245,22 +266,42 @@ void main() {
      the far face would run the full march only to be depth-rejected (logdepthbuf writes
      gl_FragDepth, so there is no early-z to save it). From underneath, only the inside face is
      the sky. */
-  bool outside = dot( cameraPosition, cameraPosition ) > SHELL_R * SHELL_R;
-  if ( outside != gl_FrontFacing ) discard;
+  float eye2 = dot( cameraPosition, cameraPosition );
+  #ifdef INNER
+    /* The floor of the band, for an eye flying inside it. Rays that leave the band downward never
+       reach the outer sphere (the planet is in the way), so without this surface a camera between
+       4 and 11 km saw clear air below it and cloud shadows on the sea with nothing casting them. */
+    if ( !gl_FrontFacing || eye2 <= BAND_IN * BAND_IN || eye2 >= SHELL_R * SHELL_R ) discard;
+    // only rays that end on the ground are this surface's; the rest belong to the outer sphere
+    float Ae = dot( cameraPosition, normalize( vWorld - cameraPosition ) );
+    if ( Ae * Ae - ( eye2 - GROUND_R * GROUND_R ) <= 0.0 ) discard;
+  #else
+    if ( ( eye2 > SHELL_R * SHELL_R ) != gl_FrontFacing ) discard;
+  #endif
 
   vec3 n = normalize( vWorld );
-  float tau, lightH;
-  marchCloud( cameraPosition, normalize( vWorld - cameraPosition ), vUvC, n, tau, lightH );
+  vec3 d = normalize( vWorld - cameraPosition );
+  float tau, tSeen;
+  marchCloud( cameraPosition, d, vUvC, n, tau, tSeen );
   float alpha = 1.0 - exp( -tau );
   if ( alpha < 0.01 ) discard;
 
-  /* Cel tone in three bands by the height the eye lands on: shaded base, body, lit top. The step
-     is softened by its own screen-space width so the bands have an edge without a stair. */
-  float band = lightH * 3.0;
-  float w = max( fwidth( band ), 0.02 );
+  /* Light is how much cloud stands between the point the eye landed on and the sun: two more looks
+     at the field, 0.5 and 1.5 km sunward. From above the eye lands on tops with clear air sunward
+     of them (white); from the pad it lands on bases with the whole cloud in the way (grey); from
+     the side a puff has a bright flank and a dark one. Nothing else lights these, which is why a
+     height-only tone made them read as plates. */
+  vec3 seen = cameraPosition + tSeen * d;
+  float hs;
+  float occ = 0.6 * cloudAt( seen + 0.5 * sunWorld, hs ) + 0.4 * cloudAt( seen + 1.5 * sunWorld, hs );
+  float light = 1.0 - 0.85 * occ * ( 1.0 - gMinif );
+  /* Cel tone in three bands, each step softened by its own screen-space width so the bands have
+     an edge without a stair. */
+  float band = light * 3.0;
+  float w = max( fwidth( band ), 0.10 );   // below this the march's own jitter stipples the step
   float tone = ( smoothstep( 1.0 - w, 1.0 + w, band ) + smoothstep( 2.0 - w, 2.0 + w, band ) ) * 0.5;
   float day = smoothstep( -0.12, 0.30, dot( n, sunWorld ) );
-  vec3 col = mix( cloudShade, cloudLit, 0.35 + 0.65 * tone ) * ( 0.10 + 0.90 * day );
+  vec3 col = mix( cloudShade, cloudLit, tone ) * ( 0.10 + 0.90 * day );
   gl_FragColor = vec4( col, alpha );
   #include <logdepthbuf_fragment>
 }
@@ -280,8 +321,8 @@ void cloudDarken() {
   if ( dot( n, sunWorld ) < 0.02 ) return;                // night side: nothing to shade
   // two-argument atan: GLSL ES has no atan2, and asking for one fails the whole program
   vec2 uv0 = vec2( atan( n.z, -n.x ) / PI2, 1.0 - acos( clamp( n.y, -1.0, 1.0 ) ) / PI );
-  float tau, lightH;
-  marchCloud( vShadeW, sunWorld, uv0, n, tau, lightH );
+  float tau, tSeen;
+  marchCloud( vShadeW, sunWorld, uv0, n, tau, tSeen );
   gl_FragColor.rgb *= mix( 1.0, exp( -tau ), shadeStrength );
 }
 `;
@@ -303,21 +344,24 @@ export function makeWeather() {
 }
 
 export function makeCloudShell(U) {
-  const mesh = new THREE.Mesh(
-    new THREE.SphereGeometry(R_OUT, SEG_W, SEG_H),
-    new THREE.ShaderMaterial({
-      uniforms: U,
-      vertexShader: SHELL_VERT,
-      fragmentShader: SHELL_FRAG,
-      transparent: true,
-      depthWrite: false,
-      side: THREE.DoubleSide,     // the sky above the pad is the inside of this shell
-      fog: false,                 // planet-scale body: FogExp2 measured from the camera would
+  const material = (defines) => new THREE.ShaderMaterial({
+    uniforms: U, defines,
+    vertexShader: SHELL_VERT,
+    fragmentShader: SHELL_FRAG,
+    transparent: true,
+    depthWrite: false,
+    side: THREE.DoubleSide,       // the sky above the pad is the inside of this shell
+    fog: false,                   // planet-scale body: FogExp2 measured from the camera would
                                   // erase it in the system view 20 000 km out
-    })
-  );
-  mesh.renderOrder = 1;           // after terrain and vehicle, before the plume
-  mesh.castShadow = false;        // a 7 km sheet at a low sun drags its silhouette hundreds of km
+  });
+  const mesh = new THREE.Mesh(new THREE.SphereGeometry(R_OUT, SEG_W, SEG_H), material({}));
+  /* Same march, drawn on the band's floor: see INNER in the fragment shader. */
+  const floor = new THREE.Mesh(new THREE.SphereGeometry(R_IN, SEG_W, SEG_H), material({ INNER: '' }));
+  for (const m of [mesh, floor]) {
+    m.renderOrder = 1;            // after terrain and vehicle, before the plume
+    m.castShadow = false;         // a 7 km sheet at a low sun drags its silhouette hundreds of km
+  }
+  mesh.add(floor);
   return mesh;
 }
 

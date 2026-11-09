@@ -1,27 +1,17 @@
 import * as THREE from 'three';
-import { ribbon } from './ribbon.js';
 import { RE, MU_E, RM, MU_M, SOI_M, PAD_UP, PAD_POS, PAD_ANGULAR, RHALF, ATMO_H, RHO0, CD_AREA, WARPS, LAND_SAFE, SAFE_EARTH, SPECS, CAPSULE_MASS, EARTH_SPIN, SPIN_AXIS, PAD_EAST, MOON_DIST, TURN, moonPos, moonVel } from './constants.js';
 
 /* ---------------- injected dependencies (see initPhysics) ----------------
-   hooks:      addLog(msg, cls), showEndOverlay(title, body, btn), setWarn(textOrNull)
+   hooks:      addLog(msg, cls), showEndOverlay(title, body, btn)
    audio:      engine(on), thud(), explosion(), win()
    vehicleOps: spawnParticle(pos, vel, life, color), addDebris(entry), detachStage(mesh, pos, quat), setVisible(visible)
    stages:     the stage records built by vehicle.js (fuel / separated live here, in the sim)
-   scene:      target for the trajectory-prediction line                                        */
-let stages = null, scene = null;
+*/
+let stages = null;
 let hooks = null, audio = null, vehicleOps = null;
-/* Injected surface getters (world.js groundHeight / moonGroundHeight). The prediction ribbon needs
-   them because a trajectory line published at the reference sphere flies THROUGH the painted
-   relief whenever it passes a hill — and a line grazing a surface under a logarithmic depth
-   buffer flickers. The user named both symptoms on 2026-11-09. Display-only: physics never reads
-   these. */
-let groundE = null, groundM = null;
-
 export function initPhysics(deps) {
-  stages = deps.stages; scene = deps.scene;
+  stages = deps.stages;
   hooks = deps.hooks; audio = deps.audio; vehicleOps = deps.vehicleOps;
-  groundE = deps.groundE || null; groundM = deps.groundM || null;
-  predLine.frustumCulled = false; scene.add(predLine);
 }
 
 /* ---------------- state ---------------- */
@@ -29,7 +19,7 @@ let state = 'pad';               // pad | flying | won | lost
 let engineOn = false, throttle = 0, targetThrottle = 0;
 let sasOn = false, sasRetro = false, simTime = 0, warpIdx = 0;
 let maxQ = 0, loggedStageOut = [false, false, false], flightStarted = false;
-let tliLogged = false, loiLogged = false, impactWarn = '';
+let tliLogged = false, loiLogged = false;
 let turnHintLogged = false, loggedMaxQ = false;
 const UP_REF = new THREE.Vector3(0, 0, 1);
 export const S = { pos: PAD_POS.clone(), v: PAD_ANGULAR.clone(), q: new THREE.Quaternion().setFromUnitVectors(UP_REF, PAD_UP) };
@@ -465,141 +455,6 @@ function checkMissionEvents() {
   }
 }
 
-/* ---------------- trajectory prediction ---------------- */
-// 3x the sample density of the old 900-point / every-6th-step scheme at the same integration
-// budget — chord faceting on a low orbit was visible as straight segments.
-const PRED_MAX = 2700;
-const predPos = new Float32Array(PRED_MAX * 3), predCol = new Float32Array(PRED_MAX * 3);
-/* A 1 px THREE.Line cannot glow, and world-space thickness is hopeless across 0.001–3e6 km.
-   The ribbon extrudes in the vertex shader at constant pixels; predLine is a Group. */
-export const predLine = ribbon({ widthPx: 2.5, glowWidthPx: 7, vertexColors: true, capacity: PRED_MAX + 2 });
-
-export function clearPredictor() { predLine.clear(); }
-
-export function predict() {
-  const i = activeStage();
-  const burning = engineOn && throttle > 0.01 && i >= 0 && stages[i].fuel > 0;
-  const sp = burning ? SPECS[i] : null;
-  let fuel = burning ? stages[i].fuel : 0;
-  const p = S.pos.clone(), v = S.v.clone(), g = new THREE.Vector3(), m = new THREE.Vector3();
-  /* Parked or already down: the first integration step of a vehicle sitting on a body reaches that
-     body's contact shell immediately, which used to publish "IMPACT PREDICTED: EARTH IN 0 min" over
-     a rocket waiting for ignition on the pad. A real arrival is settled by impact() in physStep, so
-     this has nothing to warn about either way — the test is where the prediction *starts*, not where
-     it ends. */
-  const onSurface = S.pos.length() - RE <= RHALF || S.pos.distanceTo(moonPos(simTime, m)) - RM <= RHALF;
-  /* Parked and quiet: the ribbon used to publish a stub that sat inside the hull and scraped the
-     pad deck — the reported flicker "on the launch pad or at the base of the vehicle". Nothing
-     about a pad sit has anything to predict; impact() settles the arrival. */
-  if (onSurface && !burning) {
-    predLine.clear();
-    if (impactWarn) impactWarn = '';
-    hooks.setWarn(null);
-    return;
-  }
-  let n = 0, impactType = null, impactT = 0;
-  let t = simTime;
-  const _lq = new THREE.Vector3(), _mq = new THREE.Vector3(), _lq2 = new THREE.Vector3();
-  /* The ribbon starts at the nose, not at the state point in the ship's middle: a line whose first
-     vertex is inside the hull pokes out of the fairing wherever attitude yaws (user: "penetrate
-     through the spacecraft"). 90 m along the axis clears the 110 m stack's front half. */
-  {
-    const nose = _lq.copy(p).addScaledVector(fwd(), 0.09);
-    predPos.set([nose.x, nose.y, nose.z], 0);
-    predCol.set([0.30, 0.85, 0.5], 0); n = 1;
-  }
-  /* Every published point is lifted to just above whatever surface it flies over. The old points
-     rode the reference sphere, so any painted hill over which the trajectory passed put the
-     ribbon *inside* terrain, and a line grazing a surface z-fights: that is the "very flickery"
-     orbit line. +100 m is invisible at every distance the ribbon is legible, and the impact
-     marker lands where the sim says, at the lifted shell it will actually hit. */
-  const lift = (q) => {
-    const rE = q.length();
-    if (rE - RE < 4) {
-      const need = RE + Math.max(0, groundE ? groundE(q) : 0) + 0.10;
-      if (rE < need) q.multiplyScalar(need / rE);
-    }
-    moonPos(t, _mq);
-    _lq2.subVectors(q, _mq);
-    const rM = _lq2.length();
-    if (rM - RM < 4) {
-      const needM = RM + Math.max(0, groundM ? groundM(_lq2) : 0) + 0.10;
-      if (rM < needM) q.copy(_mq).addScaledVector(_lq2, needM / rM);
-    }
-  };
-  for (let s = 0; s < 20000 && n < PRED_MAX - 1; s++) {
-    const alt = Math.min(p.length() - RE, p.distanceTo(moonPos(t, m)) - RM);
-    const speed = v.length();
-    // keep the step short enough that the arc stays smooth, long enough to cover a multi-hour coast
-    const dt = THREE.MathUtils.clamp(Math.min(alt, speed * 40, 3000) * 0.006, 0.2, 20);
-    let mass = totalMass(), thAcc = null;
-    if (sp && fuel > 0) {
-      fuel = Math.max(0, fuel - sp.thrust * throttle / (sp.isp * 9.81) * dt);
-      thAcc = fwd().multiplyScalar(sp.thrust * throttle / mass / 1000);
-    }
-    gravityAt(p, g, t);
-    const altE = p.length() - RE;
-    if (altE < 420) {
-      const rho = airDensity(altE);
-      g.addScaledVector(v, -0.5 * rho * CD_AREA * v.length() / mass);
-    }
-    if (thAcc) g.add(thAcc);
-    v.addScaledVector(g, dt); p.addScaledVector(v, dt); t += dt;
-    if (s % 2 === 0) {
-      /* Never publish a point already inside a body: lift() would drag it onto the surface, and
-         a 150 km descent step puts that point on the far side of the sphere — the ribbon then
-         skated along the globe and looked like it flew through the planet (measured at 160 km). */
-      if (p.length() >= RE && p.distanceTo(m) >= RM) {
-        const q = _lq.copy(p); lift(q);
-        predPos.set([q.x, q.y, q.z], n * 3);
-        predCol.set([0.30, 0.85, 0.5], n * 3); n++;
-      }
-    }
-    const rM = p.distanceTo(m);
-    if (rM <= RM + RHALF) { impactType = 'moon'; impactT = t - simTime; break; }
-    if (p.length() <= RE + RHALF) { impactType = 'earth'; impactT = t - simTime; break; }
-    if (p.length() > 900000 || rM > 900000) break;
-  }
-  /* Time taper: a constant-brightness beam reads as decoration and its far end — the part that
-     says "this is where you will BE" — competed with the near end for the eye. Brightness falls
-     along the ribbon as (1 − 0.72·frac^1.6), so hours-ahead dims toward the sky while the next
-     minutes stay loud. Applied before the impact marker is appended so the red stays red. */
-  for (let i = 0; i < n; i++) {
-    const f = 1 - 0.72 * Math.pow(i / Math.max(1, n - 1), 1.6);
-    predCol[i * 3] *= f; predCol[i * 3 + 1] *= f; predCol[i * 3 + 2] *= f;
-  }
-  if (!onSurface && impactType && (impactT < 3000 || impactType === 'moon')) {
-    const q = _lq.copy(p); lift(q);
-    // doubled point = the terminal quad; ribbon.js inherits the last good dir across the degenerate run
-    predPos.set([q.x, q.y, q.z], n * 3); predCol.set([1, .22, .18], n * 3); n++;
-    predPos.set([q.x, q.y, q.z], n * 3); predCol.set([1, .22, .18], n * 3); n++;
-    /* (user: the countdown is "always inaccurate") — it is not the integration (measured: 6 min
-       predicted vs 5.76 min actual on a 600 m/s dive); it is the warning firing on states where
-       the prediction's assumptions do not describe the vehicle. Measured twice: at MET 10 on the
-       pillar, rising 40 m/s under 46 000 kN, the pill read "EARTH IN 4 min" — true for a rock
-       thrown at 40 m/s, a lie for a rocket the pilot is about to stage and pitch. The pill is
-       therefore for UNPOWERED flight (glide, dive, coast-above-apogee) where the state vector is
-       the whole story; while an engine burns the red marker (where the current arc meets the
-       ground) is the only honest element and it stays. The radial test additionally keeps it off
-       during the coast up to a hop's apex. */
-    const climb = (() => {
-      const rm = _mq.subVectors(S.pos, moonPos(simTime, _lq2));
-      const rM2 = rm.lengthSq();
-      const d = new THREE.Vector3().copy(S.pos);
-      const rE2 = d.lengthSq();
-      if (rM2 < rE2) return S.v.dot(rm) / Math.sqrt(rM2);
-      return S.v.dot(d) / Math.sqrt(rE2);
-    })();
-    if (!burning && climb <= 0.05) {
-      const msg = `IMPACT PREDICTED: ${impactType === 'moon' ? 'MOON' : 'EARTH'} IN ${Math.round(impactT / 60)} min`;
-      if (msg !== impactWarn) impactWarn = msg;
-      hooks.setWarn(msg);
-    } else { impactWarn = ''; hooks.setWarn(null); }
-  } else { impactWarn = ''; hooks.setWarn(null); }
-  predLine.setPoints(predPos, n);
-  predLine.setColors(predCol, n);
-}
-
 /* ---------------- mission reset (sim side) ---------------- */
 export function resetSim() {
   stages.forEach((st, idx) => {
@@ -609,7 +464,7 @@ export function resetSim() {
   S.pos.copy(PAD_POS); S.v.copy(PAD_ANGULAR); S.q.setFromUnitVectors(UP_REF, PAD_UP);
   engineOn = false; throttle = targetThrottle = 0;
   sasOn = false; sasRetro = false; simTime = 0; warpIdx = 0; maxQ = 0;
-  tliLogged = loiLogged = loggedMaxQ = turnHintLogged = false; impactWarn = ''; distFlown = 0; trail = [];
+  tliLogged = loiLogged = loggedMaxQ = turnHintLogged = false; distFlown = 0; trail = [];
   flightStarted = false; state = 'pad'; omega.set(0, 0, 0); I0 = null;
 }
 

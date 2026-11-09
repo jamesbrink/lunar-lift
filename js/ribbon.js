@@ -15,6 +15,7 @@ import * as THREE from 'three';
      const r = ribbon({ color, widthPx, glowWidthPx, glowColor, vertexColors });
      r.setPoints(pts, n?)   pts: Float32Array [x,y,z,...] | THREE.Vector3[] | [x,y,z][]
      r.setColors(cols, n?)  cols: Float32Array [r,g,b,...] | THREE.Color[]
+     r.setAlphas(a, n?)     a: Float32Array, one opacity per point (default 1 everywhere)
      r.setColorAt(i, c)     c: THREE.Color | hex — colours point i
      r.clear()              hide everything (drawRange 0)
      r.visible              Object3D flag, works as expected
@@ -27,15 +28,18 @@ const VERT = `
 attribute vec3 aDir;
 attribute float aSide;
 attribute vec3 aColor;
+attribute float aAlpha;
 uniform vec2 uResolution;
 uniform float uWidthPx;
 uniform vec3 uColor;
 varying float vSide;
 varying vec3 vCol;
+varying float vAlpha;
 #include <logdepthbuf_pars_vertex>
 
 void main() {
   vSide = aSide;
+  vAlpha = aAlpha;
   #ifdef USE_VCOLOR
     vCol = aColor;
   #else
@@ -57,15 +61,17 @@ void main() {
 const FRAG = `
 varying float vSide;
 varying vec3 vCol;
+varying float vAlpha;
 uniform float uOpacity;
 #include <logdepthbuf_pars_fragment>
 
 void main() {
   #ifdef GLOW
     float e = 1.0 - abs( vSide );
-    gl_FragColor = vec4( vCol, pow( e, 2.2 ) * uOpacity );
+    gl_FragColor = vec4( vCol, pow( e, 2.2 ) * uOpacity * vAlpha );
   #else
-    gl_FragColor = vec4( vCol, uOpacity );
+    // a one-pixel feather on the core's own edge: a hard-edged 2 px band crawls as it moves
+    gl_FragColor = vec4( vCol, uOpacity * vAlpha * smoothstep( 0.0, 0.45, 1.0 - abs( vSide ) ) );
   #endif
   #include <logdepthbuf_fragment>
 }
@@ -80,6 +86,7 @@ export function ribbon(
   const pos = new Float32Array(capacity * 6);  // each point duplicated for its side -1/+1 vertices
   const dir = new Float32Array(capacity * 6);
   const col = new Float32Array(capacity * 6);
+  const alpha = new Float32Array(capacity * 2).fill(1);   // per point; 1 unless setAlphas says otherwise
   const side = new Float32Array(capacity * 2);
   for (let i = 0; i < capacity; i++) { side[i * 2] = -1; side[i * 2 + 1] = 1; }
   const index = new (capacity * 2 - 1 > 65535 ? Uint32Array : Uint16Array)((capacity - 1) * 6);
@@ -95,6 +102,8 @@ export function ribbon(
   geom.setAttribute('position', posA);
   geom.setAttribute('aDir', dirA);
   geom.setAttribute('aColor', colA);
+  const alphaA = new THREE.BufferAttribute(alpha, 1).setUsage(THREE.DynamicDrawUsage);
+  geom.setAttribute('aAlpha', alphaA);
   geom.setAttribute('aSide', new THREE.BufferAttribute(side, 1));
   geom.setIndex(new THREE.BufferAttribute(index, 1));
   geom.setDrawRange(0, 0);
@@ -177,6 +186,12 @@ export function ribbon(
       col[o] = col[o + 3] = r; col[o + 1] = col[o + 4] = g; col[o + 2] = col[o + 5] = b;
     }
     colA.needsUpdate = true;
+  };
+
+  group.setAlphas = (src, n) => {
+    const m = Math.min(n === undefined ? src.length : n, src.length, capacity);
+    for (let i = 0; i < m; i++) alpha[i * 2] = alpha[i * 2 + 1] = src[i];
+    alphaA.needsUpdate = true;
   };
 
   group.setColorAt = (i, c) => {

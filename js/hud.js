@@ -1,7 +1,8 @@
 import * as THREE from 'three';
 import { RE, RM, MU_E, MU_M, SOI_M, MOON_DIST, PAD_UP, PAD_POS, WARPS, SPECS, moonPos } from './constants.js';
 import { stages } from './vehicle.js';
-import { S, getState, getSimTime, getEngineOn, getThrottle, getWarpIndex, getSasOn, getSasRetro, getDistFlown, getMaxQ, getTrail, activeStage, orbitalElements, getControlAuthority, groundVel, bodyUp, navVel, predLine } from './physics.js';
+import { S, getState, getSimTime, getEngineOn, getThrottle, getWarpIndex, getSasOn, getSasRetro, getDistFlown, getMaxQ, getTrail, activeStage, orbitalElements, getControlAuthority, groundVel, bodyUp, navVel } from './physics.js';
+import { drawn } from './predictor.js';
 import * as WORLD from './world.js';
 import { initNavball, updateNavball } from './navball.js';
 import { aim } from './targeting.js';
@@ -306,34 +307,31 @@ function paintBody(key, sx, sy, R, spin, sunAng) {
   mg.beginPath(); mg.arc(sx, sy, Math.max(R - .75, .75), 0, 6.283); mg.stroke();
 }
 
-/* The predicted path — the map's hero line. predLine is the 3D ribbon Group from physics.js:
-   its shared geometry holds the same world-frame points, two vertices per point (side ±1), so
-   point i sits at offset i*6 and predLine.count is the live point count. Pe/Ap ticks are the
-   first local min/max of range-to-centre along that polyline — the charted twins of the numbers
-   updateHUD already prints, no orbit re-solved here. */
+/* The predicted path — the map's hero line. js/predictor.js publishes what the 3D ribbon is
+   showing this frame as world-frame points (the ship first, then everything still ahead of it).
+   Pe/Ap ticks are the first local min/max of range-to-centre along that polyline — the charted
+   twins of the numbers updateHUD already prints, no orbit re-solved here. */
 function drawPred(cen) {
-  const n = predLine.count;
+  const n = drawn.n;
   if (n < 2) return;
-  const geom = predLine.children[0].geometry;
-  const p = geom.getAttribute('position').array;
-  const col = geom.getAttribute('aColor').array;
+  const p = drawn.pos;
   mg.beginPath();
   for (let i = 0; i < n; i++) {
-    const [x, y] = px(p[i * 6], p[i * 6 + 2]);
+    const [x, y] = px(p[i * 3], p[i * 3 + 2]);
     i ? mg.lineTo(x, y) : mg.moveTo(x, y);
   }
   mg.strokeStyle = 'rgba(77,217,128,.16)'; mg.lineWidth = 7; mg.stroke();      // halo pass
   mg.strokeStyle = 'rgba(122,236,166,.95)'; mg.lineWidth = 1.6; mg.stroke();   // bright core
-  if (col[(n - 1) * 6] > .9) {   // physics.js paints red terminal points for a predicted impact
+  if (drawn.impact) {             // the path ends on a surface: its last stretch is drawn red
     mg.strokeStyle = '#ff6a5c'; mg.lineWidth = 1.6; mg.beginPath();
     for (let i = Math.max(0, n - 4); i < n; i++) {
-      const [x, y] = px(p[i * 6], p[i * 6 + 2]);
+      const [x, y] = px(p[i * 3], p[i * 3 + 2]);
       i > n - 4 ? mg.lineTo(x, y) : mg.moveTo(x, y);
     }
     mg.stroke();
   }
   const cx = cen ? cen.x : 0, cz = cen ? cen.z : 0;
-  const rad = i => Math.hypot(p[i * 6] - cx, p[i * 6 + 2] - cz);
+  const rad = i => Math.hypot(p[i * 3] - cx, p[i * 3 + 2] - cz);
   let peI = -1, apI = -1;
   for (let i = 1; i < n - 1 && (peI < 0 || apI < 0); i++) {
     const r0 = rad(i - 1), r1 = rad(i), r2 = rad(i + 1);
@@ -341,9 +339,9 @@ function drawPred(cen) {
     if (apI < 0 && r1 >= r0 && r1 > r2) apI = i;
   }
   const tick = (i, txt) => {
-    const wx = p[i * 6] - cx, wz = p[i * 6 + 2] - cz;
+    const wx = p[i * 3] - cx, wz = p[i * 3 + 2] - cz;
     const l = Math.hypot(wx, wz) || 1, ux = wx / l, uz = wz / l;
-    const [x, y] = px(p[i * 6], p[i * 6 + 2]);
+    const [x, y] = px(p[i * 3], p[i * 3 + 2]);
     mg.strokeStyle = '#8fdcff'; mg.lineWidth = 1.2; mg.beginPath();
     mg.moveTo(x - uz * 5, y + ux * 5); mg.lineTo(x + uz * 5, y - ux * 5);   // perpendicular to the radius
     mg.stroke();
