@@ -623,6 +623,80 @@ export function moonCraters() {
   return _craters;
 }
 
+/* ---- near-level detail: craters the canvas can never hold ----
+
+   The painted canvas is 1024×512: 10.6 km/texel. A 12 km crater stamped there is a one-byte
+   smudge, and the last kilometres of a descent were flying over nothing (measured: a 9 km pass
+   showed zero surface features). The near patch asks for its ground ANALYTICALLY instead: a
+   second seeded population of 3–45 km craters evaluated per vertex at rebuild time. Height is
+   rim-only — the patch stands on the mesh and never cuts into it, the same rule the Earth patch
+   follows, so contact on the RM sphere stays honest and no crater can sink the vehicle below
+   the ground it landed on — and the bowl itself is drawn in tone: dark floor, bright rim, ray
+   fans where a young one lands near mare. */
+let _smallCraters = null;
+function moonSmallCraters() {
+  if (_smallCraters) return _smallCraters;
+  _smallCraters = [];
+  for (let c = 0; c < 2400; c++) {
+    const hu = hash2(c, 5, 91), hv = hash2(c, 6, 57), hr = hash2(c, 7, 31), hy = hash2(c, 8, 17);
+    const rKm = 3 + Math.pow(hr, 2.2) * 42;                    // many small, few big
+    _smallCraters.push({
+      lon: hu * Math.PI * 2 - Math.PI, lat: Math.asin(2 * hv - 1), rKm,
+      rim: 0.08 + Math.min(0.22, rKm * 0.006),                 // ≤ 300 m: a rim you can see in silhouette
+      young: hy > 0.93, spokes: 6, phase: hy * 6.283,
+    });
+  }
+  // 6° buckets (~187 km, beyond the 4.2 r = 190 km reach of the biggest crater): a rebuild asks
+  // 26k vertices, and without this every vertex would walk all 2 400 craters. A colliding bucket
+  // key only costs a wasted distance test — every consumer below filters by true distance.
+  const B = 6 * Math.PI / 180, buckets = new Map();
+  for (const cr of _smallCraters) {
+    const bi = Math.floor((cr.lon + Math.PI) / B), bj = Math.floor((cr.lat + Math.PI / 2) / B);
+    for (let dj = -1; dj <= 1; dj++) for (let di = -1; di <= 1; di++) {
+      const k = (bi + di) * 977 + (bj + dj);
+      let b = buckets.get(k); if (!b) buckets.set(k, b = []);
+      b.push(cr);
+    }
+  }
+  _smallCraters.buckets = buckets; _smallCraters.B = B;
+  return _smallCraters;
+}
+
+/* globe uv → { h: rim km (≥ 0), tone: albedo multiplier }. baseLum is the painted canvas here
+   (0..1); the dark maria catch the young craters' ray fans brighter, as they do on the map pass.
+
+   The tone COMPOSES by the dominant crater, not by multiplication: a 220 km patch sits over ~70 of
+   these bowls, and a naive product of every floor factor compounds to black (measured: the whole
+   near field rendered 0.004 linear — 0.58 to the fifth). The deepest floor and the brightest rim at
+   a point win; rim HEIGHTS take the max too, so two rims that touch never stack into a spike the
+   lander could perch on. Both profiles stay C0 — a stepped floor would print a ring in vertex colour. */
+export function moonPatchDetail(u, v, baseLum) {
+  const L = moonSmallCraters();
+  const lon = (u - 0.5) * Math.PI * 2, lat = (v - 0.5) * Math.PI;
+  const list = L.buckets.get(Math.floor((lon + Math.PI) / L.B) * 977 + Math.floor((lat + Math.PI / 2) / L.B));
+  let h = 0, dark = 0, lit = 0, ray = 0;
+  if (list) {
+    const kmr = Math.PI / 180 * RM, clat = Math.max(0.05, Math.cos(lat));
+    for (const cr of list) {
+      let dlon = lon - cr.lon;
+      if (dlon > Math.PI) dlon -= 2 * Math.PI; else if (dlon < -Math.PI) dlon += 2 * Math.PI;
+      const ey = (lat - cr.lat) * kmr, ex = dlon * clat * kmr;
+      const dd = Math.hypot(ex, ey) / cr.rKm;
+      if (dd < 1.3) { const t = dd / 1.3, w = (1 - t * t) * (1 - t * t); if (w > dark) dark = w; }
+      if (dd < 1.8) {
+        const g = (dd - 1.12) / 0.17, hw = Math.exp(-g * g);
+        if (cr.rim * hw > h) h = cr.rim * hw;
+        if (0.30 * hw > lit) lit = 0.30 * hw;
+      } else if (cr.young && dd < 4.2 && baseLum < 0.4) {
+        const sp = Math.cos(cr.spokes * Math.atan2(ey, ex) + cr.phase);
+        if (sp > 0) { const r = 0.30 * Math.pow(sp, 10) * (1 - (dd - 1.8) / 2.4); if (r > ray) ray = r; }
+      }
+    }
+  }
+  const tone = 1 - 0.42 * dark + lit + ray;
+  return { h, tone };
+}
+
 function stampCraters(km, hi, w, h) {
   const kme = MOON_CIRC / w, kmr = Math.PI * RM / h;
   for (const cr of moonCraters()) {

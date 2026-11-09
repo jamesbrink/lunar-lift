@@ -8,7 +8,7 @@ import {
   applyRelief, sampleGrid, reliefField, coastField, shoreDistance, fineEarth,
   padWeight, paintedCanvas,
 } from './toonmap.js';
-import { makePatch, attachEarthPatch, updatePatch } from './terrain.js';
+import { makePatch, attachEarthPatch, updatePatch, makeMoonPatch, attachMoonPatch, updateMoonPatch, hidePatch } from './terrain.js';
 import { makeCloudLayer, updateCloudLayer } from './clouds.js';
 
 /* distances are km, angles rad — everything here lives at real planetary scale */
@@ -50,6 +50,7 @@ let spin = 0, cloudSpin = 0, cirrusSpin = 0, simT = 0;
    null until the painting lands, and every reader below degrades to the bare sphere meanwhile. */
 let earthField = null, moonField = null, shore = null;
 let earthPatch = null;
+let moonPatch = null;
 let clouds = null;
 let _sky = new THREE.Color();
 const _moon = new THREE.Vector3();
@@ -295,6 +296,10 @@ export function initWorld(target) {
   scene.add(moon);
   applyRelief(moon.geometry, 'moon');
   reliefField('moon').then((f) => { moonField = f; });
+  /* and its near level — the final kilometres want craters, not the 10.6 km/texel canvas (see
+     js/terrain.js). It rides the Moon mesh as a child, so it turns with the same spin. */
+  moonPatch = makeMoonPatch(moon);
+  attachMoonPatch(moonPatch);
 
   /* ---- starfield, well outside the moon's orbit ----
      A real sky is a magnitude pyramid: many faint, few bright, and the bright ones are BIGGER.
@@ -475,13 +480,22 @@ export function updateSunShadow(pos) {
   updateReliefPatches(pos);
 }
 
-/* One Earth patch, fed the ground point in the mesh-local frame (undo the spin — the patch is a
-   child of the mesh, the vehicle position is inertial). Near the Moon altE is ~384 000 km, so the
-   update's own altitude gate hides it; there is no lunar patch to switch to — the Moon has none. */
+/* Two patches, switched by altitude (below): each is fed the ground point in its mesh-local frame
+   (undo the spin — patches are children of the meshes, the vehicle position is inertial), and each
+   hides itself above its own 30 km gate, so exactly one is ever drawn. */
 function updateReliefPatches(pos) {
   _ld.copy(pos).normalize();
   spinLocal(earth, _ld);
   updatePatch(earthPatch, _ld.x, _ld.y, _ld.z, pos.length() - RE);
+  /* The Moon's own near level: the update's altitude gate does the handoff, so exactly one of
+     the two patches is ever visible — near the Moon altE is ~384 000 km and the Earth patch
+     hides itself; below 30 km of lunar ground the mesh-local direction feeds the crater field. */
+  const dM = pos.distanceTo(moon.position);
+  if (dM < RM + 30) {
+    _ld.copy(pos).sub(moon.position).normalize();
+    spinLocal(moon, _ld);
+    updateMoonPatch(moonPatch, _ld.x, _ld.y, _ld.z, dM - RM);
+  } else hidePatch(moonPatch);
   if (clouds) {
     _cs.copy(SUN_DIR);
     spinLocal(earth, _cs);

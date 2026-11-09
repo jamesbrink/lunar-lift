@@ -1,9 +1,9 @@
 import * as THREE from 'three';
-import { toon, RAMP_EARTH } from './toon.js';
-import { RE } from './constants.js';
+import { toon, RAMP_EARTH, RAMP_MOON } from './toon.js';
+import { RE, RM } from './constants.js';
 import {
   sampleGrid, fineEarth, shoreDistance, padWeight, padShoreWeight, padAuthored,
-  reliefField, coastField, canvasData, canvasDataSoft,
+  reliefField, coastField, canvasData, canvasDataSoft, moonPatchDetail,
 } from './toonmap.js';
 
 /* The near level — Earth only; the Moon has none.
@@ -96,6 +96,100 @@ export function attachEarthPatch(p) {
     if (!a[0] || !a[2] || !a[3]) return;
     p.rel = a[0]; p.coast = a[1]; p.px = a[2]; p.soft = a[3]; p.ready = true; p.dirty = true;
   });
+}
+
+/* ---- the lunar near level ----
+
+   The Moon wore no near patch and the last kilometres were the reviewer's "uniform grey fog with
+   no terrain features": the painted albedo is 10.6 km/texel, so every 3–45 km crater — most of
+   what a lander actually sees — is a sub-texel smudge. Same radial-warped mesh as Earth, but the
+   ground is asked analytically: height is the relief field plus the rim-only detail from
+   toonmap.moonPatchDetail (never negative, so contact on the RM sphere stays honest), colour is
+   the painted pixel multiplied by that detail's tone (dark floor, bright rim, ray fans). No
+   coastline, no fine Earth octaves, no fog — there is no air on the Moon, so its limb must stay
+   as crisp as the sky it cuts. RAMP_MOON so it matches the far mesh under the same sun. */
+export function makeMoonPatch(moonBody) {
+  const n = COLS * COLS;
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(n * 3), 3));
+  geo.setAttribute('color', new THREE.BufferAttribute(new Float32Array(n * 3), 3));
+  geo.setAttribute('normal', new THREE.BufferAttribute(new Float32Array(n * 3), 3));
+  const idx = new Uint32Array(SEG * SEG * 6);
+  let t = 0;
+  for (let y = 0; y < SEG; y++) {
+    for (let x = 0; x < SEG; x++) {
+      const a = y * COLS + x, b = a + 1, c = a + COLS, d = c + 1;
+      idx[t++] = a; idx[t++] = c; idx[t++] = b;
+      idx[t++] = b; idx[t++] = c; idx[t++] = d;
+    }
+  }
+  geo.setIndex(new THREE.BufferAttribute(idx, 1));
+  const mesh = new THREE.Mesh(geo, toon({
+    vertexColors: true, gradientMap: RAMP_MOON,
+    polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2,
+  }));
+  mesh.material.fog = false;              // no atmosphere: the near ground cannot haze into the sky
+  mesh.receiveShadow = true;
+  mesh.castShadow = false;
+  mesh.visible = false;
+  moonBody.add(mesh);
+  return { mesh, ready: false, dirty: false, cosT: Math.cos(RECENTER / RM), gx: 0, gy: 1, gz: 0, has: false, rel: null, px: null };
+}
+
+export function attachMoonPatch(p) {
+  Promise.all([reliefField('moon'), canvasData('moon')]).then((a) => {
+    if (!a[0] || !a[1]) return;
+    p.rel = a[0]; p.px = a[1]; p.ready = true; p.dirty = true;
+  });
+}
+
+export function updateMoonPatch(p, dx, dy, dz, alt) {
+  if (!p) return;
+  if (!p.ready || alt > SHOW_ALT) { hidePatch(p); return; }
+  if (p.has && dx * p.gx + dy * p.gy + dz * p.gz > p.cosT && !p.dirty) { p.mesh.visible = true; return; }
+  p.gx = dx; p.gy = dy; p.gz = dz; p.has = true; p.dirty = false;
+  p.mesh.visible = true;
+  rebuildMoon(p);
+}
+
+function rebuildMoon(p) {
+  _g.set(p.gx, p.gy, p.gz).normalize();
+  if (Math.abs(_g.y) < 0.9) _e1.set(0, 1, 0).cross(_g).normalize();
+  else _e1.set(1, 0, 0).cross(_g).normalize();
+  _e2.copy(_g).cross(_e1).normalize();
+
+  const pos = p.mesh.geometry.attributes.position.array;
+  const col = p.mesh.geometry.attributes.color.array;
+  let k = 0;
+  for (let iy = 0; iy < COLS; iy++) {
+    const oy = HALF * warp(1 - iy / SEG * 2);
+    for (let ix = 0; ix < COLS; ix++, k += 3) {
+      const ox = HALF * warp(ix / SEG * 2 - 1);
+      let vx = _g.x + (_e1.x * ox + _e2.x * oy) / RM;
+      let vy = _g.y + (_e1.y * ox + _e2.y * oy) / RM;
+      let vz = _g.z + (_e1.z * ox + _e2.z * oy) / RM;
+      const vl = 1 / Math.sqrt(vx * vx + vy * vy + vz * vz);
+      vx *= vl; vy *= vl; vz *= vl;
+      const v = 0.5 + Math.asin(Math.max(-1, Math.min(1, vy))) / Math.PI;
+      let u = Math.atan2(vz, -vx) / (2 * Math.PI); if (u < 0) u += 1;
+
+      const g = p.rel ? sampleGrid(p.rel, u, v) : 0;
+      pxColor(p.px, u, v, _c1);
+      const lum = 0.2126 * _c1.r + 0.7152 * _c1.g + 0.0722 * _c1.b;
+      const d = moonPatchDetail(u, v, lum);
+      const h = g + d.h + 0.004;                 // a hair above the far mesh; polygonOffset wins ties
+      pos[k] = vx * (RM + h); pos[k + 1] = vy * (RM + h); pos[k + 2] = vz * (RM + h);
+      const tone = Math.min(1.6, d.tone);
+      col[k] = Number.isFinite(_c1.r) ? s2l(Math.min(1, _c1.r * tone)) : 0.3;
+      col[k + 1] = Number.isFinite(_c1.g) ? s2l(Math.min(1, _c1.g * tone)) : 0.3;
+      col[k + 2] = Number.isFinite(_c1.b) ? s2l(Math.min(1, _c1.b * tone)) : 0.3;
+    }
+  }
+  gridNormals(p);
+  p.mesh.geometry.attributes.position.needsUpdate = true;
+  p.mesh.geometry.attributes.color.needsUpdate = true;
+  p.mesh.geometry.attributes.normal.needsUpdate = true;
+  p.mesh.geometry.computeBoundingSphere();
 }
 
 export function hidePatch(p) { if (p && p.mesh.visible) p.mesh.visible = false; }
