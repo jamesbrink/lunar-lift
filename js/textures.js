@@ -49,29 +49,50 @@ const smoothstep = (a, b, x) => { const t = THREE.MathUtils.clamp((x - a) / (b -
 let _cumulus = null;
 export function cumulusTex() {
   if (_cumulus) return _cumulus;
-  const W = 1024, H = 512, data = new Uint8Array(W * H * 4);
+  /* 2048×1024, not 1024×512: at 39 km/texel the whole cloud system minified to its mip average by
+     ~200 km up, and the orbit view wore a featureless veil. At 20 km/texel a 150 km puff survives
+     to mip 3 and the deck keeps cells across the whole reachable orbit band; the material sharpens
+     what averaging lifts toward the mean (see the deck note in js/world.js). */
+  const W = 2048, H = 1024, data = new Uint8Array(W * H * 4);
   const noise = noiseKit();
+  const warpA = noise, warpB = noise;
   for (let iy = 0; iy < H; iy++) {
     /* South-first rows: a DataTexture samples row 0 at v=0 (flipY is false), and SphereGeometry's
        v=0 is the SOUTH pole — north-first rows render the whole weather belt upside down. cirrusTex
        and js/clouds.js's near tile follow the same convention. */
     const lat = ((iy + 0.5) / H - 0.5) * 180;
     const a = Math.abs(lat);
-    const itcz = 1.15 * Math.exp(-Math.pow((a - 4) / 9, 2));
-    const midlat = 0.85 * Math.exp(-Math.pow((a - 52) / 14, 2));
+    const itcz = 1.95 * Math.exp(-Math.pow((a - 4) / 9, 2));
+    const midlat = 0.50 * Math.exp(-Math.pow((a - 52) / 14, 2));
     const dry = -0.55 * Math.exp(-Math.pow((a - 25) / 9, 2));
     const polar = 0.30 * Math.exp(-Math.pow((a - 78) / 12, 2));
     const belt = 0.34 + itcz + midlat + dry + polar;
     for (let ix = 0; ix < W; ix++) {
       const u = ix / W, v = iy / H;
+      /* Domain warp: pushing the sample point through two low-lattice noises turns round iso-blob
+         contours into lobed, turbulent ones — the cauliflower that plain fbm never grows. Without
+         it the deck sharpens into… bigger circles. */
+      const wu = (warpA(u, v, 7, 99) - 0.5) * 0.09;
+      const wv = (warpB(u, v, 11, 77) - 0.5) * 0.05;
       let sum = 0, amp = 0.5, tot = 0;
-      for (let k = 0; k < 5; k++) {                        // 12 .. 192 cells around the globe
-        sum += amp * noise(u, v * 0.55, 12 << k, 40 + k);
+      for (let k = 0; k < 6; k++) {                        // 16 .. 512 cells around the globe
+        sum += amp * noise(u + wu, (v + wv) * 0.55, 16 << k, 40 + k);
         tot += amp; amp *= 0.5;
       }
-      const dens = smoothstep(0.60, 0.82, sum / tot + belt * 0.24);
+      /* The belt term must nudge, not decide: ITCZ (belt 1.49) · 0.24 lifted the WHOLE band's mean
+         0.36 over the threshold and the tropical deck printed as one solid grey plate (measured:
+         9 620 clear / 10 279 full / 1 720 middle — no edges left to see). At gain 0.11 the ITCZ
+         mean (0.664) sits at the low end of this ramp, so the fbm's ±0.07 still carves holes into
+         roughly half the band; the dry belts fall below and go sparse instead of bare. The ramp
+         stays 0.055 wide — crisp-but-antialiased at 20 km/texel. */
+      const dens = smoothstep(0.655, 0.71, sum / tot + belt * 0.11);
+      /* Thickness tints as well as occludes: RGB carries a smooth density (raw fbm position in the
+         ramp band) while alpha stays the crisp mask. Without it the deck's interior is one flat
+         white plate through the ramp — measured, in every orbit frame this session — and what the
+         eye reads as a cloud is really the gradient from thin grey edge to piled white core. */
+      const th = 168 + 87 * smoothstep(0.60, 0.78, sum / tot + belt * 0.11);
       const i = (iy * W + ix) * 4;
-      data[i] = 255; data[i + 1] = 255; data[i + 2] = 255; data[i + 3] = (dens * 255) | 0;
+      data[i] = th; data[i + 1] = th; data[i + 2] = 205 + 50 * (th - 168) / 87; data[i + 3] = (dens * 255) | 0;
     }
   }
   _cumulus = new THREE.DataTexture(data, W, H, THREE.RGBAFormat);
@@ -86,7 +107,7 @@ export function cumulusTex() {
      note in js/world.js. */
   _cumulus.magFilter = THREE.LinearFilter;
   _cumulus.minFilter = THREE.LinearMipmapLinearFilter;
-  _cumulus.generateMipmaps = true;          // 1024×512 is power-of-two
+  _cumulus.generateMipmaps = true;          // 2048×1024 is power-of-two
   _cumulus.needsUpdate = true;
   return _cumulus;
 }
@@ -126,6 +147,27 @@ export function cirrusTex() {
   _cirrus.generateMipmaps = true;
   _cirrus.needsUpdate = true;
   return _cirrus;
+}
+
+/* flareTex is the sun's own plate: a hard cel disc to 0.72 r and a tight pow corona after it.
+   glowTex was used for the sun and its centre-ramped profile is what made the flare a lantern;
+   the disc gets an edge, which is the difference between "the sun" and "a light leak". */
+let _flare = null;
+export function flareTex() {
+  if (_flare) return _flare;
+  const N = 128, data = new Uint8Array(N * N * 4);
+  for (let y = 0; y < N; y++) {
+    for (let x = 0; x < N; x++) {
+      const r = Math.min(1, Math.hypot(x - (N - 1) / 2, y - (N - 1) / 2) / ((N - 1) / 2));
+      const a = r <= 0.72 ? 1 : smoothstep(1.0, 0.72, r) * 0.55;
+      const i = (y * N + x) * 4;
+      data[i] = 255; data[i + 1] = 250; data[i + 2] = 235; data[i + 3] = (a * 255) | 0;
+    }
+  }
+  _flare = new THREE.DataTexture(data, N, N, THREE.RGBAFormat);
+  _flare.colorSpace = THREE.SRGBColorSpace;
+  _flare.needsUpdate = true;
+  return _flare;
 }
 
 /* glowTex is shared by the world (sun flare, pad lamps) and the vehicle (engine glow): cached so
