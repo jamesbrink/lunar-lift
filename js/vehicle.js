@@ -915,7 +915,10 @@ export function updateBurnVisuals({ pos, quat, vel, throttle, activeIdx, burn, f
     if (on) {
       const L = (4 + throttle * 11) * (idx === 0 ? 1.35 : idx === 1 ? 1.0 : .55);
       const flick = .9 + Math.random() * .2;
-      st.flame.scale.set((2 + throttle * 1.6) * flick, L * flick, L * flick);
+      /* (radius, length, radius): the cone's axis is its local +Y after the -90° pitch below, so the
+         two radial axes have to take the radius. It used to read (rx, L, L), which stretched the plume
+         along one radial direction and drew the whole flame as a diamond under the rocket. */
+      st.flame.scale.set((2 + throttle * 1.6) * flick, L * flick, (2 + throttle * 1.6) * flick);
       st.glow.scale.setScalar((6 + throttle * 13) * flick);
       // engine gimbal: the plume lags the turn, swinging opposite the body rate (clamped +/-0.22 rad).
       // Euler 'YXZ': Rx pitches apex toward +Y for omega.x > 0 (nose pitches toward -Y),

@@ -105,14 +105,24 @@ export function outline(mesh, scale = 1) {
   return o;
 }
 
-/* The two-tone plume: a saturated outer cone and a pale core, both unlit, so the flame looks drawn
-   rather than rendered. Returns [outer, core] already parented to `parent`. */
+/* The drawn flame: apex at the throat, widening aft — a cone flipped so its point is where the gas
+   leaves the nozzle. It used to be the stock ConeGeometry, apex aft and base at the engine, so the
+   silhouette was a spike narrowing away from the rocket, and its base cap is a flat disc that additive
+   blending turned into a glowing blob at the plume's end. Open-ended and flipped, it reads as exhaust.
+   Two tones (saturated outer, pale core parented inside) so scaling one scales both. */
+function flameCone(r, h, seg) {
+  const g = new THREE.ConeGeometry(r, h, seg, 1, true);
+  g.rotateX(Math.PI);                       // apex down to y = -h/2 …
+  g.translate(0, h / 2, 0);                 // … and the apex at the origin, mouth aft at y = h
+  return g;
+}
+
 export function plumeMeshes(parent, outerColour = 0xff7a2a, coreColour = 0xffe9b0) {
-  const outer = new THREE.Mesh(new THREE.ConeGeometry(1, 1, 14),
-    new THREE.MeshBasicMaterial({ color: outerColour, transparent: true, opacity: 0.85, blending: THREE.AdditiveBlending, depthWrite: false }));
-  const core = new THREE.Mesh(new THREE.ConeGeometry(0.45, 0.72, 10),
+  const outer = new THREE.Mesh(flameCone(1, 1, 24),
+    new THREE.MeshBasicMaterial({ color: outerColour, transparent: true, opacity: 0.62, blending: THREE.AdditiveBlending, depthWrite: false }));
+  const core = new THREE.Mesh(flameCone(0.42, 0.62, 18),
     new THREE.MeshBasicMaterial({ color: coreColour, transparent: true, opacity: 0.95, blending: THREE.AdditiveBlending, depthWrite: false }));
-  core.position.y = 0.14;                                   // sit the core up inside the mouth
+  core.position.y = 0.04;                                   // start just aft of the throat
   outer.add(core);
   parent.add(outer);
   return { outer, core };
