@@ -1,6 +1,9 @@
 import * as THREE from 'three';
 import { RE, RM, MU_E, MU_M, SOI_M, moonPos } from './constants.js';
 import { S, getSimTime, isBurning, orbitalElements, navVel, fwd } from './physics.js';
+/* One-directional: js/hud.js draws the navball and js/world.js paints the canvases this plot
+   blits; world never imports navball, so this edge does not close a cycle. */
+import * as WORLD from './world.js';
 
 /* ---------------- KSP-style attitude ball ----------------
    The ball is an orthographic view of the sky as seen from the nose of the
@@ -37,7 +40,7 @@ function proj(v, R) {
   return { x: b.x / m * R, y: -b.y / m * R, front: false };
 }
 
-function marker(c, cx, cy, dir, R, colour, r = 5) {
+function marker(c, cx, cy, dir, R, colour, r = 5, label = null) {
   const p = proj(dir, R);
   if (!p) return null;
   c.save();
@@ -45,6 +48,7 @@ function marker(c, cx, cy, dir, R, colour, r = 5) {
   c.strokeStyle = colour; c.fillStyle = colour; c.lineWidth = 1.4;
   c.beginPath(); c.arc(cx + p.x, cy + p.y, r, 0, 6.283); c.stroke();
   c.beginPath(); c.arc(cx + p.x, cy + p.y, 1.6, 0, 6.283); c.fill();
+  if (label) { c.font = '8px ui-monospace,monospace'; c.fillText(label, cx + p.x + r + 2, cy + p.y + 3); }
   c.restore();
   return p;
 }
@@ -103,15 +107,19 @@ export function drawNavball() {
 
   c.save();
   c.beginPath(); c.arc(cx, cy, R, 0, 6.283); c.clip();
-  c.fillStyle = '#3a7ab8'; c.fillRect(0, 0, NB, NB);           // sky
+  /* The ball's palette follows the body underneath: blue sky over green ground at Earth, and
+     black vacuum over grey regolith at the Moon — a green horizon under a lunar descent read as
+     a broken instrument, because no such surface exists there. */
+  c.fillStyle = nearMoon ? '#06080d' : '#3a7ab8'; c.fillRect(0, 0, NB, NB);   // sky / vacuum
+  const groundCol = nearMoon ? '#4b4b54' : '#2b4b36';
 
   const u = toBody(up);
   if (u.z < -0.999) {
-    c.fillStyle = '#2b4b36'; c.fillRect(0, 0, NB, NB);         // looking straight down
+    c.fillStyle = groundCol; c.fillRect(0, 0, NB, NB);          // looking straight down
   } else if (u.z < 0.999) {
     const arc = horizonArc(u);
     if (arc.length) {
-      c.fillStyle = '#2b4b36';
+      c.fillStyle = groundCol;
       c.beginPath();
       arc.forEach((d, i) => i ? c.lineTo(cx + d.x * R, cy - d.y * R) : c.moveTo(cx + d.x * R, cy - d.y * R));
       const a2 = Math.atan2(arc[arc.length - 1].y, arc[arc.length - 1].x);
@@ -177,6 +185,9 @@ export function drawNavball() {
     marker(c, cx, cy, centre.clone().addScaledVector(ecc, -el.a * (1 + el.e)).sub(S.pos), R, '#8fdcff', 4);
   }
   if (rM < 1.2e6) marker(c, cx, cy, moon.clone().sub(S.pos), R, '#c9cbd2', 4);
+  /* From lunar space Earth is the destination — give it the same courtesy marker the Moon gets
+     from cislunar space, so the return burn can be aimed off the ball. */
+  if (nearMoon) marker(c, cx, cy, S.pos.clone().negate(), R, '#7fb2e8', 5, 'EARTH');
   c.restore();
 
   // the nose: the direction the engines are pushing — at the centre by construction of proj()
@@ -212,8 +223,56 @@ function drawOrbit(nearMoon, centre, vel, el, ecc) {
   const ox = ORB_W / 2, oy = ORB_H / 2;
   const px = p => [ox + p.x * scale, oy - p.y * scale];
 
-  c.fillStyle = nearMoon ? '#c9cbd2' : '#2f6ca8';
-  c.beginPath(); c.arc(ox, oy, Math.max(2, bodyR * scale), 0, 6.283); c.fill();
+  /* The centre body is the PAINTED MAP, not a token dot: the same canvas the planet wears is
+     blitted into a clipped disc, centred on the ground beneath the vehicle (body-local, so it
+     turns with the planet), with a night side laid over the anti-sun half. A navy circle made
+     the plot read as decoration; a chart you can pick Florida out of is navigation.
+     The crop is linear in lon/lat, not true orthographic — at 150 px the difference is under a
+     coastline's width, and every pixel here has to survive a 2× dpr canvas first. */
+  const bodyRpx = Math.max(2, bodyR * scale);
+  const pcv = WORLD.planetCanvas(nearMoon ? 'moon' : 'earth');
+  c.save();
+  c.beginPath(); c.arc(ox, oy, bodyRpx, 0, 6.283); c.clip();
+  if (pcv && pcv.width > 1) {
+    const spin = WORLD.bodySpin(nearMoon ? 'moon' : 'earth');
+    const cs = Math.cos(spin), sn = Math.sin(spin);
+    const lx = cs * rel.x - sn * rel.z, lz = sn * rel.x + cs * rel.z;   // rotY(−spin), world→body
+    const lat = Math.asin(THREE.MathUtils.clamp(rel.y / rel.length(), -1, 1));
+    const lon = Math.atan2(-lz, lx);
+    const cu = ((lon / (2 * Math.PI)) + 0.5) * pcv.width;
+    const cvr = (0.5 - lat / Math.PI) * pcv.height;
+    /* The disc edge is 90° of ground from the centre in both axes: ±90° lon = quarter of the map
+       width, ±90° lat = half the height. (Ground km was the wrong currency here: the horizon of
+       an orthographic disc is πR/2 km away, not R.) */
+    const sxw = pcv.width / 4;
+    const syw = pcv.height / 2;
+    const drawWin = (sx, dx, w) => c.drawImage(pcv, sx, cvr - syw, w, syw * 2, dx, oy - bodyRpx, w * (bodyRpx / sxw), bodyRpx * 2);
+    const srcLeft = cu - sxw, srcRight = cu + sxw;
+    if (srcLeft >= 0 && srcRight <= pcv.width) {
+      drawWin(srcLeft, ox - bodyRpx, sxw * 2);
+    } else if (srcLeft < 0) {                       // window wraps the dateline: two true-offset draws
+      drawWin(srcLeft + pcv.width, ox - bodyRpx, -srcLeft);
+      drawWin(0, ox - bodyRpx - srcLeft, srcRight);
+    } else {
+      const w1 = pcv.width - srcLeft;
+      drawWin(srcLeft, ox - bodyRpx, w1);
+      drawWin(0, ox - bodyRpx + w1, srcRight - pcv.width);
+    }
+    /* night side: the anti-sun half in the plot's own basis */
+    const su = A.dot(WORLD.SUN_DIR), sv = B.dot(WORLD.SUN_DIR);
+    const sl = Math.hypot(su, sv) || 1;
+    const gx = ox + (su / sl) * bodyRpx, gy = oy - (sv / sl) * bodyRpx;
+    const g = c.createLinearGradient(gx, gy, ox - (su / sl) * bodyRpx, oy - (sv / sl) * bodyRpx);
+    g.addColorStop(0, 'rgba(4,8,16,0)'); g.addColorStop(0.52, 'rgba(4,8,16,0)');
+    g.addColorStop(0.62, 'rgba(4,8,16,.62)'); g.addColorStop(1, 'rgba(4,8,16,.86)');
+    c.fillStyle = g; c.fillRect(ox - bodyRpx, oy - bodyRpx, bodyRpx * 2, bodyRpx * 2);
+  } else {
+    c.fillStyle = nearMoon ? '#c9cbd2' : '#2f6ca8';
+    c.fillRect(ox - bodyRpx, oy - bodyRpx, bodyRpx * 2, bodyRpx * 2);
+  }
+  c.restore();
+  c.strokeStyle = 'rgba(143,220,255,.28)'; c.lineWidth = 1;
+  c.beginPath(); c.arc(ox, oy, bodyRpx, 0, 6.283); c.stroke();
 
   const bound = Math.max(reach * 1.15, rel.length() * 1.15, bodyR * 1.05);
   c.strokeStyle = 'rgba(143,220,255,.55)'; c.lineWidth = 1.2; c.beginPath();
