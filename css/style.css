@@ -43,7 +43,7 @@
   .hud.onmap{z-index:8}
   /* !important because warn/desc/igniteHint are shown by inline style in updateHUD/setWarn */
   body.map .flightonly{display:none !important}
-  #clock{left:50%;top:10px;transform:translateX(-50%);font-family:var(--mono);font-size:12px;
+  #clock{left:50%;top:6px;transform:translateX(-50%);font-family:var(--mono);font-size:12px;
     color:var(--ob-muted);letter-spacing:.08em;white-space:nowrap;text-shadow:var(--ob-halo)}
   #clock b{color:var(--ob-fg)} #warpInd{color:var(--ob-accent)}
   #log{left:50%;top:64px;transform:translateX(-50%);display:flex;flex-direction:column;align-items:center;gap:4px;width:520px}
@@ -80,8 +80,16 @@
      --ob-ok L .054 → 9.6:1, --ob-fg L .013 → 11:1. The dark ink stays (the on-bright palette is
      the shipped language); the plate just stops the terrain voting on the contrast. Same pill
      geometry as the toast lines so the centre screen reads as one furniture family. */
+  /* Round 8: the MET strip and the throttle stack join the same family. Review 8 measured both
+     in dark ink over the black sky of the vacuum frames (MET grey-on-black, "MAIN ENGINE 295 KN"
+     teal-on-sea and the 0 % numeral on black) — the halo only holds the ink up on BRIGHT terrain,
+     it cannot invent contrast on night. The plate makes them legible on any background. Padding
+     grows OUTWARD: #clock top 10→6 and #throttle bottom 78→72 with 4/6 px padding put the text
+     exactly where it was measured before (DESCENT clearance at 192 px unchanged). */
   #warn,#desc,#igniteHint{background:rgba(240,244,250,.9);border:1px solid rgba(16,24,36,.28);
     border-radius:7px;padding:5px 12px}
+  #clock{background:rgba(240,244,250,.9);border:1px solid rgba(16,24,36,.28);
+    border-radius:7px;padding:4px 12px}
   .stageRow{display:grid;grid-template-columns:auto 1fr auto;gap:8px;align-items:center;margin:4px 0}
   .stageRow .pip{width:10px;height:10px;border-radius:3px;border:1px solid var(--panel-border);background:#222b3a}
   .stageRow.active .pip{background:var(--accent);box-shadow:0 0 8px rgba(111,211,255,.7)}
@@ -127,7 +135,8 @@
   #bigBtn{pointer-events:auto;background:linear-gradient(180deg,#8fdcff,#4cb8e8);border:0;color:#06222f;
     font:inherit;font-weight:700;font-size:15px;letter-spacing:.12em;padding:11px 34px;border-radius:9px;cursor:pointer}
   #bigBtn:hover{filter:brightness(1.1)}
-  #throttle{left:50%;bottom:78px;transform:translateX(-50%);text-align:center;pointer-events:none}
+  #throttle{left:50%;bottom:72px;transform:translateX(-50%);text-align:center;pointer-events:none;
+    background:rgba(240,244,250,.9);border:1px solid rgba(16,24,36,.28);border-radius:9px;padding:6px 16px}
   #thrBig{font-family:var(--mono);font-size:30px;font-weight:700;letter-spacing:.04em;
     color:var(--ob-fg);text-shadow:var(--ob-halo)}
   #thrBig span{font-size:15px;color:var(--ob-muted);font-weight:500}

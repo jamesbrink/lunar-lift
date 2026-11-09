@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { toon, RAMP_EARTH, RAMP_MOON } from './toon.js';
 import { RE, RM } from './constants.js';
+import { moonTex } from './textures.js';
 import {
   sampleGrid, fineEarth, shoreDistance, padWeight, padShoreWeight, padAuthored,
   reliefField, coastField, canvasData, canvasDataSoft, moonPatchDetail,
@@ -34,6 +35,27 @@ const HALF = 220;                     // km to the rim: horizon is covered to al
    of ground travel. */
 const SEG = 320;                      // 321×321 vertices, radial warp: ~12 m centre, ~1.4 km rim
 const COLS = SEG + 1;
+/* Round 7: the lunar near level alone steps up to 512. Review 7 measured the 320 mesh's bake as
+   "grid-aligned ~1 km rectangles / defocused blobs" at every 2–9 km viewing angle: with the pit
+   octaves dead past r ≈ 9/38 km there is nothing for 0.1–2 km cells to carry except interpolated
+   canvas mottle, and the cell edges read as the mosaic. At 512 the step law becomes
+   0.008 + 4.26·t⁴ km, the fine octave survives to r 15.7 km and the coarse one to r 66 km —
+   inside the 95 km horizon of the 2.6 km skim, and under the lattice-≥·2·step alias rule.
+   Rebuild cost is ~2.6× the earth patch's; measured below before shipping. Earth stays 320. */
+const SEG_M = 512;                    // lunar mesh: 513×513 vertices, ~8 m centre, ~1.9 km rim (over ±220 km)
+/* Round 8: the cap STAYS at ±220 km — shrunk to 90 and 160 this round, and both were worse. The
+   rim cannot hide: the horizon from the skim is 95 km over the reference sphere, but line of
+   sight reaches √(2·RM·h_obs)+√(2·RM·h_target) ≈ 195 km over +1.6 km highland, so a 90 or 160 km
+   rim pokes ABOVE the horizon and draws its (fade-tapered, toothed) edge straight across the
+   field — measured in-frame at both sizes, the same artifact the cap was halved to cure. At 220
+   the rim is outside any skim sight line. The horizon crack that motivated the shrink was the
+   far globe chording through the patch, not the rim; that is fixed by the 300 m lift plus
+   drowning the globe's draw under the skim (updateMoonPatch). Density consequence of the wide
+   cap: cells run 1–4 km past r 27 km and the VERTEX crater plates alias there — the per-fragment
+   canvas map is what carries the mid-field read now, at 2.7 km/texel. */
+const HALF_M = 220;                   // km to the lunar rim: outside the skim's ~195 km sight line
+const SPHERE_DROWN_ALT = 2.8;         // km: below this the far globe's drawRange goes to zero (updateMoonPatch)
+const COLS_M = SEG_M + 1;
 const FINE_FROM = 8, FINE_TO = 30;    // km: fine octaves exist inside this radius
 const LIFT = 0.008;                   // km above the globe mesh, constant — never negative, polygonOffset wins the ties
 const RECENTER = 12;                  // km of ground travel before a rebuild: ~1.2 ms steady, and at 12 km even the outlier rebuild lands outside any window a player is watching
@@ -90,6 +112,7 @@ export function makePatch(body) {
   body.add(mesh);
   return {
     mesh, ready: false, dirty: false,
+    seg: SEG, cols: COLS,
     cosT: Math.cos(RECENTER / RE),
     gx: 0, gy: 1, gz: 0, has: false,
     rel: null, coast: null, px: null, soft: null,
@@ -118,16 +141,17 @@ export function attachEarthPatch(p) {
    the Moon, so its limb must stay as crisp as the sky it cuts. RAMP_MOON so it matches the far mesh
    under the same sun. */
 export function makeMoonPatch(moonBody) {
-  const n = COLS * COLS;
+  const n = COLS_M * COLS_M;
   const geo = new THREE.BufferGeometry();
   geo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(n * 3), 3));
   geo.setAttribute('color', new THREE.BufferAttribute(new Float32Array(n * 3), 3));
   geo.setAttribute('normal', new THREE.BufferAttribute(new Float32Array(n * 3), 3));
-  const idx = new Uint32Array(SEG * SEG * 6);
+  geo.setAttribute('uv', new THREE.BufferAttribute(new Float32Array(n * 2), 2));
+  const idx = new Uint32Array(SEG_M * SEG_M * 6);
   let t = 0;
-  for (let y = 0; y < SEG; y++) {
-    for (let x = 0; x < SEG; x++) {
-      const a = y * COLS + x, b = a + 1, c = a + COLS, d = c + 1;
+  for (let y = 0; y < SEG_M; y++) {
+    for (let x = 0; x < SEG_M; x++) {
+      const a = y * COLS_M + x, b = a + 1, c = a + COLS_M, d = c + 1;
       idx[t++] = a; idx[t++] = c; idx[t++] = b;
       idx[t++] = b; idx[t++] = c; idx[t++] = d;
     }
@@ -135,6 +159,19 @@ export function makeMoonPatch(moonBody) {
   geo.setIndex(new THREE.BufferAttribute(idx, 1));
   const mesh = new THREE.Mesh(geo, toon({
     vertexColors: true, gradientMap: RAMP_MOON,
+    /* Round 8: the painted sheet rides the patch as a per-fragment map, sampled from the SAME
+       texture the far globe and the HUD inset use (the shared moonTex — a dedicated
+       CanvasTexture wrapper FAILED SILENTLY, shared-`source` reassignment samples a constant;
+       a fresh THREE.Texture over the same image failed the same way, both measured). What an
+       earlier round blamed on the sampler was a site-selection error: (−17.5°,−75°) has ZERO
+       craters within ±120 km, so a working sampler still read flat grey there. Measured at
+       (−30°,20°): mare plates and crater floors land on the mesh crisp; bilinear + mip chain
+       (LEFT AT DEFAULT) is the winner — mag=1003 measured jaggies where texels magnify, mag
+       1006 with min=1006 (no mips) measured stipple at grazing angles. The vertex channel is
+       a pure linear deviation (round 7): canvas × deviation, albedo composed once, never
+       squared. uv is the equirectangular uv rebuildMoon writes, dateline-unwrapped so no
+       triangle spans the canvas. */
+    map: (() => { const mt = moonTex(); mt.anisotropy = 16; return mt; })(),
     polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2,
   }));
   mesh.material.fog = false;              // no atmosphere: the near ground cannot haze into the sky
@@ -143,7 +180,7 @@ export function makeMoonPatch(moonBody) {
   mesh.visible = false;
   moonBody.add(mesh);
   // body keeps the spin (for the sun's mesh-local frame); light is resolved lazily by bakeSun
-  return { mesh, ready: false, dirty: false, cosT: Math.cos(RECENTER / RM), gx: 0, gy: 1, gz: 0, has: false, rel: null, px: null, body: moonBody, light: undefined };
+  return { mesh, ready: false, dirty: false, seg: SEG_M, cols: COLS_M, cosT: Math.cos(RECENTER / RM), gx: 0, gy: 1, gz: 0, has: false, rel: null, px: null, body: moonBody, light: undefined };
 }
 
 export function attachMoonPatch(p) {
@@ -156,6 +193,24 @@ export function attachMoonPatch(p) {
 export function updateMoonPatch(p, dx, dy, dz, alt) {
   if (!p) return;
   if (!p.ready || alt > SHOW_ALT) { hidePatch(p); return; }
+  /* Round 8: under the skim the far globe is DROWNED, not patched over. The patch rides the
+     relief grid at its exact value while the globe meshes chords that same grid between its own
+     ~10 km vertices — up to ~240 m of overshoot in concave fields — and wherever the chord won,
+     the globe poked through the patch. Measured at (−30°,20°) t 1066: a dark straight CRACK on
+     the horizon band, teeth at the globe's cell spacing, its every raycast hit landing at one
+     ground radius (76–78 km) — a circle, the line of sight grazing the highland there while
+     the pocked-through globe showed its flat chord flats behind. A 300 m lift clears the poke
+     THROUGH, but the gap the lift opens reads as the same dark band at the horizon, so: while
+     the patch is up at skim altitude (≤ SPHERE_DROWN_ALT), the globe's own draw range goes to
+     zero — every ray the skim can cast hits patch terrain long before 220 km, and above the
+     band the globe returns for the transition frames where its horizon ring IS the picture.
+     drawRange (not .visible): the patch is a CHILD of the globe mesh and .visible=false would
+     take it down too, and raycasts/camera collision stay mathematical either way. */
+  const drown = alt <= SPHERE_DROWN_ALT;
+  if (p.sphereHidden !== drown) {
+    p.body.geometry.setDrawRange(drown ? 0 : Infinity, drown ? 0 : Infinity);
+    p.sphereHidden = drown;
+  }
   if (p.has && dx * p.gx + dy * p.gy + dz * p.gz > p.cosT && !p.dirty) { p.mesh.visible = true; return; }
   p.gx = dx; p.gy = dy; p.gz = dz; p.has = true; p.dirty = false;
   p.mesh.visible = true;
@@ -194,14 +249,16 @@ function rebuildMoon(p) {
   else _e1.set(1, 0, 0).cross(_g).normalize();
   _e2.copy(_g).cross(_e1).normalize();
   const sun = bakeSun(p);                 // once per rebuild, not per vertex
+  let uC = Math.atan2(_g.z, -_g.x) / (2 * Math.PI); if (uC < 0) uC += 1;   // uv unwrap centre (dateline-safe)
 
   const pos = p.mesh.geometry.attributes.position.array;
   const col = p.mesh.geometry.attributes.color.array;
-  let k = 0;
-  for (let iy = 0; iy < COLS; iy++) {
-    const oy = HALF * warp(1 - iy / SEG * 2);
-    for (let ix = 0; ix < COLS; ix++, k += 3) {
-      const ox = HALF * warp(ix / SEG * 2 - 1);
+  const uvA = p.mesh.geometry.attributes.uv.array;
+  let k = 0; let m = 0;
+  for (let iy = 0; iy < COLS_M; iy++) {
+    const oy = HALF_M * warp(1 - iy / SEG_M * 2);
+    for (let ix = 0; ix < COLS_M; ix++, k += 3, m += 2) {
+      const ox = HALF_M * warp(ix / SEG_M * 2 - 1);
       let vx = _g.x + (_e1.x * ox + _e2.x * oy) / RM;
       let vy = _g.y + (_e1.y * ox + _e2.y * oy) / RM;
       let vz = _g.z + (_e1.z * ox + _e2.z * oy) / RM;
@@ -209,34 +266,39 @@ function rebuildMoon(p) {
       vx *= vl; vy *= vl; vz *= vl;
       const v = 0.5 + Math.asin(Math.max(-1, Math.min(1, vy))) / Math.PI;
       let u = Math.atan2(vz, -vx) / (2 * Math.PI); if (u < 0) u += 1;
+      let uu = u - uC; if (uu > 0.5) uu -= 1; else if (uu < -0.5) uu += 1;   // unwrap across the dateline so no triangle spans the canvas
+      uvA[m] = uC + uu; uvA[m + 1] = v;               // equirectangular uv (kept: costs 4 lines, lets any future fragment read sample the same grid the bake does)
 
       const g = p.rel ? sampleGrid(p.rel, u, v) : 0;
       pxColor(p.px, u, v, _c1);
       const lum = 0.2126 * _c1.r + 0.7152 * _c1.g + 0.0722 * _c1.b;
-      /* Pit attenuation by local mesh spacing. Per-vertex step of this mesh (SEG = 320):
-         2·HALF/SEG·d/dt[t·(A + (1−A)t⁴)] = 0.0128 + 6.81·t⁴ km; distance from centre
-         220·(0.0093t + 0.9907t⁵) km. A noise octave may only live where the step resolves it
-         (lattice ≥ 2·step); below that a vertex samples white noise and the radial warp draws it
-         as radial streaks. FINE octaves (250 m + 700 m lattices): full to step 140 m (t 0.371,
-         r 2.5 km), zero at 880 m (t 0.598, r 20.1 km). COARSE octave (2.2 km lattice,
-         js/toonmap.js round 6): full to 1.1 km (t 0.632, r 25.0 km), zero at 2.2 km (t 0.753,
-         r 65.7 km) — its own ramp, so pitting still covers the visible foreground of the 2.6 km
-         skim (horizon 95 km), which review 5 measured as featureless, and it dies exactly where
-         it would alias. Mid-tier craters (≥3 km bowls) are not faded at all. (2026-11-09: before,
-         whole-frame starburst; round-5 fix, featureless foreground; this is the resolved middle.) */
-      const wt = Math.max(Math.abs(ix / SEG * 2 - 1), Math.abs(1 - iy / SEG * 2));
+      /* Pit attenuation by local mesh spacing. Per-vertex step of this mesh (SEG_M = 512 over
+         ±HALF_M = 220 km): 2·220/512·d/dt[t·(A + (1−A)t⁴)] = 0.008 + 4.26·t⁴ km; distance from
+         centre 220·(0.0093t + 0.9907t⁵) km. A noise octave may only live where the step resolves
+         it (lattice ≥ 2·step); below that a vertex samples white noise and the radial warp draws
+         it as radial streaks. FINE octave (250 m lattice): full to step 140 m (t 0.420, r 4.3
+         km), zero at 500 m (t 0.583, r 15.7 km). SECOND octave (700 m lattice) dies with it.
+         COARSE octave (1.6 km lattice, js/toonmap.js round 6): full to 800 m step (t 0.657,
+         r 28.3 km), zero at 1.6 km (t 0.785, r 66.6 km) — its own ramp, so pitting covers the
+         visible foreground AND middle field of the 2.6 km skim and dies exactly where it would
+         alias. Mid-tier craters (≥3 km bowls) are not faded; between r 27 km and the horizon the
+         read is carried by the per-fragment canvas map, not by these plates. (Round 7 numbers,
+         re-verified for the cap's return to ±220 km.) */
+      const wt = Math.max(Math.abs(ix / SEG_M * 2 - 1), Math.abs(1 - iy / SEG_M * 2));
       const smooth = (a, x, b) => { const s = (x - a) / (b - a); return s <= 0 ? 1 : s >= 1 ? 0 : 1 - s * s * (3 - 2 * s); };
-      const pa = smooth(0.371, wt, 0.517);     // zero at 500 m step (r 9.2 km): the ±27 % octave must die before the 250 m lattice aliases into the starburst
-      const pa2 = smooth(0.591, wt, 0.703);    // 1.6 km lattice: full ≤ 800 m step (r 18.7 km), zero at 1.6 km (r 38.5 km)
+      const pa = smooth(0.420, wt, 0.583);     // fine + second octaves: full ≤140 m step (r 4.3 km), zero at 500 m (r 15.7 km)
+      const pa2 = smooth(0.657, wt, 0.785);    // 1.6 km lattice: full ≤800 m step (r 28.3 km), zero at 1.6 km (r 66.6 km)
       const d = moonPatchDetail(u, v, lum, sun, pa, pa2);
-      /* Vertical relief exaggeration ×2.6, tapered to ×1 over the outer 20 % of the cap. A 3 km bowl
-         with a 300 m rim tilts ~11° — under a 28° sun that is 0.28 ≤ dotNL ≤ 0.65, inside ONE ramp
-         band, and it renders as an albedo smudge (review 5 frames 11/12, "flat polygon patches").
-         At ×2.6 the lee wall tilts 28°, crosses the 0.25 step and self-shadows; the taper to ×1
-         across wt 0.8→1.0 kills the seam against the far mesh, whose baked relief excludes these
-         small bowls (34 km/texel cannot hold them) and whose vertices physics lands on — physics
-         never touches the patch, so this is a display-only exaggeration. */
-      const exag = 1 + 1.6 * (1 - smooth(0.8, wt, 1.0));
+      /* Vertical relief exaggeration — ×1.4 now, was ×2.6 (round 8). The ×2.6 law exists because
+         review 5 saw bowls as albedo smudges under a three-band ramp: ×2.6 tilted lee walls to
+         28° so the ramp carved them. Round 7/8 gave the bowls DRAWN albedo instead — a 12.8 km
+         painted ring, the collar stroke and a ×1.5 contrast curve on a 2.7 km/texel canvas, plus
+         the plateau crescent law in moonPatchDetail — and at ×2.6 the 150 m rim crests of the
+         pockmark tier became 390 m swells the sun painted as 5–20 km fog-waves: the "soft blobby
+         surface" of review 7. ×1.4 keeps a little lee tilt for the big bowls and lets the drawn
+         ring carry the read; the taper to ×1 over the outer 20 % of the cap is unchanged, and
+         physics never touches the patch, so this is a display-only number. */
+      const exag = 1 + 0.4 * (1 - smooth(0.8, wt, 1.0));
       /* Round 6: the lift is 80 m, not 4 m — the 4 m patch was BURIED almost everywhere. The far
          mesh is the relief grid displaced at its own ~10.7 km vertices and chorded between them;
          over 34 km-scale grid cells with up to 2 km amplitude the chord overshoots the true field
@@ -247,7 +309,18 @@ function rebuildMoon(p) {
          the patch at the same 0.8 km. This is why every skim frame ever captured read as smooth
          smoke — none of them ever showed the patch. 80 m clears the worst chord sag; the physics
          never touches the patch (it lands on RM exactly), so the extra lift is display-only. */
-      const h = g + d.h * exag + 0.08;
+      /* Round 8 RIM FADE: everything the patch ADDS to the globe — crater/pit relief, the ×gain
+         exaggeration, the 300 m lift — is ramped to zero across the outer 15 % of the cap, so
+         the square edge cannot step above the globe wherever it might be seen (with the cap at
+         ±220 km this band is under the skim's sight line, and this is cheap insurance for the
+         transition altitudes). The lift NOT fading under the globe's chord was the other half
+         of the horizon crack (see updateMoonPatch): the globe chords the relief grid by up to
+         ~240 m and poked through an 80 m lift, drawing a dark toothed line on the horizon band
+         (measured at (−30°,20°): hits at one ground radius, 76–78 km = the sight-line circle,
+         not the rim). 300 m of lift clears the poke; the drown of the globe's draw under the
+         skim removes what the lift cannot — the visible gap band. Display-only. */
+      const rimFade = smooth(0.85, wt, 1.0);
+      const h = g + (d.h * exag + 0.3) * rimFade;
       pos[k] = vx * (RM + h); pos[k + 1] = vy * (RM + h); pos[k + 2] = vz * (RM + h);
       /* Deviation gain (measured 2026-11-09, round 5): the old 1 + 1.6·(tone−1) ran against a base
          that itself sat at sRGB 0.80 under the day ramp — 34 % of vertices clipped above 0.90, so
@@ -260,19 +333,27 @@ function rebuildMoon(p) {
          term is still the same C0 crater profile — slower-varying than the mesh, so the bake
          cannot staircase. */
       const tone = Math.max(0.34, Math.min(1.7, 1 + 2.2 * (d.tone - 1)));
-      col[k] = Number.isFinite(_c1.r) ? s2l(Math.min(1, _c1.r * tone)) : 0.3;
-      col[k + 1] = Number.isFinite(_c1.g) ? s2l(Math.min(1, _c1.g * tone)) : 0.3;
-      col[k + 2] = Number.isFinite(_c1.b) ? s2l(Math.min(1, _c1.b * tone)) : 0.3;
+      /* Round 7: the vertex channel is now a PURE LINEAR DEVIATION (grey), because the painted
+         sheet arrives per-fragment in `map`; s2l(canvas·tone) here would square the albedo. The
+         deviation logic is unchanged from round 5 — sunward rim up to ×1.7, floor ×0.34, the
+         same C0 crater profile, slower-varying than the mesh so the bake cannot staircase. */
+      const gcol = Number.isFinite(tone) ? tone : 0.5;
+      col[k] = gcol; col[k + 1] = gcol; col[k + 2] = gcol;
     }
   }
   gridNormals(p);
   p.mesh.geometry.attributes.position.needsUpdate = true;
   p.mesh.geometry.attributes.color.needsUpdate = true;
   p.mesh.geometry.attributes.normal.needsUpdate = true;
+  p.mesh.geometry.attributes.uv.needsUpdate = true;
   p.mesh.geometry.computeBoundingSphere();
 }
 
-export function hidePatch(p) { if (p && p.mesh.visible) p.mesh.visible = false; }
+export function hidePatch(p) {
+  if (!p) return;
+  if (p.mesh.visible) p.mesh.visible = false;
+  if (p.sphereHidden) { p.body.geometry.setDrawRange(0, Infinity); p.sphereHidden = false; }
+}
 
 /* Per-frame, called from js/world.js with the ground point as a unit vector in the body-local
    frame (the caller undoes the spin) and the altitude in km above the reference sphere. */
@@ -350,17 +431,18 @@ function rebuild(p) {
    result is exactly the surface the vertices describe. On a tame cap every normal sits within a
    few degrees of the local radial direction; if this ever disagrees, the field is not tame. */
 function gridNormals(p) {
+  const S = p.seg, C1 = p.cols;
   const pos = p.mesh.geometry.attributes.position.array;
   const nrm = p.mesh.geometry.attributes.normal.array;
-  for (let iy = 0; iy < COLS; iy++) {
-    const yu = iy > 0 ? iy - 1 : 0, yd = iy < SEG ? iy + 1 : SEG;
-    for (let ix = 0; ix < COLS; ix++) {
-      const xl = ix > 0 ? ix - 1 : 0, xr = ix < SEG ? ix + 1 : SEG;
-      const i0 = (iy * COLS + ix) * 3;
-      _pa.fromArray(pos, (yu * COLS + ix) * 3);       // up-row
-      _pb.fromArray(pos, (yd * COLS + ix) * 3);       // down-row
-      _pc.fromArray(pos, (iy * COLS + xr) * 3);       // right
-      _pd.fromArray(pos, (iy * COLS + xl) * 3);       // left
+  for (let iy = 0; iy < C1; iy++) {
+    const yu = iy > 0 ? iy - 1 : 0, yd = iy < S ? iy + 1 : S;
+    for (let ix = 0; ix < C1; ix++) {
+      const xl = ix > 0 ? ix - 1 : 0, xr = ix < S ? ix + 1 : S;
+      const i0 = (iy * C1 + ix) * 3;
+      _pa.fromArray(pos, (yu * C1 + ix) * 3);       // up-row
+      _pb.fromArray(pos, (yd * C1 + ix) * 3);       // down-row
+      _pc.fromArray(pos, (iy * C1 + xr) * 3);       // right
+      _pd.fromArray(pos, (iy * C1 + xl) * 3);       // left
       const tx = _pc.x - _pd.x, ty = _pc.y - _pd.y, tz = _pc.z - _pd.z;
       const bx = _pb.x - _pa.x, by = _pb.y - _pa.y, bz = _pb.z - _pa.z;
       let nx = ty * bz - tz * by, ny = tz * bx - tx * bz, nz = tx * by - ty * bx;

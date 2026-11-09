@@ -112,23 +112,67 @@ function cleanMask(mask, w, h, passes = 3) {
    corners and one-texel spurs; the closing fills concave nicks and single-texel straits of
    disagreement. Longitude WRAPS — the dateline is not an edge; latitude clamps to itself so polar
    coasts are not shaved at the map border. Area moves only at corners: measured on the shipped
-   Earth canvas, land share 36.9 % before and after (moon mare 3.27 % before → 3.27 %). */
+   Earth canvas, land share 36.9 % before and after (moon mare 3.27 % before → 3.27 %).
+
+   Bit-packed (round 8, measured): the per-texel closure version spent most of the 5.8 s the 4×
+   moon repaint took — 32 passes × 8.4 M texels × 5 clamped neighbour lookups through closures. A
+   row of the mask is a bit vector now: the 4-neighbourhood is two shifts on the word array
+   (longitude wraps through the circular word order, latitude clamps via duplicated border rows)
+   and erode/dilate are one AND/OR chain per word. Same rule, same rounds; requires w divisible
+   by 32, which both shipped canvases are (moon 4096, earth 2048). */
 function openClose(mask, w, h, rounds = 2) {
-  const near = (a, x, y) => a[Math.max(0, Math.min(h - 1, y)) * w + ((x % w) + w) % w];
-  const step = (a, keep) => {
-    const o = new Uint8Array(mask.length);
-    for (let y = 0; y < h; y++) for (let x = 0; x < w; x++)
-      o[y * w + x] = keep(near(a, x - 1, y), near(a, x + 1, y), near(a, x, y - 1), near(a, x, y + 1), a[y * w + x]) ? 1 : 0;
+  if (w % 32 !== 0) throw new Error('openClose needs width divisible by 32');
+  const K = w >> 5;
+  const pack = (m) => {
+    const a = new Uint32Array(K * h);
+    for (let y = 0; y < h; y++) {
+      const row = y * w, wr = y * K;
+      for (let x = 0; x < w; x++) if (m[row + x]) a[wr + (x >> 5)] |= 1 << (x & 31);
+    }
+    return a;
+  };
+  const ero = (a) => {
+    const o = new Uint32Array(a.length);
+    for (let y = 0; y < h; y++) {
+      const r = y * K, up = (y > 0 ? y - 1 : 0) * K, dn = (y < h - 1 ? y + 1 : h - 1) * K;
+      for (let j = 0; j < K; j++) {
+        const jm = (j - 1 + K) % K, jp = (j + 1) % K;
+        const l = (a[r + j] << 1) | (a[r + jm] >>> 31);
+        const rr = (a[r + j] >>> 1) | (a[r + jp] << 31);
+        o[r + j] = a[r + j] & l & rr & a[up + j] & a[dn + j];
+      }
+    }
     return o;
   };
-  const ero = (a) => step(a, (l, r, u, d, v) => v && l && r && u && d);
-  const dil = (a) => step(a, (l, r, u, d, v) => v || l || r || u || d);
-  let s = mask;
+  const dil = (a) => {
+    const o = new Uint32Array(a.length);
+    for (let y = 0; y < h; y++) {
+      const r = y * K, up = (y > 0 ? y - 1 : 0) * K, dn = (y < h - 1 ? y + 1 : h - 1) * K;
+      for (let j = 0; j < K; j++) {
+        const jm = (j - 1 + K) % K, jp = (j + 1) % K;
+        const l = (a[r + j] << 1) | (a[r + jm] >>> 31);
+        const rr = (a[r + j] >>> 1) | (a[r + jp] << 31);
+        o[r + j] = a[r + j] | l | rr | a[up + j] | a[dn + j];
+      }
+    }
+    return o;
+  };
+  let s = pack(mask);
   for (let p = 0; p < rounds; p++) s = ero(s);
   for (let p = 0; p < rounds; p++) s = dil(s);
   for (let p = 0; p < rounds; p++) s = dil(s);
   for (let p = 0; p < rounds; p++) s = ero(s);
-  return s;
+  const out = new Uint8Array(mask.length);
+  for (let y = 0; y < h; y++) {
+    const row = y * w, wr = y * K;
+    for (let j = 0; j < K; j++) {
+      let word = s[wr + j];
+      if (!word) continue;
+      let x = j << 5;
+      while (word) { if (word & 1) out[row + x] = 1; word >>>= 1; x++; }
+    }
+  }
+  return out;
 }
 
 /* Grow a mask by a sequence of radii with a separable scan: O(w*h) per pass instead of the O(w*h*r²)
@@ -346,23 +390,44 @@ function voteLabels(lab, land, w, h, rad) {
   }
 }
 
-/* Separable box mean over a wrapping longitude and a clamped latitude. */
+/* Separable box mean over a wrapping longitude and a clamped latitude. Sliding windows (round 8):
+   the naive per-pixel loop is O(rad) and paintMoon's kernels are now r 28 + r 20 on 8.4 Mpx —
+   O(n) sliding makes the canvas size a rounding error (measured: the rewrite also speeds up the
+   Earth's r-3 passes). The horizontal window wraps; the vertical window clamps, and the multiset
+   it carries is rebuilt by count, so border rows contribute their clamped multiplicity exactly.
+   Rounding differs from the direct sum in the last ulp only; the mare cut is quantile-recomputed
+   on the same field, so nothing downstream depends on the order. */
 function boxSignal(a, w, h, rad) {
   const tmp = new Float32Array(a.length);
   const n = 2 * rad + 1;
   for (let y = 0; y < h; y++) {
     const row = y * w;
+    let s = 0;
+    for (let k = -rad; k <= rad; k++) s += a[row + ((k % w) + w) % w];
     for (let x = 0; x < w; x++) {
-      let s = 0;
-      for (let k = -rad; k <= rad; k++) s += a[row + ((x + k) % w + w) % w];
       tmp[row + x] = s / n;
+      s += a[row + (x + rad + 1) % w] - a[row + ((x - rad) % w + w) % w];
     }
   }
-  for (let y = 0; y < h; y++) {
-    for (let x = 0; x < w; x++) {
-      let s = 0;
-      for (let k = -rad; k <= rad; k++) s += tmp[(Math.min(h - 1, Math.max(0, y + k))) * w + x];
+  const cnt = new Int32Array(h);
+  for (let x = 0; x < w; x++) {
+    cnt.fill(0);
+    let s = 0;
+    for (let k = -rad; k <= rad; k++) {
+      const yy = k < 0 ? 0 : k > h - 1 ? h - 1 : k;
+      s += tmp[yy * w + x]; cnt[yy]++;
+    }
+    for (let y = 0; y < h; y++) {
       a[y * w + x] = s / n;
+      const outY = y - rad, inY = y + rad + 1;
+      const oy = outY < 0 ? 0 : outY > h - 1 ? h - 1 : outY;
+      const iy = inY < 0 ? 0 : inY > h - 1 ? h - 1 : inY;
+      const vOut = tmp[oy * w + x], vIn = tmp[iy * w + x];
+      // A leaving row the entering row clamps to is replaced in the window by the same texel.
+      if (oy !== iy || cnt[oy] > 1) { s += vIn - vOut; cnt[oy]--; }
+      else { cnt[oy]--; }
+      if (cnt[iy] === 0) s += vIn;
+      cnt[iy]++;
     }
   }
 }
@@ -418,9 +483,34 @@ export function paintMoon(path) {
 
 async function paintMoonJob(path) {
   const src = await pixels(path);
-  const w = src.w, h = src.h, d = src.data;
+  /* Paint at 4× the shipped sheet (4096 × 2048, 2.7 km/texel). At the native 1024 the albedo
+     stamps of the 4–18 km pockmark tier land on ONE texel each, and a 1–2 px dash stamped on the
+     same 10.7 km lattice that quantises the crater centres is exactly the grid-aligned "tone
+     block ladder" review 6 measured from 140 km (frame 10) and 9 km (frame 11); at the round-7
+     2048 the near patch magnified 5.3 km texels into visible 300 px plates (measured on the
+     Nearest-mag skim, 2026-11-09 — the pixel grid itself became the complaint). 2.7 km/texel
+     puts the smallest drawn bowl on ~3 texels and the 26 km ring on ~10. Bilinear here only
+     resamples the photograph; every bowl the pipeline draws after this point is analytic and
+     scales automatically in km. The relief grid stays FW × FH — buildMoonField re-samples blur
+     by index, so physics and the far mesh are untouched. The kernels below doubled their radius
+     with the canvas to hold their km; boxSignal's sliding windows hold the paint cost. */
+  const w = src.w * 4, h = src.h * 4;
   const lum = new Float32Array(w * h);
-  for (let i = 0; i < w * h; i++) lum[i] = (d[i * 4] * 0.3 + d[i * 4 + 1] * 0.59 + d[i * 4 + 2] * 0.11) / 255;
+  const luma = (x, y) => { const o = (y * src.w + x) * 4, d = src.data;
+    return (d[o] * 0.3 + d[o + 1] * 0.59 + d[o + 2] * 0.11) / 255; };
+  for (let y = 0; y < h; y++) {
+    const fy = (y + 0.5) * src.h / h - 0.5;
+    const y0 = Math.max(0, Math.min(src.h - 1, Math.floor(fy)));
+    const y1 = Math.min(src.h - 1, y0 + 1), wy = fy - y0;
+    for (let x = 0; x < w; x++) {
+      const fx = (x + 0.5) * src.w / w - 0.5;
+      const x0 = Math.floor(fx);
+      const xa = ((x0 % src.w) + src.w) % src.w, xb = (x0 + 1) % src.w;   // longitude wraps
+      const wx = fx - x0;
+      lum[y * w + x] = (luma(xa, y0) * (1 - wx) + luma(xb, y0) * wx) * (1 - wy)
+                     + (luma(xa, y1) * (1 - wx) + luma(xb, y1) * wx) * wy;
+    }
+  }
   const blur = new Float32Array(w * h);
   for (let y = 0; y < h; y++) {
     for (let x = 0; x < w; x++) {
@@ -445,8 +535,9 @@ async function paintMoonJob(path) {
      5139 runs → 1 976, corners per 100 boundary texels 56.7 → 48.7. The maria in the painting are
      then one flat tone inside one round outline, which is what a cartoon mare looks like. */
   const wide = blur.slice();
-  boxSignal(wide, w, h, 7);
-  boxSignal(wide, w, h, 5);            // round 6: r7 then r5 ≈ a 340 km kernel; the r7-only cut
+  boxSignal(wide, w, h, 28);
+  boxSignal(wide, w, h, 20);          // round 6: r7+r5 ≈ a 340 km kernel at 1024; rounds 7/8 double
+                                       // the radii with the canvas so the kernel stays 340 km. The r7-only cut
                                        // still cut maria into jigsaw arcs (review 5, frames 11/13)
   const mareCut = quantile(wide, shareBelow(blur, 0.36));
   const rawMare = new Uint8Array(w * h);
@@ -460,7 +551,7 @@ async function paintMoonJob(path) {
      first order — the painted mare share measured 3.65 % before and after on the shipped canvas
      — and 34 km is under a tenth of the smallest mare anyone views whole, so shapes survive.
      Edges clamp to self so polar maria are not shaved at the map border. */
-  const mare = openClose(rawMare, w, h, 2);
+  const mare = openClose(rawMare, w, h, 8);   // 8 rounds at 2.7 km = the same 34 km corner shave
   const out = new Uint8ClampedArray(w * h * 4);
   for (let i = 0; i < w * h; i++) {
     const v = blur[i];
@@ -490,6 +581,19 @@ async function paintMoonJob(path) {
       const k = 1 + lvl * 0.015, o = (y * w + x) * 4;
       out[o] *= k; out[o + 1] *= k; out[o + 2] *= k;
     }
+  }
+  /* Contrast curve (round 8, measured on the skim frames): the painted plate separation —
+     mare 100 / mid 135 / high 157 / bright 176 — survives the toon ramp only as a whisper once
+     it is lit, and review 7's "defocused cowhide" was partly just this: drawn edges with a 15 %
+     luma budget. Push every drawn edge ×1.5 about the mid tone (mare 100 → 79, high 157 → 166,
+     young rays ride toward white); the mare/mid gate in moonPatchDetail keys at 0.42–0.47,
+     which stays inside the WIDENED gap, and the mottle scales to ±6.8 % — still slower than
+     anything on the mesh. The far mesh gains the same curve: the disc stops reading as one grey
+     plate from orbit, which was review 6's frame-10 complaint. */
+  for (let i = 0; i < out.length; i += 4) {
+    out[i] = (out[i] - 140) * 1.5 + 140;
+    out[i + 1] = (out[i + 1] - 140) * 1.5 + 140;
+    out[i + 2] = (out[i + 2] - 140) * 1.5 + 140;
   }
   const cv = document.createElement('canvas');
   cv.width = w; cv.height = h;
@@ -856,7 +960,7 @@ export function moonCraters() {
    and youngest bowls stay the brightest features on the disc. */
 const MID_N = 6000;
 const MID_RIM = 0.15;                   // km crest cap: everything this tier may add to the ground
-const MID_DRAW = 14;                    // km: the smallest radius a 10.6 km/texel map can draw
+const MID_DRAW = 4;                     // km: the smallest radius a 2.7 km/texel map can draw (round 8 quadrupled the canvas; was 8 at 5.3 km/texel)
 const MID_BAND = 1.6;                   // crater radii out to which the painted crest still bites
 let _midCraters = null;
 export function moonMidCraters() {
@@ -1039,12 +1143,28 @@ export function moonPatchDetail(u, v, baseLum, sun, pitAmp = 1, pitAmp2) {
           const den = Math.hypot(sE, sN) * dd * cr.rKm;
           if (den > 1e-6) cs = (ex * sE + ey * sN) / den;
         }
-        if (dd < 1.3) {
-          const t = dd / 1.3, w = (1 - t * t) * (1 - t * t);
+        if (dd < 1.45) {
+          /* Plate with an ABSOLUTE-km feather (round 8): the r-relative falloffs — (1−t²)² over
+             1.3 r, then the first plateau attempt's 0.43 r — are 2–8 km gradients on a mesh whose
+             mid-field cells run 0.5–2 km, so every bowl rendered as a soft-edged fog blob at a
+             skim (measured: tone off → the mesh is flat grey, all the visible mush was this law).
+             A fixed 0.4 km feather is 2–10 cells wide everywhere it can be seen: a hard plate. */
+          const FE = 0.4;
+          let w;
+          if (dd * cr.rKm <= cr.rKm - FE) w = 1;
+          else { const s = (dd * cr.rKm - (cr.rKm - FE)) / FE; w = s >= 1 ? 0 : 1 - s * s * (3 - 2 * s); }
           const dk = w * cr.fdark * (0.62 - 0.38 * cs);
           if (dk > dark) dark = dk;
         }
-        const g = (dd - 1.12) / 0.17, hw = Math.exp(-g * g);
+        /* Rim crest: a FLAT band of absolute width ~0.9 km (r ± 0.45 km, feathered at both edges),
+           not r-relative and not a gaussian — a LINE on screen at every mesh spacing down to ~1 km
+           cells, which is what a cartoon crater rim is. */
+        const rKm2 = cr.rKm, band = 0.45, fe2 = 0.15;
+        const dEdge = Math.abs(dd * rKm2 - rKm2);
+        let hw;
+        if (dEdge >= band) hw = 0;
+        else if (dEdge > band - fe2) { const s = (band - dEdge) / fe2; hw = s * s * (3 - 2 * s); }
+        else hw = 1;
         if (cr.rim * hw > h) h = cr.rim * hw;
         const lc = 0.30 * hw * (0.45 + 0.55 * (cs > 0 ? cs : 0));
         if (lc > lit) lit = lc;
@@ -1068,31 +1188,38 @@ export function moonPatchDetail(u, v, baseLum, sun, pitAmp = 1, pitAmp2) {
       }
     }
   }
-  /* Round 6b, measured: the linear octave at ±10 % (post-gain ±22 %) never crossed a ramp band —
-     the 41×41 vertex window under the vehicle bucketed into ONE luminance bin (1 572 of 1 681
-     vertices in [0.10,0.20)) and the skim foreground still read flat. The pit field itself was
-     verified live (tone 0.85 → 1.20 over 600 m at the site), so the fix is amplitude: renormalise
-     the weighted noise to 0…1 and let it span 0.80 … 1.35 — ±27 % albedo, ±60 % after the 2.2×
-     deviation gain, which straddles two ramp bands and reads as hollowed ground. Apollo's own
-     pit-to-plain swing is ~2× anyway; the cel language wants it. */
+  /* Round 8, second attempt — the sun-facing slope term measured, and REJECTED. cs (directional
+     derivative along the sun's horizontal, half-lattice step: median |cs| 0.19, p90 0.45 over
+     20 000 samples per octave, identical across octaves — hash noise is scale-free) at ±25/42 %
+     rendered the whole skim as 1.6 km fog blobs: at a 14° sun every smooth swell's sunward face
+     goes bright and its far face dark, which is physically true and visually the exact mush the
+     review called out. Shading the smooth field cannot produce crispness — only the craters have
+     edges sharp enough to shade into bands. The read moved to GEOMETRY instead (pitH below).
+     Round 6b's albedo law is restored verbatim; keeping cs in any form here is a documented
+     dead end, so it is gone, not tuned. */
   const pit = 0.80 + (0.55 / 0.70) * (0.45 * pitNoise(lon * RM * 4, lat * RM * 4, 913)      // 250 m pitted regolith
                                     + 0.25 * pitNoise(lon * RM * 1.43, lat * RM * 1.43, 57)); // 700 m mare churn
-  /* Round 6: a third, COARSE octave (2.2 km lattice). Review 5 measured the skim frame's
+  /* Round 6: a third, COARSE octave (1.6 km lattice). Review 5 measured the skim frame's
      foreground as "a featureless smooth gradient" — at 2.6 km the fine octaves only cover the
      ~1.1 km radius where the warp mesh is under 140 m, and everything past that is ramped off
      against a lattice it cannot resolve. The coarse field keeps readable hollows where the mesh
-     runs 0.3-1.6 km (its own pitAmp2 ramp, js/terrain.js), and dies at ~2.2 km step, exactly
-     where it would start aliasing — the starburst stays fixed. */
-  const n2 = pitNoise(lon * RM * 0.625, lat * RM * 0.625, 1121);   // 1.6 km lattice (was 2.2)
-  /* Round 6b: amplify around the median before scaling — a linear octave reads as smoke, an
-     amplified one clips to flat plains and flat pit floors with steep sides between, which is
-     what hollows look like on a vacuum body. n′ = clamp((n−0.5)·3+0.5). Measured the softer
-     (×2.4, ±12 %) variant at the 2.6 km skim: visible across the frame, but leopard-print soft,
-     not hollowed — hence the harder knee and 0.84…1.20 swing. */
+     runs 0.3-1.6 km (its own pitAmp2 ramp, js/terrain.js), and dies at its alias limit — the
+     starburst stays fixed. Round 6b: amplify around the median — a linear octave reads as smoke,
+     an amplified one clips to flat plains and flat pit floors with steep sides between, which is
+     what hollows look like on a vacuum body. n′ = clamp((n−0.5)·3+0.5); the softer (×2.4, ±12 %)
+     variant measured leopard-print soft, not hollowed — hence the harder knee and 0.84…1.20. */
+  const n2 = pitNoise(lon * RM * 0.625, lat * RM * 0.625, 1121);
   const p2 = Math.max(0, Math.min(1, (n2 - 0.5) * 3 + 0.5));
   const pit2 = 0.84 + 0.36 * p2;
-  // hollows get geometry too: ±20 m of real relief × pitAmp2, so the mesh normals shade the field, ×2.6 exag
-  const pitH = (pit2 - 1) * 0.14 * (pitAmp2 === undefined ? 1 : pitAmp2);
+  /* Round 8: the hollows' READ is geometry, not albedo. ±25 m of relief on a 1.6 km lattice is
+     a 1.8° facet — inside one band of the 8-texel RAMP_MOON at every sun angle, which is why
+     this octave never registered however its tone was shaped. At ±95 m (0.19 km floor-to-peak
+     before the ×1.4 exaggeration) the cell-to-cell facet spans ~13° at the 14° test sun and
+     straddles the ramp's 0.23/0.47 steps: hollows with lit and shaded walls, no fog, because
+     the tone stays the round-6b ±18 % (a smooth albedo swing IS fog at this scale — the
+     slope-tone experiment above). The patch is display-only (physics lands on RM), so this
+     amplitude costs nothing but normals. */
+  const pitH = (pit2 - 1) * 0.19 * (pitAmp2 === undefined ? 1 : pitAmp2);
   return { h: h + pitH, tone: (1 - 0.42 * dark + lit + ray) *
     (1 + (pit - 1) * pitAmp) * (1 + (pit2 - 1) * (pitAmp2 === undefined ? 1 : pitAmp2)) };
 }
@@ -1213,11 +1340,11 @@ function stampMidRims(km, w, h) {
    Unlike the big pass, these land on maria too: a 200 km walled plain would shatter the flat basalt
    look, but a mare with nothing in it is exactly the empty sheet the review measured, and the Moon's
    maria are themselves heavily bombarded.
-   MID_DRAW/MID_BAND are the pen: 10.7 km per texel cannot hold a 4 km bowl, so a sub-texel crater is
-   drawn at the smallest legible radius (a 2·MID_BAND·MID_DRAW = 45 km ring rather than a 8 km one)
-   rather than dropped — same centre as the relief and the analytic patch, only the brush floored,
-   which is what a cartoon does and what stops a thousand 4 km bowls becoming a thousand coin flips
-   over which single texel gets darkened. */
+   MID_DRAW/MID_BAND are the pen: even at 2.7 km per texel a 4 km bowl is barely two texels, so a
+   sub-texel crater is drawn at the smallest legible radius (a 2·MID_BAND·MID_DRAW = 12.8 km ring
+   rather than an 8 km one) rather than dropped — same centre as the relief and the analytic patch,
+   only the brush floored, which is what a cartoon does and what stops a thousand 4 km bowls
+   becoming a thousand coin flips over which single texel gets darkened. */
 function stampMidAlbedo(out, w, h) {
   const sx = w / FW, sy = h / FH;
   const kmr = Math.PI * RM / h;                       // km per row; columns widen by 1/cos(lat)

@@ -13,10 +13,11 @@ import { paintEarth, paintMoon, paintedTexture } from './toonmap.js';
    PNG that used to stand in for weather carried its density in the alpha channel while the material
    sampled green, which covered the entire planet in an opaque white tablecloth. */
 
-// Sizes are the source assets' own (earth_atmos_2048.jpg, moon_1024.jpg) — see paintedTexture.
+// Sizes are the paint output's own (earth: the 2048 source; moon: painted at 4× the 1024 source —
+// see paintMoonJob). paintedTexture's placeholder MUST match these or WebGL pins the small size.
 export const earthTex = () => paintedTexture(
   paintEarth('assets/earth_atmos_2048.jpg', 'assets/earth_specular_2048.jpg'), 'earth', 2048, 1024);
-export const moonTex = () => paintedTexture(paintMoon('assets/moon_1024.jpg'), 'moon', 1024, 512);
+export const moonTex = () => paintedTexture(paintMoon('assets/moon_1024.jpg'), 'moon', 4096, 2048);
 
 /* Deterministic value noise, shared by both cloud decks. The lattice wraps in longitude and clamps at
    the poles, so there is no seam at the dateline and nothing weird at the poles, and the same run
