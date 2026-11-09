@@ -639,17 +639,47 @@ let _smallCraters = null;
 function moonSmallCraters() {
   if (_smallCraters) return _smallCraters;
   _smallCraters = [];
+  /* Bake the crater's local east/north basis once (p(lon,lat) = (−cosλcosφ, sinλ, cosλsinφ) in
+     the mesh-local frame → east = (sinλ, 0, cosλ), north = (−sinλcosφ, cosφ, −sinλsinφ)). The
+     directional rim bake projects the sun onto this basis per vertex it touches; doing the four
+     trig calls here keeps the per-vertex loop to multiplies. */
+  const frame = (cr) => {
+    cr.sl = Math.sin(cr.lon); cr.cl = Math.cos(cr.lon);
+    cr.sla = Math.sin(cr.lat); cr.cla = Math.cos(cr.lat);
+  };
   for (let c = 0; c < 2400; c++) {
     const hu = hash2(c, 5, 91), hv = hash2(c, 6, 57), hr = hash2(c, 7, 31), hy = hash2(c, 8, 17);
     const rKm = 3 + Math.pow(hr, 2.2) * 42;                    // many small, few big
-    _smallCraters.push({
+    const cr = {
       lon: hu * Math.PI * 2 - Math.PI, lat: Math.asin(2 * hv - 1), rKm,
       rim: 0.08 + Math.min(0.22, rKm * 0.006),                 // ≤ 300 m: a rim you can see in silhouette
       young: hy > 0.93, spokes: 6, phase: hy * 6.283,
-    });
+      fdark: 0.72 + hash2(c, 9, 43) * 0.4,                     // per-bowl floor albedo 0.72–1.12: a
+    };                                                         // flat floor across every bowl was the tiling tell
+    frame(cr);
+    _smallCraters.push(cr);
+  }
+  /* Micro tier: 4 000 more at 0.3–2.5 km. The 2 km view measured nearly empty (one mare blob, one
+     small crater on smooth grey) because mid-tier spacing leaves a 440 km cap holding ~9 bowls;
+     this tier adds ~11 more within the lookup, 25 m-spaced vertices resolve a 0.6 km bowl, and at
+     4 km they read as the pockmarked highland texture real mare/highland terrain wears. Rims cap
+     at 80 m — visible in silhouette at grazing sun, harmless to contact — and NO ray systems: a
+     ray fan at 0.4 r would smear over four neighbours. They ride the same 6° buckets below; the
+     reach maths is unchanged (1.8 r = 4.5 km ≪ 187 km). */
+  for (let c = 0; c < 4000; c++) {
+    const hu = hash2(c, 12, 29), hv = hash2(c, 13, 79), hr = hash2(c, 14, 67);
+    const rKm = 0.3 + hr * hr * 2.2;                           // 0.3–2.5 km, many small, few big
+    const cr = {
+      lon: hu * Math.PI * 2 - Math.PI, lat: Math.asin(2 * hv - 1), rKm,
+      rim: 0.02 + Math.min(0.06, rKm * 0.025),                 // ≤ 80 m, positive-only as every rim is
+      young: false, spokes: 0, phase: 0,                       // no rays, and hash2 keys disjoint from
+      fdark: 0.7 + hash2(c, 15, 59) * 0.45,                    // the mid tier's, so the lists decorrelate
+    };
+    frame(cr);
+    _smallCraters.push(cr);
   }
   // 6° buckets (~187 km, beyond the 4.2 r = 190 km reach of the biggest crater): a rebuild asks
-  // 26k vertices, and without this every vertex would walk all 2 400 craters. A colliding bucket
+  // 26k vertices, and without this every vertex would walk all 6 400 craters. A colliding bucket
   // key only costs a wasted distance test — every consumer below filters by true distance.
   const B = 6 * Math.PI / 180, buckets = new Map();
   for (const cr of _smallCraters) {
@@ -666,13 +696,20 @@ function moonSmallCraters() {
 
 /* globe uv → { h: rim km (≥ 0), tone: albedo multiplier }. baseLum is the painted canvas here
    (0..1); the dark maria catch the young craters' ray fans brighter, as they do on the map pass.
+   sun is the sun direction as a unit vector in the caller's mesh-local frame (the frame the uv is
+   in), or null before the scene light exists — then every cs below sits at 0 and the bake falls
+   back to the old omnidirectional look, never NaN. With it each bowl is a crescent: the sunward
+   rim crest keeps the full bright line, the anti-sun crest throws a shadow, the floor washes out
+   sunward and deepens anti-sunward. The crest keeps a 45 % base ring because displacement-only
+   craters vanished at high sun on the far mesh (AGENTS.md) — the ring must read at every angle;
+   flat shading only where the sun is truly at zenith, which is the honest answer there.
 
    The tone COMPOSES by the dominant crater, not by multiplication: a 220 km patch sits over ~70 of
    these bowls, and a naive product of every floor factor compounds to black (measured: the whole
    near field rendered 0.004 linear — 0.58 to the fifth). The deepest floor and the brightest rim at
    a point win; rim HEIGHTS take the max too, so two rims that touch never stack into a spike the
    lander could perch on. Both profiles stay C0 — a stepped floor would print a ring in vertex colour. */
-export function moonPatchDetail(u, v, baseLum) {
+export function moonPatchDetail(u, v, baseLum, sun) {
   const L = moonSmallCraters();
   const lon = (u - 0.5) * Math.PI * 2, lat = (v - 0.5) * Math.PI;
   const list = L.buckets.get(Math.floor((lon + Math.PI) / L.B) * 977 + Math.floor((lat + Math.PI / 2) / L.B));
@@ -684,11 +721,29 @@ export function moonPatchDetail(u, v, baseLum) {
       if (dlon > Math.PI) dlon -= 2 * Math.PI; else if (dlon < -Math.PI) dlon += 2 * Math.PI;
       const ey = (lat - cr.lat) * kmr, ex = dlon * clat * kmr;
       const dd = Math.hypot(ex, ey) / cr.rKm;
-      if (dd < 1.3) { const t = dd / 1.3, w = (1 - t * t) * (1 - t * t); if (w > dark) dark = w; }
       if (dd < 1.8) {
+        /* cs = dot(unit radial from the crater centre, unit sun-tangent) in the crater's east/north
+           frame — ex/ey are km in exactly that frame, sun is projected on its prebaked basis, so
+           the whole weighting is ~10 multiplies per vertex-crater pair. den carries both norms;
+           den ≈ 0 means the sun stands at zenith here or the vertex IS the centre: cs = 0. */
+        let cs = 0;
+        if (sun) {
+          const sE = sun.x * cr.sl + sun.z * cr.cl;
+          const sN = sun.y * cr.cla - (sun.x * cr.cl + sun.z * cr.sl) * cr.sla;
+          const den = Math.hypot(sE, sN) * dd * cr.rKm;
+          if (den > 1e-6) cs = (ex * sE + ey * sN) / den;
+        }
+        if (dd < 1.3) {
+          const t = dd / 1.3, w = (1 - t * t) * (1 - t * t);
+          const dk = w * cr.fdark * (0.62 - 0.38 * cs);
+          if (dk > dark) dark = dk;
+        }
         const g = (dd - 1.12) / 0.17, hw = Math.exp(-g * g);
         if (cr.rim * hw > h) h = cr.rim * hw;
-        if (0.30 * hw > lit) lit = 0.30 * hw;
+        const lc = 0.30 * hw * (0.45 + 0.55 * (cs > 0 ? cs : 0));
+        if (lc > lit) lit = lc;
+        const sh = 0.55 * hw * (cs < 0 ? -cs : 0);
+        if (sh > dark) dark = sh;
       } else if (cr.young && dd < 4.2 && baseLum < 0.4) {
         const sp = Math.cos(cr.spokes * Math.atan2(ey, ex) + cr.phase);
         if (sp > 0) { const r = 0.30 * Math.pow(sp, 10) * (1 - (dd - 1.8) / 2.4); if (r > ray) ray = r; }

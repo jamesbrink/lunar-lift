@@ -105,9 +105,12 @@ export function attachEarthPatch(p) {
    what a lander actually sees — is a sub-texel smudge. Same radial-warped mesh as Earth, but the
    ground is asked analytically: height is the relief field plus the rim-only detail from
    toonmap.moonPatchDetail (never negative, so contact on the RM sphere stays honest), colour is
-   the painted pixel multiplied by that detail's tone (dark floor, bright rim, ray fans). No
-   coastline, no fine Earth octaves, no fog — there is no air on the Moon, so its limb must stay
-   as crisp as the sky it cuts. RAMP_MOON so it matches the far mesh under the same sun. */
+   the painted pixel multiplied by that detail's tone (crescent bowls — bright sunward rim, shadowed
+   anti-sun rim and floor — plus ray fans). Two analytic tiers: 2 400 bowls of 3–45 km and 4 000
+   micro-bowls of 0.3–2.5 km, the tier the 2 km view was missing (measured: one mare blob and a
+   single crater on smooth grey). No coastline, no fine Earth octaves, no fog — there is no air on
+   the Moon, so its limb must stay as crisp as the sky it cuts. RAMP_MOON so it matches the far mesh
+   under the same sun. */
 export function makeMoonPatch(moonBody) {
   const n = COLS * COLS;
   const geo = new THREE.BufferGeometry();
@@ -133,7 +136,8 @@ export function makeMoonPatch(moonBody) {
   mesh.castShadow = false;
   mesh.visible = false;
   moonBody.add(mesh);
-  return { mesh, ready: false, dirty: false, cosT: Math.cos(RECENTER / RM), gx: 0, gy: 1, gz: 0, has: false, rel: null, px: null };
+  // body keeps the spin (for the sun's mesh-local frame); light is resolved lazily by bakeSun
+  return { mesh, ready: false, dirty: false, cosT: Math.cos(RECENTER / RM), gx: 0, gy: 1, gz: 0, has: false, rel: null, px: null, body: moonBody, light: undefined };
 }
 
 export function attachMoonPatch(p) {
@@ -152,11 +156,38 @@ export function updateMoonPatch(p, dx, dy, dz, alt) {
   rebuildMoon(p);
 }
 
+/* The sun in the Moon's mesh-local frame, which is the frame the crater uv — and therefore the
+   directional rim bake — lives in. js/world.js imports terrain.js, so importing SUN_DIR back would
+   close a cycle; instead read the renderer's own sun: world.js parks its single DirectionalLight at
+   (vehicle + SUN_DIR·SUN_RANGE) with its target at the vehicle every frame, so light→target is
+   SUN_DIR itself — no constant duplicated, and the shading follows the light if the sun table ever
+   moves. The inverse spin is world.js spinLocal's rotY(−rotation.y) arithmetic — the Moon only ever
+   turns about Y. Resolved once, allocation-free after, and null before the world or the light exist;
+   a null sun keeps moonPatchDetail omnidirectional (its documented fallback), never NaN. */
+const _msun = new THREE.Vector3();
+function bakeSun(p) {
+  if (!p.light) {
+    const scene = p.body ? p.body.parent : null;
+    if (!scene) return null;
+    for (const o of scene.children) if (o.isDirectionalLight) { p.light = o; break; }
+    if (!p.light) return null;
+  }
+  const L = p.light.position, T = p.light.target.position;
+  if (!Number.isFinite(L.x - T.x) || !Number.isFinite(L.y - T.y) || !Number.isFinite(L.z - T.z)) return null;
+  let x = L.x - T.x, y = L.y - T.y, z = L.z - T.z;
+  const l = Math.hypot(x, y, z);
+  if (!(l > 1e-9)) return null;
+  x /= l; y /= l; z /= l;
+  const a = p.body.rotation.y, c = Math.cos(a), s = Math.sin(a);
+  return _msun.set(c * x - s * z, y, s * x + c * z);
+}
+
 function rebuildMoon(p) {
   _g.set(p.gx, p.gy, p.gz).normalize();
   if (Math.abs(_g.y) < 0.9) _e1.set(0, 1, 0).cross(_g).normalize();
   else _e1.set(1, 0, 0).cross(_g).normalize();
   _e2.copy(_g).cross(_e1).normalize();
+  const sun = bakeSun(p);                 // once per rebuild, not per vertex
 
   const pos = p.mesh.geometry.attributes.position.array;
   const col = p.mesh.geometry.attributes.color.array;
@@ -176,7 +207,7 @@ function rebuildMoon(p) {
       const g = p.rel ? sampleGrid(p.rel, u, v) : 0;
       pxColor(p.px, u, v, _c1);
       const lum = 0.2126 * _c1.r + 0.7152 * _c1.g + 0.0722 * _c1.b;
-      const d = moonPatchDetail(u, v, lum);
+      const d = moonPatchDetail(u, v, lum, sun);
       const h = g + d.h + 0.004;                 // a hair above the far mesh; polygonOffset wins ties
       pos[k] = vx * (RM + h); pos[k + 1] = vy * (RM + h); pos[k + 2] = vz * (RM + h);
       const tone = Math.min(1.6, d.tone);
