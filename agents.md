@@ -22,6 +22,7 @@ npm i --no-save three@0.160.1             # tool only; the game has no dependenc
 node tools/mission-sim.mjs                 # solves the launch window then flies it: ~50 s
 node tools/mission-sim.mjs game --phase=4.9561012   # the shipped window: ~2 s
 python3 tools/mission-math.py              # must exit 0; recomputes the derived numbers in docs/
+node tools/shader-lint.mjs                 # must print ok; every ShaderMaterial must compile
 ```
 
 Shipped flight right now: `RESULT WON`, periselene 169 km, LOI 875 m/s at 183 km, touchdown
@@ -174,6 +175,21 @@ state differs from the ship's real trajectory by ~100 km, which would make the r
   and the ascent trail came out as a ringed fir tree spaced by the frame rate. `spawnPlume` now
   back-projects parcel *c* along the velocity by the slice of `simDt` it represents and starts its age,
   remaining life and heat there.
+- **A dead ShaderMaterial announces itself once, through a channel the harness cannot see.** A failed
+  program logs exactly one `console.error` at program build; `tab.errors()` does NOT capture
+  `console.error`, so every A/B after the failure measures a world where the object simply is not
+  there. When one object draws nothing, install a console hook on a fresh load before touching
+  anything else.
+- **Whole-frame pixel sandwiches lie here.** Temporal drift — clouds, water glint, living parcels —
+  measures 0.016–0.06 RMSE between two idle seconds, larger than some real state diffs. Trust
+  spatial compare-masks and the eyes, not frame-mean error.
+- **A lunar burn cannot be photographed from inside its own ejecta.** The lunar spray regime
+  (`keep 0.45`, `out 0.75`, ×3 advection and life) lofts parcels on ballistic arcs hundreds of
+  metres high and wide; measured at a 400 kN pulse at 70 m: 120+ spray/moon-hot parcels alive
+  within 500 m of the engine. Any camera closer than ~2 km sits inside the translucent dome and
+  every pixel behind it goes flat grey — a dozen "featureless grey" frames cost a full review round
+  before `parcelAudit()` proved the spray was there and only the camera was wrong. Shoot lunar
+  surface blasts from ≥ 2.8 km, or from behind the spray at horizon distance.
 
 - **Camera collision is applied twice per frame** — to `desired` and again to the interpolated
   `camPos`. A lerp between two points outside a sphere is a chord, and chords are inside, so before
