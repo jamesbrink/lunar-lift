@@ -5,7 +5,7 @@ throttleable) — off LC-39 at Cape Canaveral on a rotating, real-radius Earth (
 real Moon 384 400 km away: orbit, trans-lunar injection, lunar orbit insertion, and a soft powered
 landing under the 32 m/s `LAND_SAFE` limit or you lose the spacecraft. The orbital physics is
 hand-written in `js/physics.js` — no orbital-mechanics library; the only runtime dependency is
-Three.js 0.160.1, loaded from a CDN through the importmap in `index.html`, so an internet connection
+Three.js 0.187.0, loaded from a CDN through the importmap in `index.html`, so an internet connection
 is required.
 
 ## Run
@@ -161,7 +161,7 @@ how the multi-day translunar coast is crossed in a test.
 The mission is completable and has been flown end to end:
 
 ```
-npm i --no-save three@0.160.1    # for the tool only; the game itself has no dependencies
+npm i --no-save three@0.187.0    # for the tool only; the game itself has no dependencies
 node tools/mission-sim.mjs
 ```
 

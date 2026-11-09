@@ -1,6 +1,6 @@
 # Working notes for agents in this repo
 
-LUNAR LIFT: a real-scale orbital game — vanilla ES modules, Three.js 0.160.1 from a CDN importmap,
+LUNAR LIFT: a real-scale orbital game — vanilla ES modules, Three.js 0.187.0 from a CDN importmap,
 hand-written gravity in `js/physics.js`, no build step, no runtime npm dependencies.
 
 Read this before changing physics, the vehicle, or any number that appears in a doc.
@@ -18,7 +18,7 @@ teleport(pos, vel, simTime) reset()`, plus `_cam`, `_pred`, `setCam(d)`.
 ## Verify with these, and only these
 
 ```sh
-npm i --no-save three@0.160.1             # tool only; the game has no dependencies
+npm i --no-save three@0.187.0             # tool only; the game has no dependencies
 node tools/mission-sim.mjs                 # solves the launch window then flies it: ~50 s
 node tools/mission-sim.mjs game --phase=4.9561012   # the shipped window: ~2 s
 python3 tools/mission-math.py              # must exit 0; recomputes the derived numbers in docs/
@@ -31,7 +31,7 @@ stack) is LOST at 5,577 m/s with a dry tank. If you change physics, specs, const
 window, re-run and fix every number that moved **in the same commit** — `README.md` and
 `docs/reference/*.md` quote measured output, and a doc that no run backs is a bug.
 
-`three` must resolve for the tool: `npm i --no-save three@0.160.1`, or the root `node_modules`
+`three` must resolve for the tool: `npm i --no-save three@0.187.0`, or the root `node_modules`
 symlink to `/tmp/lltest/node_modules`. Ignore the `MODULE_TYPELESS_PACKAGE_JSON` warning; do not add
 `"type": "module"` to `package.json` without checking `server.js`. `.gitignore` says `node_modules`
 with no trailing slash because that entry is a symlink, and `node_modules/` does not match symlinks.

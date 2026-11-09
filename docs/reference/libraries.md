@@ -100,7 +100,7 @@ in `tools/` are calibrated against.
 
 | Need | Choice |
 | --- | --- |
-| rendering | Three.js `0.160.1` from a CDN importmap — the only runtime dependency of the game |
+| rendering | Three.js `0.187.0` from a CDN importmap — the only runtime dependency of the game |
 | textures | vendored in `assets/`, no network fetches at runtime |
 | build step | none: `node server.js` serves ES modules with `no-store` headers plus an SSE reload channel |
 | verification scripts | plain Node (`/tmp/lltest` harness during development, `tools/` for the committed ones), importing the game's own `js/*.js` — the same code the browser runs |

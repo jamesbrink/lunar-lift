@@ -11,7 +11,7 @@
    vehicle people will actually fly. --phase pins the Moon's angle at MET 0 instead of solving it.
 
    'three' has to resolve; the game itself stays dependency-free (it loads Three from a CDN
-   importmap), so install it for the tool only:  npm i --no-save three@0.160.1
+   importmap), so install it for the tool only:  npm i --no-save three@0.187.0
 
    Units are the game's: km, s, tonnes, kN. simTime is real mission seconds — no time speed-up,
    warp only buys more substeps (js/main.js caps each substep at DTPHYS, so 0.1 s is the step the

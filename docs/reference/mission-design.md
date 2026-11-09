@@ -13,7 +13,7 @@ RESULT WON   fuel left 0.0/0.0/7.6 t        294122s TOUCHDOWN — 20.1 m/s. THE 
 `groundVel()` with `LAND_SAFE` in the frame of the surface underneath.
 
 ```sh
-npm i --no-save three@0.160.1     # the tool needs Three; the game itself has no dependencies
+npm i --no-save three@0.187.0     # the tool needs Three; the game itself has no dependencies
 node tools/mission-sim.mjs                       # solves the launch window, then flies: ~50 s
 node tools/mission-sim.mjs game --phase=4.9561012  # fly the shipped window exactly, as shipped
 node tools/mission-sim.mjs retro                 # the stack this repo shipped before: LOST
