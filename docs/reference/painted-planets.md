@@ -137,7 +137,8 @@ Cost, as GPU time from `EXT_disjoint_timer_query_webgl2` on an Apple M4 Max at a
 buffer (frame-interval numbers are vsync and say nothing): drawn at full resolution with twelve
 samples the shell alone was 6.7 ms of a 13.4 ms idle frame at the pad. It is now drawn in the
 half-resolution pass (`js/halfres.js`) with twenty samples, stops marching once opaque, and skips the
-lattice where it is unresolved; the whole idle frame is 4.4–5.2 ms. Nothing slower has been measured.
+lattice where it is unresolved; the whole idle frame at the pad is 5.9 ms, of which the march is
+about 0.9. No slower GPU has been measured.
 
 Row 0 is south in every generated sheet: a `DataTexture` samples row 0 at `v = 0`, and
 `SphereGeometry`'s `v = 0` is the south pole.

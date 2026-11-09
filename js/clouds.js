@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { RE } from './constants.js';
 import { cumulusTex, cirrusTex } from './textures.js';
-import { fxOnly, RES_SCALE } from './halfres.js';
+import { skyOnly, sky, RES_SCALE } from './halfres.js';
 
 /* Weather is ONE field on ONE mesh, not a cap that follows the ship.
 
@@ -35,7 +35,11 @@ const R_OUT = RE + BAND_TOP;            // 6382, the shell's own radius
 const THICK = BAND_TOP - BAND_BASE;     // 7 km
 const CELLS = 250;                      // tile repeats around the globe: 160 km per tile
 const CELL_TEX = 512;                   // 0.3125 km per texel
-const SEG_W = 512, SEG_H = 256;         // same chord as the decks it replaces (12.5 km)
+/* 192 × 96: a 208 km facet whose chord sags 0.85 km. That would be a wobbling limb on an opaque deck;
+   here the mesh only says WHICH pixels the shell covers and where each ray starts, and the ray's
+   direction does not care how far along it the surface was. At 512 × 256 the four shell draws put
+   half a million vertices through the pipeline every frame for nothing (measured: ~1 ms). */
+const SEG_W = 192, SEG_H = 96;
 const MARCH = 20;                       // samples through the view column
 const MARCH_SHADE = 4;                  // samples through the sun column for ground shade
 
@@ -242,6 +246,50 @@ uniform float extHigh;
 uniform vec3 sunWorld;
 `;
 
+/* Which of the shell's surfaces owns a pixel. Exactly one does, by construction, so the march can
+   run with blending off and the composite can draw both meshes without doubling anything.
+   - eye above the band: the outer sphere's near (front) face; its march covers the whole chord;
+   - eye below the band: the outer sphere's inside (back) face — unless the ray goes into the ground;
+   - eye inside the band: the same back face for rays that stay clear of the ground, and the band's
+     FLOOR (the inner sphere) for rays that end on it. Without the floor a camera between 4 and 11 km
+     saw clear air beneath it and cloud shadows on the sea with nothing casting them. */
+const FACE = /* glsl */`
+  float eye2 = dot( cameraPosition, cameraPosition );
+  float Ae = dot( cameraPosition, normalize( vWorld - cameraPosition ) );
+  bool grounded = Ae < 0.0 && Ae * Ae - ( eye2 - GROUND_R * GROUND_R ) > 0.0;
+  #ifdef INNER
+    if ( !gl_FrontFacing || eye2 <= BAND_IN * BAND_IN || eye2 >= SHELL_R * SHELL_R || !grounded ) discard;
+  #else
+    if ( ( eye2 > SHELL_R * SHELL_R ) != gl_FrontFacing ) discard;
+    if ( eye2 <= SHELL_R * SHELL_R && grounded ) discard;
+  #endif
+`;
+
+/* The shell as the MAIN pass draws it: the same geometry, depth-tested at full resolution against
+   everything opaque, its colour looked up from the half-resolution march by screen position. */
+const LOOKUP_FRAG = /* glsl */`
+#include <common>
+#include <logdepthbuf_pars_fragment>
+#define SHELL_R ${R_OUT.toFixed(1)}
+#define BAND_IN ${R_IN.toFixed(1)}
+#define GROUND_R ${RE.toFixed(1)}
+uniform sampler2D skyMap;
+uniform vec2 skyTexel;
+uniform vec2 skyScreen;
+varying vec3 vWorld;
+varying vec2 vUvC;
+
+void main() {
+` + FACE + /* glsl */`
+  vec2 uv = gl_FragCoord.xy / skyScreen, o = 0.5 * skyTexel;     // 3x3 tent: see js/halfres.js
+  vec4 c = 0.25 * ( texture2D( skyMap, uv + o ) + texture2D( skyMap, uv - o )
+                  + texture2D( skyMap, uv + vec2( o.x, -o.y ) ) + texture2D( skyMap, uv + vec2( -o.x, o.y ) ) );
+  if ( c.a < 0.004 ) discard;
+  gl_FragColor = c;
+  #include <logdepthbuf_fragment>
+}
+`;
+
 const SHELL_VERT = /* glsl */`
 #include <common>
 #include <logdepthbuf_pars_vertex>
@@ -270,23 +318,7 @@ varying vec2 vUvC;
 #define uvOrigin vWorld
 ` + MARCH_FN + /* glsl */`
 void main() {
-  /* One face per regime. From outside, the near face's march already covers the whole chord and
-     the far face would run the full march only to be depth-rejected (logdepthbuf writes
-     gl_FragDepth, so there is no early-z to save it). From underneath, only the inside face is
-     the sky. */
-  float eye2 = dot( cameraPosition, cameraPosition );
-  #ifdef INNER
-    /* The floor of the band, for an eye flying inside it. Rays that leave the band downward never
-       reach the outer sphere (the planet is in the way), so without this surface a camera between
-       4 and 11 km saw clear air below it and cloud shadows on the sea with nothing casting them. */
-    if ( !gl_FrontFacing || eye2 <= BAND_IN * BAND_IN || eye2 >= SHELL_R * SHELL_R ) discard;
-    // only rays that end on the ground are this surface's; the rest belong to the outer sphere
-    float Ae = dot( cameraPosition, normalize( vWorld - cameraPosition ) );
-    if ( Ae * Ae - ( eye2 - GROUND_R * GROUND_R ) <= 0.0 ) discard;
-  #else
-    if ( ( eye2 > SHELL_R * SHELL_R ) != gl_FrontFacing ) discard;
-  #endif
-
+` + FACE + /* glsl */`
   vec3 n = normalize( vWorld );
   vec3 d = normalize( vWorld - cameraPosition );
   float tau, tSeen;
@@ -313,7 +345,7 @@ void main() {
   float tone = ( smoothstep( 1.0 - w, 1.0 + w, band ) + smoothstep( 2.0 - w, 2.0 + w, band ) ) * 0.5;
   float day = smoothstep( -0.12, 0.30, dot( n, sunWorld ) );
   vec3 col = mix( cloudShade, cloudLit, tone ) * ( 0.10 + 0.90 * day );
-  gl_FragColor = vec4( col, alpha );
+  gl_FragColor = vec4( col * alpha, alpha );      // premultiplied: this is a layer, not the frame
   #include <logdepthbuf_fragment>
 }
 `;
@@ -355,27 +387,32 @@ export function makeWeather() {
 }
 
 export function makeCloudShell(U) {
-  const material = (defines) => new THREE.ShaderMaterial({
-    uniforms: U, defines,
-    vertexShader: SHELL_VERT,
-    fragmentShader: SHELL_FRAG,
-    transparent: true,
-    depthWrite: false,
+  /* The march: no depth, no blending (one surface per pixel, see FACE), drawn only into the sky
+     target. Its 6.7 ms at full resolution is why it lives there. */
+  const march = (defines) => new THREE.ShaderMaterial({
+    uniforms: U, defines, vertexShader: SHELL_VERT, fragmentShader: SHELL_FRAG,
     side: THREE.DoubleSide,       // the sky above the pad is the inside of this shell
-    fog: false,                   // planet-scale body: FogExp2 measured from the camera would
-                                  // erase it in the system view 20 000 km out
+    transparent: false, blending: THREE.NoBlending, depthTest: false, depthWrite: false, fog: false,
   });
-  const mesh = new THREE.Mesh(new THREE.SphereGeometry(R_OUT, SEG_W, SEG_H), material({}));
-  /* Same march, drawn on the band's floor: see INNER in the fragment shader. */
-  const floor = new THREE.Mesh(new THREE.SphereGeometry(R_IN, SEG_W, SEG_H), material({ INNER: '' }));
-  for (const m of [mesh, floor]) {
-    m.renderOrder = 1;            // after terrain and vehicle, before the plume
+  /* The lookup: what the main camera draws. fog: false — a planet-scale body, and FogExp2 measured
+     from the camera would erase it in the system view 20 000 km out. */
+  const lookup = (defines) => new THREE.ShaderMaterial({
+    uniforms: sky, defines, vertexShader: SHELL_VERT, fragmentShader: LOOKUP_FRAG,
+    side: THREE.DoubleSide, transparent: true, depthWrite: false, fog: false,
+    blending: THREE.CustomBlending, blendEquation: THREE.AddEquation,
+    blendSrc: THREE.OneFactor, blendDst: THREE.OneMinusSrcAlphaFactor,
+  });
+  const outer = new THREE.SphereGeometry(R_OUT, SEG_W, SEG_H), floor = new THREE.SphereGeometry(R_IN, SEG_W, SEG_H);
+  const mesh = new THREE.Mesh(outer, march({}));
+  mesh.add(new THREE.Mesh(floor, march({ INNER: '' })));
+  skyOnly(mesh);
+  for (const [geo, defines] of [[outer, {}], [floor, { INNER: '' }]]) {
+    const m = new THREE.Mesh(geo, lookup(defines));
+    m.renderOrder = 1;            // after terrain and vehicle, before the exhaust and the ribbon
     m.castShadow = false;         // a 7 km sheet at a low sun drags its silhouette hundreds of km
+    mesh.add(m);
   }
-  mesh.add(floor);
-  /* Drawn in the half-resolution pass (js/halfres.js), which is where this shell's 6.7 ms went. The
-     march reads its own footprint from screen derivatives, hence PIXEL_SCALE above. */
-  return fxOnly(mesh);
+  return mesh;
 }
 
 /* Add the weather shade to an already-built material's program. three keys its program cache on

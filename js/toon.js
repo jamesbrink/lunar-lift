@@ -59,6 +59,7 @@ export const PALETTE = {
   hull: 0xf1f4f8, dark: 0x232932, accent: 0xe0532c, engine: 0x767d87,
   silver: 0xcdd5de,
   padConcrete: 0x9aa1ab, padSteel: 0xc3cbd4, blast: 0x2b2f36, lutRed: 0xc2452f, padDeck: 0x7f8894,
+  hardstand: 0xb4b9bf, gravel: 0xbfae8c, asphalt: 0x4a4f57,
 };
 
 export function toon(opts = {}) {

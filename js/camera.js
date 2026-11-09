@@ -252,10 +252,17 @@ export function updateCamera(dt) {
       if (_h.length() < 0.12) _h.crossVectors(_up, Math.abs(_up.y) < 0.9 ? AXIS : X_AXIS);
     }
     _h.normalize();
-    /* Ease back behind the nose — in flight. On the pad there is no "behind": the heading is a
-       fallback axis, and easing toward it slid the opening shot sideways for its first seconds. */
-    if (mode === 'chase' && performance.now() - lastInput > 2000 && S.pos.length() - RE > 0.2) {
-      wantYaw *= Math.exp(-0.5 * dt); wantPitch *= Math.exp(-1.6 * dt);   // the yaw comes round slowly: from the pad shot it is a 130° move
+    /* With no input for two seconds the view eases home. Home is the pad shot on the ground and
+       "behind the nose" in flight, and it travels from one to the other across the first 30 km of
+       climb — a slow arc round the vehicle as it rises. It used to be "behind the nose" always:
+       on the pad that is behind the umbilical tower, and once that was avoided the camera swung
+       130° in the seconds after liftoff. Near the Moon the altitude over EARTH is what is read, so
+       a landing is never dragged round to the pad's angle. */
+    if (mode === 'chase' && performance.now() - lastInput > 2000) {
+      const home = PAD_YAW * (1 - THREE.MathUtils.smoothstep(S.pos.length() - RE, 1, 30));
+      let d = (home - wantYaw) % (2 * Math.PI);
+      if (d > Math.PI) d -= 2 * Math.PI; else if (d < -Math.PI) d += 2 * Math.PI;
+      wantYaw += d * (1 - Math.exp(-1.6 * dt)); wantPitch *= Math.exp(-1.6 * dt);
     }
     /* The chase camera is a crane shot written as a function of height. On the ground it sits low
        and looks UP the stack — a 110 m rocket seen from above its own nose is a pencil. As the

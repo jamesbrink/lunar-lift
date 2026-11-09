@@ -219,13 +219,25 @@ state differs from the ship's real trajectory by ~100 km, which would make the r
   a few frames later) and at a retina-sized drawing buffer — `tab.emulate({ viewport: { …,
   deviceScaleFactor: 2 } })`. That is how the weather shell (6.7 ms of 13.4 idle) and the exhaust
   sprites (16 ms of 31.6 at full throttle) were found.
-- **Soft, fill-bound layers go in the half-resolution pass.** `js/halfres.js` draws `LAYER_FX`
-  objects (weather shell, exhaust points) into a quarter-pixel target with its own depth prepass of
-  every `LAYER_OCC` mesh, then composites through a 3×3 tent. Same views after: 13.4 → 5.2 ms idle,
-  31.6 → 8.4 ms at full throttle. Consequences to remember: a shader in that pass sees pixels twice
-  the size (screen-derivative footprints and point sizes are scaled by `RES_SCALE`); a new opaque
-  mesh must be passed through `occlude()` or smoke draws over it; ordered dither survives the tent
-  as a weave, white noise does not.
+- **Soft, fill-bound layers go in the half-resolution pass, and how each is hidden decides how it
+  comes back.** `js/halfres.js` draws the weather march and the exhaust points into quarter-pixel
+  targets. Same views before and after: 13.4 → 5.9 ms idle, 31.6 → 6.4 ms at full throttle on the pad.
+  The weather is marched with no depth at all and put on screen by the shell's own geometry in the
+  main pass (a lookup by screen position), so hardware cuts it at full resolution; testing it against
+  a low-resolution depth prepass left a one-texel fringe of cloud on every silhouette. The exhaust
+  keeps the prepass (smoke is in front of the ship as often as behind) and is skipped when no parcel
+  is alive. Remember: a shader in these passes sees pixels twice the size (footprints and point sizes
+  scale by `RES_SCALE`); a new opaque mesh must go through `occlude()` or smoke draws over it;
+  ordered dither survives the tent as a weave, white noise does not; and the shell's mesh density
+  buys nothing — 512 × 256 cost ~1 ms over 192 × 96 for the same picture.
+- **A ground colour cannot hold a road; geometry can.** The pad stood on 360 m of terrain painted
+  concrete-grey because the patch's vertices are 25 m apart at best. The site is now slabs in
+  `js/pad.js` half a metre proud of terrain measured flat to ±0.22 u within 700 u, and the terrain
+  under them is grass.
+- **Exhaust parcels are only a plume where air holds them together.** Above ~40 km nothing does, they
+  separate at km/s, and a 1600-slot pool draws them as coloured dots a hundred metres apart. They
+  fade out between 28 and 50 km and are not simulated above 52; the drawn flames, spread by the same
+  thin air, are the exhaust up there. Lunar parcels are exempt.
 - **Two surfaces on one plane flicker, and a vehicle standing in a slab is two.** The pad deck was a
   solid box with a dark box inset, both tops at z 3.0, and the stack (skirt at z 1.4, bells to −1)
   stood sunk through them: crawling stripes at the foot of the rocket. `js/pad.js` now has a real
@@ -238,6 +250,9 @@ state differs from the ship's real trajectory by ~100 km, which would make the r
   module defaults, so each mission opened with the horizon rolling level; and "ease back behind the
   nose" ran on the pad, where the nose's heading is a fallback axis. Measured after: 0.000° of camera
   rotation across the first 4 s.
+- **"Home" for the chase camera is a function of altitude.** The pad shot on the ground, behind the
+  nose by 30 km, a slow arc between: easing straight to "behind the nose" after liftoff was a 130°
+  swing in two seconds (now ≤ 3.4°/s, measured over the first 10 s of flight).
 - **Damp the camera's offset, never its position.** A lerp of the absolute position toward a moving
   target trails it by speed × time-constant: in a 300 km orbit at ×1 with 0.12 km asked for, the camera
   sat 0.572 km back with the ship 32 % up the frame, and under warp it was simply left behind. The
@@ -364,11 +379,8 @@ await tab.evaluate(`(async () => {
 
 ## Structure
 
-One concern per file; no god files. Current sizes: `toonmap.js` 1779, `vehicle.js` 1363,
-`world.js` 687, `terrain.js` 549, `navball.js` 498, `physics.js` 472, `hud.js` 437, `clouds.js` 406,
-`camera.js` 293, `predictor.js` 275, `textures.js` 232, `saturn.js` 231, `ribbon.js` 213,
-`pad.js` 181, `main.js` 172, `toon.js` 137, `constants.js` 119, `targeting.js` 108, `halfres.js` 91,
-`audio.js` 62, `haze.js` 62. `vehicle.js` is now the exhaust and debris alone — the hardware it used
+One concern per file; no god files. Current sizes: `toonmap.js` 1778, `vehicle.js` 1374, `world.js` 687, `terrain.js` 549, `navball.js` 498, `physics.js` 472, `clouds.js` 443, `hud.js` 437, `camera.js` 300, `predictor.js` 275, `textures.js` 232, `saturn.js` 231, `ribbon.js` 213, `pad.js` 202, `main.js` 172, `toon.js` 138, `constants.js` 119, `targeting.js` 108, `halfres.js` 103, `audio.js` 62, `haze.js` 62.
+`vehicle.js` is now the exhaust and debris alone — the hardware it used
 to build is `saturn.js`, the launch complex left `world.js` for `pad.js`. It is still the largest
 behavioural module; if the particle field grows, split its renderer from its integrator.
 `physics.js` stays display-free: `tools/mission-sim.mjs` imports it headless, and `saturn.js` with

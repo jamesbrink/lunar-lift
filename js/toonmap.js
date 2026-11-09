@@ -1656,12 +1656,11 @@ export function padAuthored(u, v, near = 0) {
        zero by 920 m, peak 0.85: 500 m sits at ~half tone, 700 m at ~a tenth. The chamfered-square
        core from review3 is gone — square corners at 440–560 m were what made the silhouette read
        as geometry; with a real gradient there is no iso-contour left to alias into octagon teeth. */
-    if (rr < 0.36) return C.concrete.slice();
-    /* The transition is a GRADIENT, not a second plate: any hard ring of any width is a contour,
-       and every contour at this radius has straight grid-following edges at 150–300 m vertex
-       spacing. Spread over three or four vertex cells it reads as a pad area worn into grassland. */
-    if (rr < 0.92) {
-      const t = (1 - smoothS(0.32, 0.92, rr)) * 0.85;
+    /* The complex itself is geometry now (js/pad.js: hardstand, crawlerway, perimeter road), which
+       can hold an edge the patch's vertices cannot. What is left for the ground colour is the wear
+       around it: grass thinning toward the hardstand, a third of the way to concrete at most. */
+    if (rr < 0.7) {
+      const t = (1 - smoothS(0.2, 0.7, rr)) * 0.35;
       const k = C.concrete, o = C.grass;
       return [k[0] + (o[0] - k[0]) * (1 - t), k[1] + (o[1] - k[1]) * (1 - t), k[2] + (o[2] - k[2]) * (1 - t)];
     }

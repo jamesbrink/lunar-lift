@@ -84,25 +84,26 @@ Repo-wide convention (see `docs/reference/README.md`): **km, s, tonnes, kN**.
 - `js/terrain.js` (549 lines) — the near level: one 161 × 161 mesh warped radially, ~25 m spacing
   under the vehicle stretching to a ±220 km rim, hidden above 30 km and re-centred in place after
   ground travel, so the ground the vehicle touches is always the authored ground.
-- `js/toonmap.js` (1401 lines) — where the planets are *painted*, once at boot, from data rather than
+- `js/toonmap.js` (1778 lines) — where the planets are *painted*, once at boot, from data rather than
   from imagery: the specular sheet is read as a land mask and the diffuse sheet as a biome signal, and
   the result is a flat cartoon surface map — ocean, shelf, a hard coastline stroke, grass, forest,
   desert, tundra, boreal, ice — plus the relief fields, the authored Merritt Island shore lines and the
   cloud sheets. No photographic pixel reaches the screen. Look and its limits:
   `docs/reference/painted-planets.md` and `docs/reference/cartoon-art-direction.md`.
-- `js/toon.js` (137 lines) — the cel shading itself: `toon()` materials on a quantising ramp
+- `js/toon.js` (138 lines) — the cel shading itself: `toon()` materials on a quantising ramp
   (`RAMP_EARTH` is four texels with the top two equal, so its steps sit at N·L = −0.5, 0, +0.5 — out by
   the terminator; three samples the ramp at `dotNL · 0.5 + 0.5`, see `agents.md`), `PALETTE`, and
   `outline()` for the single dark edge on hardware.
 - `js/saturn.js` (231 lines) — the Saturn V as drawn hardware: three stage groups in the real paint
   scheme, engine fairings and fins, contoured bells, the launch escape system, and one flame per engine.
-- `js/vehicle.js` (1363 lines) — what the hardware does: the pose each frame, the flames' size and
+- `js/vehicle.js` (1374 lines) — what the hardware does: the pose each frame, the flames' size and
   spread with air density, the exhaust particle field and its ground interaction, staging debris.
-- `js/pad.js` (181 lines) — Launch Complex 39: mobile launcher with a real flame opening, the red
-  umbilical tower with swing arms and crane, propellant farm, floodlights. Static geometry is merged
+- `js/pad.js` (202 lines) — Launch Complex 39: mobile launcher with a real flame opening, the red
+  umbilical tower with swing arms and crane, propellant farm, floodlights, and the site it stands on —
+  hardstand, flame trench, crawlerway, perimeter road, water tower. Static geometry is merged
   into nine meshes.
-- `js/halfres.js` (91 lines) — the half-resolution pass the weather and the exhaust are drawn in, with
-  its own depth prepass, composited over the frame.
+- `js/halfres.js` (103 lines) — the half-resolution pass the weather and the exhaust are drawn in, with
+  the exhaust behind its own depth prepass, the weather cut by the hardware at full resolution.
 - `js/predictor.js` (275 lines) — where the vehicle is going. Integrates the path five times a second,
   draws it every frame from the ship's current position: it starts a short gap ahead of the ship, fades
   in, dims with time ahead, and stops after one lap of a closed orbit. Places the `Ap`/`Pe` markers
@@ -116,7 +117,7 @@ Repo-wide convention (see `docs/reference/README.md`): **km, s, tonnes, kN**.
   track and the launch site on them.
 - `js/navball.js` (498 lines) — the KSP-style attitude ball: an orthographic view of the sky from
   the nose, prograde/retrograde markers, apsis markers, the Moon as a target.
-- `js/camera.js` (293 lines) — chase, orbit and system cameras; drag/zoom input. The chase camera is a
+- `js/camera.js` (300 lines) — chase, orbit and system cameras; drag/zoom input. The chase camera is a
   crane shot keyed to altitude — low and looking up the stack on the pad, high and looking down past
   it from the stratosphere, the lens widening from 64° to 76° — and it shakes with thrust and dynamic
   pressure. Follows the middle of
@@ -139,7 +140,7 @@ Repo-wide convention (see `docs/reference/README.md`): **km, s, tonnes, kN**.
   sprite, deterministic so the weather is the same every run. The photographic diffuse/normal/specular maps
   under `assets/` are inputs to the painter in `js/toonmap.js` (mask and biome signal); the normal
   map is no longer bound to any surface, per `docs/reference/cartoon-art-direction.md`.
-- `js/clouds.js` (406 lines) — the weather: one shell from 4 to 11 km around the whole planet, its
+- `js/clouds.js` (443 lines) — the weather: one shell from 4 to 11 km around the whole planet, its
   opacity marched through the view ray as optical depth. The macro sheet sets coverage, a tileable rank
   lattice at 0.31 km per texel gives the cells their shape, and two drifting copies of it make them
   build and dissolve. The same march, aimed up the sun ray, is injected into the globe and the near

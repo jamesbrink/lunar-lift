@@ -501,6 +501,7 @@ export function spawnParticle(pos, vel, life, color, size0 = 3.5, smoke = 0) {
 function spawnPlume(set, pos, quat, vel, throttle, simDt) {
   moonPos(getSimTime(), _mo);     // so a burn right after an ff() jump picks the right body underneath
   const onMoon = pos.distanceToSquared(_mo) < SOI2;
+  if (!onMoon && pos.length() - RE > 52 && pos.length() - RE < 2000) { emitAcc = 0; return; }   // drawn at zero opacity up here (fillBuffers): do not simulate them
   const veEff = set.ve * (0.45 + 0.55 * throttle);     // throttle sets exit velocity, not sprite size
   emitAcc += set.rate * throttle * simDt;              // parcels/s: the mass flow at rendering resolution
   let n = emitAcc | 0; emitAcc -= n;
@@ -1045,7 +1046,13 @@ function fillBuffers() {
          the sky, it goes back to the dark grey that makes a column read. */
       if (b === 3 && (Math.sqrt(x * x + y * y + z * z) - RE) < 0.05) b = 5;
       const c = BAND_C[b]; cr = c[0]; cg = c[1]; cb = c[2];
-      const fade = Math.min(1, pAge[i] * 8 + 0.05) * Math.min(1, pLife[i] * pInv[i] * 2.5 + 0.05);
+      let fade = Math.min(1, pAge[i] * 8 + 0.05) * Math.min(1, pLife[i] * pInv[i] * 2.5 + 0.05);
+      /* Free-flying exhaust thins out with the air, between 28 and 50 km. Below that, drag piles the
+         parcels into the rope the ascent drags behind it; above it nothing stops them, they separate
+         at kilometres per second, and the pool can only draw them as a scatter of coloured dots a
+         hundred metres apart — which is what trailed the vehicle through the upper atmosphere. Up
+         there the exhaust is the drawn flames, spread wide by the same thin air (updateBurnVisuals). */
+      if (!pMoon[i] && !pSmoke[i]) fade *= 1 - THREE.MathUtils.smoothstep(Math.sqrt(x * x + y * y + z * z) - RE, 28, 50);
       a = BAND_A[b] * fade; ad = BAND_G[b] * fade;
       /* Deflected flow is air-mixed the moment it leaves the trench, so it carries almost no light:
          at 0.5 it still read as a ring of flaming lanterns rolling across the flat, because glow is
@@ -1149,6 +1156,10 @@ export function parcelAudit(ref = null, nearKm = 0.5) {
    h ≈ 33 ms rather than fall behind the clock — at 1000× a 4 km/s parcel can tunnel the ~5 m hull
    radius in one step, the accepted trade; nothing explodes, because the drag update is implicit
    and the colliders are positional. */
+/* Is there any exhaust to draw? The half-resolution FX pass (with its depth prepass of the whole
+   opaque scene) is skipped when there is not. */
+export const plumeLive = () => nAlive > 0;
+
 export function updateParticles(dt) {
   if (dt > 0) {
     const d = Math.min(1, dt);

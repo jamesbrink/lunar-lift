@@ -68,6 +68,9 @@ export function buildPad(glowMap) {
   const steel = named('steel', { color: PALETTE.padSteel });
   const red = named('red', { color: PALETTE.lutRed });
   const dark = named('dark', { color: PALETTE.blast });
+  const hard = named('hard', { color: PALETTE.hardstand });
+  const gravel = named('gravel', { color: PALETTE.gravel });
+  const asphalt = named('asphalt', { color: PALETTE.asphalt });
   /* White with a floor of emissive: the tanks and the white room sit on the camera side of their
      own terminator through the launch window, and on the bare ramp they read as black. The real
      ones are the brightest things on the complex. */
@@ -85,13 +88,13 @@ export function buildPad(glowMap) {
      them. Two coplanar faces under a logarithmic depth buffer rasterise as crawling stripes, and
      that is what flickered at the foot of the stack. Now nothing shares a plane: the deck's top is
      z 1.0, just under the skirt and the fins; the opening is an actual hole, with the bells hanging
-     into it; and the only surface in the hole is the floor at z 0.3. Every slab's underside is
+     into it; and the only surface in the hole is the floor at z 0.62, over the hardstand's 0.45. Every slab's underside is
      below ground, so no bottom edge lies on the terrain either. */
   box(64, 15, 2.6, deck, 0, 15.5, -0.3, true);
   box(64, 15, 2.6, deck, 0, -15.5, -0.3, true);
   box(22, 16.2, 2.6, deck, 21, 0, -0.3, true);
   box(22, 16.2, 2.6, deck, -21, 0, -0.3, true);
-  box(20.6, 16.6, 1.6, dark, 0, 0, -0.5);                             // trench floor, top z 0.3
+  box(20.6, 16.6, 1.6, dark, 0, 0, -0.18);                            // trench floor, top z 0.62
   // four hold-down arms from the opening's edge to just under the skirt (z 1.4), between the fins
   box(6.6, 1.8, 1.0, dark, 6.7, 0, 0.8, true); box(6.6, 1.8, 1.0, dark, -6.7, 0, 0.8, true);
   box(1.8, 4.6, 1.0, dark, 0, 5.7, 0.8, true); box(1.8, 4.6, 1.0, dark, 0, -5.7, 0.8, true);
@@ -175,6 +178,24 @@ export function buildPad(glowMap) {
     thin.add(new THREE.CylinderGeometry(0.35, 0.6, 102, 8), steel, false, mx, 26, 49, Math.PI / 2);
     thin.add(new THREE.SphereGeometry(0.8, 10, 8), steel, false, mx, 26, 100.4);
   }
+  /* ---- the site: what the launcher stands on, and how it got there ----
+     The ground here used to be the terrain patch painted concrete-grey for 360 m and fading out by
+     920 m: a flat grey field with nothing in it, because a vertex-coloured mesh whose spacing is
+     25 m at best cannot hold a road. So the site is geometry — slabs half a metre proud of the
+     terrain (which is flat to ±0.22 u within 700 u of the pad, measured) with their undersides
+     below it — and the terrain under them is grass again (js/toonmap.js, padAuthored).
+     Tops, none shared: hardstand 0.45, flame trench 0.55, crawlerway 0.40, road 0.36. */
+  const octagon = (r, h) => { const o = new THREE.CylinderGeometry(r, r, h, 8); o.rotateY(Math.PI / 8); return o; };
+  B.add(octagon(170, 1.6), hard, false, 0, 0, -0.35, Math.PI / 2);                 // the hardstand, 475 m across
+  box(22, 420, 1.6, dark, 0, 0, -0.25);                                           // flame trench, north-south through the launcher
+  for (const y of [-11, 11]) box(760, 13, 1.6, gravel, -540, y, -0.4);            // crawlerway: two gravel tracks west to the horizon
+  B.add(new THREE.RingGeometry(214, 221, 64), asphalt, false, 0, 0, 0.36);        // perimeter road
+  box(9, 120, 1.4, asphalt, 190, 150, -0.35, false, 0, 0, 0.9);                   // and the road in from the north-east
+  // the sound-suppression water tower, 88 m: the tallest thing on the site that is not the stack
+  B.add(new THREE.CylinderGeometry(7.5, 7.5, 9, 20), whiteMat, true, 120, -150, 56, Math.PI / 2);
+  B.add(new THREE.SphereGeometry(7.5, 20, 10, 0, Math.PI * 2, 0, Math.PI / 2), whiteMat, true, 120, -150, 60.5, Math.PI / 2);
+  for (const [dx, dy] of [[5, 5], [-5, 5], [5, -5], [-5, -5]]) box(1.1, 1.1, 54, steel, 120 + dx, -150 + dy, 25.5, true);
+  B.add(new THREE.CylinderGeometry(1.4, 1.4, 52, 10), steel, false, 120, -150, 26, Math.PI / 2);
   B.build(g, true);
   thin.build(g, false);
   return { group: g, lamps };
