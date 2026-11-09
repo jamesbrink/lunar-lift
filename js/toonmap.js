@@ -241,7 +241,11 @@ async function paintEarthJob(diffusePath, maskPath) {
      turns every boundary into a graded iso-line; bilinear sampling carries it to a curve. */
   const sdf = earthCoast(cleaned, w, h).km;
   const ss = (a, b, x) => { const t = Math.min(1, Math.max(0, (x - a) / (b - a))); return t * t * (3 - 2 * t); };
-  const H = 14;                                   // km blend half-width ≈ 0.7 texel
+  /* Round 6b: H 14 -> 60 km. With a 28 km blend the shelf-break iso-line (sd ≈ 175) read at
+     160 km as a dark curve running parallel to the limb — the "floating tear" again. A 120 km
+     graded band keeps the near/far sea two tones (review 4's monotone complaint) but no longer
+     draws a line where there is no coast. */
+  const H = 60;                                   // km blend half-width ≈ 3 texels
   for (let y = 0; y < h; y++) {
     for (let x = 0; x < w; x++) {
       const i = y * w + x, o = i * 4;
@@ -268,7 +272,7 @@ async function paintEarthJob(diffusePath, maskPath) {
         out[o + 2] += (C.coast[2] - out[o + 2]) * wsea;
       } else {
         const sd = sdf[i];
-        const wo = 1 - ss(175 - H, 175 + H, sd), ws = 1 - ss(95 - H, 95 + H, sd), wc = 1 - ss(25 - H, 25 + H, sd);
+        const wo = 1 - ss(115, 235, sd), ws = 1 - ss(95 - H, 95 + H, sd), wc = 1 - ss(25 - H, 25 + H, sd);
         // open ocean was one value everywhere (review 4: "the low-orbit oceans of 09/15 are
         // monotone flats"): three slow tones, ~900-1500 km wavelength, far slower than any mesh
         const u = (x + 0.5) / w, v2 = (y + 0.5) / h;

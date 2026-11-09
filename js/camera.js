@@ -8,7 +8,7 @@ import { S, fwd, getSimTime } from './physics.js';
 export const camera = new THREE.PerspectiveCamera(58, innerWidth / innerHeight, 0.001, 3000000);
 
 export const camModes = ['chase', 'orbit', 'system'];
-export const getCamDist = () => curDist;
+// getCamDist removed with the world-space nav arrows (round 6b); nothing else reads curDist.
 let camMode = 0, dragging = false, lastInput = 0;
 
 /* Input writes the `want` numbers and each frame damps the `cur` ones toward them. Assigning a camera

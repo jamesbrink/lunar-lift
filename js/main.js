@@ -1,9 +1,9 @@
 import * as THREE from 'three';
 import { RE, RM, WARPS, DTPHYS, PAD_POS, moonPos } from './constants.js';
 import { initWorld, spinBodies, syncTime, updateSky, updateSunShadow, groundHeight, moonGroundHeight } from './world.js';
-import { stages, initVehicle, initNavVectors, updateNavVectors, spawnParticle, addDebris, detachStage, setVisible, updateParticles, updateDebris, updateBurnVisuals, clearDebris, resetStages, lesGroup } from './vehicle.js';
-import { S, keys, initPhysics, getState, getSimTime, setSimTime, getEngineOn, getThrottle, getWarpIndex, setWarpIndex, setTargetThrottle, getSasOn, setSas, cycleWarp, toggleSas, toggleSasRetro, activeStage, fwd, isBurning, accelAt, physStep, predict, toggleIgnite, separateStage, separateLES, addDistFlown, pushTrail, resetSim, clearPredictor, markTeleported, predLine, omega, getControlAuthority, navVel, groundVel } from './physics.js';
-import { camera, initCamera, cycleCamera, updateCamera, resetCameraView, setCamMode, setCamDist, resizeCamera, getCamDist } from './camera.js';
+import { stages, initVehicle, spawnParticle, addDebris, detachStage, setVisible, updateParticles, updateDebris, updateBurnVisuals, clearDebris, resetStages, lesGroup } from './vehicle.js';
+import { S, keys, initPhysics, getState, getSimTime, setSimTime, getEngineOn, getThrottle, getWarpIndex, setWarpIndex, setTargetThrottle, getSasOn, setSas, cycleWarp, toggleSas, toggleSasRetro, activeStage, fwd, isBurning, accelAt, physStep, predict, toggleIgnite, separateStage, separateLES, addDistFlown, pushTrail, resetSim, clearPredictor, markTeleported, predLine, omega, getControlAuthority } from './physics.js';
+import { camera, initCamera, cycleCamera, updateCamera, resetCameraView, setCamMode, setCamDist, resizeCamera } from './camera.js';
 import { initHUD, addLog, updateHUD, drawMap, toggleMapView, endOverlay, setWarn, hideOverlay, clearLog } from './hud.js';
 import { audioInit, audioEngine, audioThud, audioExplosion, audioWin, updateEngineGain } from './audio.js';
 import { updateAim, resetAim } from './targeting.js';
@@ -33,7 +33,6 @@ renderer.shadowMap.type = THREE.PCFShadowMap;
 const scene = new THREE.Scene();
 scene.background = new THREE.Color(0x04060b);
 scene.fog = new THREE.FogExp2(0x04060b, 0);
-const _gv = new THREE.Vector3();   // scratch for the per-frame ground-speed read
 
 /* ---------------- overlays / flow ---------------- */
 function resetMission() {
@@ -56,7 +55,6 @@ function resetMission() {
 let audioArmed = false;
 initWorld(scene);
 initVehicle(scene);
-initNavVectors(scene);
 initPhysics({
   scene,
   stages,
@@ -116,7 +114,6 @@ function frame() {
 
     // visuals follow physics
     updateBurnVisuals({ pos: S.pos, quat: S.q, vel: S.v, throttle: getThrottle(), activeIdx: activeStage(), burn: isBurning(), fwd, omega });
-    updateNavVectors(S.pos, fwd(), navVel(), isBurning(), getCamDist(), groundVel(_gv));
     updateDebris(simDt, accelAt);
     updateEngineGain(isBurning(), Math.max(0, S.pos.length() - RE));
     predTick += dtReal; if (predTick > .35) { predTick = 0; if (getState() === 'flying') predict(); }

@@ -546,9 +546,14 @@ export function predict() {
     if (thAcc) g.add(thAcc);
     v.addScaledVector(g, dt); p.addScaledVector(v, dt); t += dt;
     if (s % 2 === 0) {
-      const q = _lq.copy(p); lift(q);
-      predPos.set([q.x, q.y, q.z], n * 3);
-      predCol.set([0.30, 0.85, 0.5], n * 3); n++;
+      /* Never publish a point already inside a body: lift() would drag it onto the surface, and
+         a 150 km descent step puts that point on the far side of the sphere — the ribbon then
+         skated along the globe and looked like it flew through the planet (measured at 160 km). */
+      if (p.length() >= RE && p.distanceTo(m) >= RM) {
+        const q = _lq.copy(p); lift(q);
+        predPos.set([q.x, q.y, q.z], n * 3);
+        predCol.set([0.30, 0.85, 0.5], n * 3); n++;
+      }
     }
     const rM = p.distanceTo(m);
     if (rM <= RM + RHALF) { impactType = 'moon'; impactT = t - simTime; break; }
@@ -565,11 +570,29 @@ export function predict() {
   }
   if (!onSurface && impactType && (impactT < 3000 || impactType === 'moon')) {
     const q = _lq.copy(p); lift(q);
+    // doubled point = the terminal quad; ribbon.js inherits the last good dir across the degenerate run
     predPos.set([q.x, q.y, q.z], n * 3); predCol.set([1, .22, .18], n * 3); n++;
     predPos.set([q.x, q.y, q.z], n * 3); predCol.set([1, .22, .18], n * 3); n++;
-    const msg = `IMPACT PREDICTED: ${impactType === 'moon' ? 'MOON' : 'EARTH'} IN ${Math.round(impactT / 60)} min`;
-    if (msg !== impactWarn) impactWarn = msg;
-    hooks.setWarn(msg);
+    /* (user: the countdown is "always inaccurate") — it is not the integration (measured: 6 min
+       predicted vs 5.76 min actual on a 600 m/s dive); it is the warning firing while the vehicle
+       is still CLIMBING. A rocket going up at 53 m/s on the pillar will, on this exact state
+       vector, come back down in some number of minutes — and then the pilot throttles, stages,
+       pitches, and the number was a lie by construction. The impact marker (the red dot where
+       the current arc meets the ground) stays; the countdown shows only once the vehicle is
+       actually coming down (radial velocity below +50 m/s). */
+    const climb = (() => {
+      const rm = _mq.subVectors(S.pos, moonPos(simTime, _lq2));
+      const rM2 = rm.lengthSq();
+      const d = new THREE.Vector3().copy(S.pos);
+      const rE2 = d.lengthSq();
+      if (rM2 < rE2) return S.v.dot(rm) / Math.sqrt(rM2);
+      return S.v.dot(d) / Math.sqrt(rE2);
+    })();
+    if (climb <= 0.05) {
+      const msg = `IMPACT PREDICTED: ${impactType === 'moon' ? 'MOON' : 'EARTH'} IN ${Math.round(impactT / 60)} min`;
+      if (msg !== impactWarn) impactWarn = msg;
+      hooks.setWarn(msg);
+    } else { impactWarn = ''; hooks.setWarn(null); }
   } else { impactWarn = ''; hooks.setWarn(null); }
   predLine.setPoints(predPos, n);
   predLine.setColors(predCol, n);

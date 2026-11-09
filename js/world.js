@@ -18,7 +18,7 @@ const SUN_ANG = 0.009;             // rad: the real sun is 0.53° wide, so the f
 const STAR_R = 2000000;            // km — the starfield sits well outside the moon's orbit
 const SKY_R = 20000;               // km — the sky dome rides the camera; small vs the moon at 384 400
 const SHADOW_MAX = 48;             // km half-extent of the vehicle-tracking shadow box
-const SHADOW_MIN = 6;              // km — tight enough for ~100 m pad structures to resolve
+const SHADOW_MIN = 3;              // km — 4096² over ±3 km is 1.46 m/texel: the pad zoom the user screenshotted showed ~10 m blob steps at the old ±6 km
 const CUMULUS_ALT = 2, CIRRUS_ALT = 9;          // km above the surface
 const ATMO_SHELL = 1.01;          // atmosphere glow shell: RE * 1.01
 
@@ -552,9 +552,15 @@ function buildPad(glowMap) {
   // crawler platform with track skirts; deck top z = 3
   // The skirts join the deck in carrying the dark outline: review2 — "none of the pad models
   // carry the dark outlines the art direction promises"; the big readable shapes get edge=true.
-  box(64, 46, 3, concrete, 0, 0, 1.5, false, true, true);
-  box(64, 9, 3.6, concrete, 0, -23, 1.2, false, true, true);
-  box(64, 9, 3.6, concrete, 0, 23, 1.2, false, true, true);
+  /* Round 6b (user: "clickers … probably from clipping"): the deck and skirts had their BOTTOM
+     faces at exactly z = 0, the same plane the terrain patch draws — coplanar faces under a
+     logarithmic depth buffer rasterise as running dashes along every contact edge (measured as
+     a stitched black tick-mark trail the length of the deck). Every ground-touching slab now
+     sinks ≥ 0.6 m into the ground so the intersection line sits BELOW the visible silhouette;
+     tops are unchanged, so the physics anchor at z = 4 is untouched. */
+  box(64, 46, 3.6, concrete, 0, 0, 1.2, false, true, true);
+  box(64, 9, 4.2, concrete, 0, -23, 0.9, false, true, true);
+  box(64, 9, 4.2, concrete, 0, 23, 0.9, false, true, true);
   // reinforced launch deck: four slabs ring the flame-trench opening; tops z = 4 (physics anchor)
   box(44, 12, 1, concrete, 0, -14, 3.5, false, true);
   box(44, 12, 1, concrete, 0, 14, 3.5, false, true);
@@ -563,10 +569,15 @@ function buildPad(glowMap) {
   // flame trench below the opening + four canted exhaust deflectors (outlined: against the dark
   // trench the un-outlined slabs read as one black hole; the edge is what separates four plates)
   box(21, 17, 4.4, blast, 0, 0, 0.8, false, true);
-  const d1 = box(18, 7, 1.2, blast, 0, -3.5, 2.4, true, true, true); d1.rotation.x = 0.75;
-  const d2 = box(18, 7, 1.2, blast, 0, 3.5, 2.4, true, true, true); d2.rotation.x = -0.75;
-  const d3 = box(15, 7, 1.2, blast, -7, 0, 2.4, true, true, true); d3.rotation.y = 0.75;
-  const d4 = box(15, 7, 1.2, blast, 7, 0, 2.4, true, true, true); d4.rotation.y = -0.75;
+  /* Round 6b (user: "launchpad clickers … probably from clipping"): the deflectors reached z 4.8
+     while the F-1 exits hang at z 3.5 — every bell on the bolt circle (r ≤ 3.55) was pierced by a
+     plate, and the intersection rendered as jagged black clickers around the engine cluster.
+     Lowered to z 1.2 and narrowed 7→6: the plate top now peaks at z ≈ 3.25, clearing every bell
+     by 0.25+; the trench floor is z 3.0, so the V still reads over the opening. */
+  const d1 = box(18, 6, 1.2, blast, 0, -3.5, 1.2, true, true, true); d1.rotation.x = 0.75;
+  const d2 = box(18, 6, 1.2, blast, 0, 3.5, 1.2, true, true, true); d2.rotation.x = -0.75;
+  const d3 = box(15, 6, 1.2, blast, -7, 0, 1.2, true, true, true); d3.rotation.y = 0.75;
+  const d4 = box(15, 6, 1.2, blast, 7, 0, 1.2, true, true, true); d4.rotation.y = -0.75;
   // strongback tower (legs to z 56) with a swing arm reaching for the rocket at mid-vehicle height
   box(1.8, 1.8, 52, steel, -16, -10, 30, true, false, true);
   box(1.8, 1.8, 52, steel, -16, -2, 30, true, false, true);

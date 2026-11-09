@@ -1441,62 +1441,12 @@ export function resetStages() {
 }
 
 /* ---------------- navigation vectors drawn in the world ----------------
-   The plume shows where the engines are firing, but only while they are lit.
-   These two lines make the attitude legible at any zoom: an orange arrow along
-   the nose (the direction the thrust will push the vehicle) and a cyan line
-   along the velocity. Both are scaled to the camera distance so they stay
-   readable from the pad out to orbit.                                            */
-const navGroup = new THREE.Group();
-navGroup.frustumCulled = false;
-function arrowPair(colour) {
-  const geo = new THREE.BufferGeometry();
-  geo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(6), 3));
-  const line = new THREE.Line(geo, new THREE.LineBasicMaterial({ color: colour, transparent: true, opacity: .8 }));
-  const head = new THREE.Mesh(new THREE.ConeGeometry(1, 2, 14), new THREE.MeshBasicMaterial({ color: colour, transparent: true, opacity: .85, depthWrite: false }));
-  line.frustumCulled = head.frustumCulled = false;
-  return { geo, line, head };
-}
-export const thrustArrow = arrowPair(0xff7a3c);
-export const velArrow = arrowPair(0x6fd3ff);
-
-export function initNavVectors(target) {
-  navGroup.add(thrustArrow.line, thrustArrow.head, velArrow.line, velArrow.head);
-  target.add(navGroup);
-}
-
-const _nv = new THREE.Vector3();
-/* The vehicle is 79.6 local units long (F-1 exit -42 to LES nose-cone tip 37.6), so this is its
-   length in km — a 111 m Saturn V at 1 unit = 1.4 m. */
-const SHIP_KM = 79.6 * VS;
-function setArrow(a, pos, dir, len) {
-  const p = a.geo.attributes.position.array;
-  p[0] = pos.x; p[1] = pos.y; p[2] = pos.z;
-  p[3] = pos.x + dir.x * len; p[4] = pos.y + dir.y * len; p[5] = pos.z + dir.z * len;
-  a.geo.attributes.position.needsUpdate = true;
-  a.head.position.set(pos.x + dir.x * len, pos.y + dir.y * len, pos.z + dir.z * len);
-  a.head.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), dir);
-  const s = len * 0.13;
-  a.head.scale.setScalar(s);
-  a.head.visible = true;
-}
-
-export function updateNavVectors(pos, nose, vel, burning, camDist, groundSpeed = 0) {
-  /* Sized off the vehicle, never off the camera distance. The old `camDist * 0.35` made each arrow
-     35% of the distance to the camera, so pulling the chase view back for the horizon turned them
-     into 30 km cones that swamped a 105 m rocket and the planet behind it. Growing with zoom is
-     still useful — hence a bounded allowance; at the closest chase distance the old floor of 1.1
-     hull lengths drew a cone taller than the frame, over the HUD. */
-  const len = SHIP_KM * THREE.MathUtils.clamp((camDist / SHIP_KM) * 0.045, 0.8, 2.2);
-  thrustArrow.line.visible = thrustArrow.head.visible = burning;
-  if (burning) setArrow(thrustArrow, pos, nose, len);
-  /* The direction is the steering frame (`navVel()`, so it agrees with the navball), but a vehicle
-     sitting on the pad is not moving *across* it — its only velocity is the ground moving underneath
-     at 409 m/s, which used to draw a 30 m cone beside a parked rocket for the whole countdown. The
-     arrow shows when there is ground speed; the frame the two disagree by is nobody's business here. */
-  _nv.copy(vel);
-  if (_nv.lengthSq() > 1e-9 && groundSpeed > 0.002) setArrow(velArrow, pos, _nv.normalize(), len);
-  else velArrow.line.visible = velArrow.head.visible = false;
-}
+   REMOVED (round 6b). These arrows — an orange cone along the nose while burning and a cyan one
+   along the velocity — were the giant orange triangle users kept photographing above the fairing
+   ("what is the arrow over the rocket?"). The 1 px THREE.Line survived every object-hide A/B that
+   was tried, because the *head* was the conspicuous part and it is a ConeGeometry(1,2) mesh on the
+   parented group's far end. Attitude is already legible from the plume, the navball and the ribbon;
+   nothing in the game consumed these (no tools, no HUD), so the whole subsystem went. */
 
 /* visuals follow physics: rocket transform, flame/glow, plume emission */
 export function updateBurnVisuals({ pos, quat, vel, throttle, activeIdx, burn, fwd, omega }) {
