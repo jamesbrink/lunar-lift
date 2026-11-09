@@ -385,7 +385,7 @@ function updateShadowBox(pos) {
   setShadowBox(THREE.MathUtils.clamp(SHADOW_MIN + local * 0.12, SHADOW_MIN, SHADOW_MAX));
 }
 
-/* 37 meshes + 4 lamp sprites, all in build units around the crawler deck */
+/* 84 meshes + 4 lamp sprites, all in build units around the crawler deck */
 function buildPad(glowMap) {
   const g = new THREE.Group();
   g.scale.setScalar(PAD_SCALE);
@@ -427,11 +427,24 @@ function buildPad(glowMap) {
   box(1.8, 1.8, 52, steel, -16, -10, 30, true);
   box(1.8, 1.8, 52, steel, -16, -2, 30, true);
   for (const bz of [14, 27, 40]) box(1.8, 8, 1.2, steel, -16, -6, bz, true);
+  /* X-bracing in every strongback bay. Two legs and four rungs read as a wardrobe at pad distance;
+     the real strongback is a truss, and diagonal members are what the eye recognises as one. */
+  for (const [z0, z1] of [[6, 14], [14, 27], [27, 40], [40, 52]]) {
+    const bl = Math.hypot(8, z1 - z0), bc = (z0 + z1) / 2, ba = Math.atan2(8, z1 - z0);
+    const b1 = box(0.7, 0.7, bl, steel, -16, -6, bc, true); b1.rotation.x = ba;
+    const b2 = box(0.7, 0.7, bl, steel, -16, -6, bc, true); b2.rotation.x = -ba;
+  }
   const swing = box(12, 1.6, 1.6, steel, -9, -2, 34, true); swing.rotation.z = 0.05;
-  // service tower (legs to z 60) with a crew access arm at capsule height
+  // service tower: legs to z 60, a clad core between them, and a crew access arm at capsule height
   box(1.8, 1.8, 56, steel, 16, -10, 32, true);
   box(1.8, 1.8, 56, steel, 16, -2, 32, true);
+  box(4.6, 6.6, 50, steel, 16, -6, 29, true, false, true);   // cladding: the tower is a building, not two poles
+  box(2.2, 3.2, 6, blast, 16, -6, 57, true);                  // dark cab/crown cap under the arm pivot
   for (const bz of [18, 44]) box(1.8, 8, 1.2, steel, 16, -6, bz, true);
+  for (const [z0, z1] of [[7, 18], [18, 44], [44, 55]]) {
+    const bl = Math.hypot(8, z1 - z0), bc = (z0 + z1) / 2, ba = Math.atan2(8, z1 - z0);
+    const b1 = box(0.6, 0.6, bl, steel, 16, -9.3, bc, true); b1.rotation.x = ba;
+  }
   const crewArm = box(11, 1.5, 1.5, steel, 10, -2, 56, true); crewArm.rotation.z = -0.04;
   // two thin lightning masts; tips clear the 74-unit vehicle
   for (const mx of [-30, 30]) {
@@ -442,26 +455,45 @@ function buildPad(glowMap) {
   }
   // clustered LOX/LH2 tanks on a pad with a manifold header and a feed line toward the deck
   box(34, 28, 2, concrete, 50, 36, 3, false, true);
+  /* White with a floor of emissive: on the shared toon ramp these spheres sat on the camera side
+     of their own terminator through the whole launch window (the sun is east, the chase camera
+     looks from the south), so the cluster read as four black donuts ringed by their own outline.
+     The real tanks are the brightest objects on the complex — a fixed lift is honest here. */
+  const tankMat = toon({ color: 0xe9eef4 });
+  tankMat.emissive = new THREE.Color(0x33383f);
   for (const [tx, ty] of [[40, 28], [58, 30], [42, 44], [60, 46]]) {
-    const tank = new THREE.Mesh(new THREE.SphereGeometry(6, 24, 16), steel);
+    const tank = new THREE.Mesh(new THREE.SphereGeometry(6, 24, 16), tankMat);
     tank.position.set(tx, ty, 10); tank.castShadow = true; tank.receiveShadow = true; g.add(tank);
     outline(tank);
   }
   const manifold = new THREE.Mesh(new THREE.CylinderGeometry(0.9, 0.9, 26, 10), steel);
   manifold.position.set(50, 36, 7); manifold.rotation.x = Math.PI / 2; manifold.castShadow = true; g.add(manifold);
   box(22, 1.2, 1.2, steel, 25, 36, 6.4, true);
-  // floodlight rig: mast + cross-truss carrying four glow lamps
+  // floodlight rig: mast + cross-truss carrying four lamps on real fixtures
   box(1.4, 1.4, 22, steel, 0, -34, 15, true);
   box(30, 1.4, 1.4, steel, 0, -34, 26, true);
   for (let i = 0; i < 4; i++) {
-    /* depthTest on: these are additive glow sprites, and with the test off their orange composited
-       over anything in front — the chase camera saw the glow painted across the rocket hull whenever
-       the pad sat behind it. A glow that respects the hull reads as light on a fixture; one that
-       ignores it reads as a bug. The origins drop to z = 21.5 so the sprite disks clear the
-       cross-truss at 26 instead of half-burying themselves in it — moving the fixture, not the test. */
-    const l = new THREE.Sprite(new THREE.SpriteMaterial({ map: glowMap, color: 0xfff2c9, transparent: true, opacity: 0.45, blending: THREE.AdditiveBlending, depthWrite: false }));
-    l.position.set(-13.5 + i * 9, -34, 21.5); l.scale.setScalar(7); g.add(l);
+    /* The lamp used to be the sprite alone: a 7-unit bokeh disc hanging in the air with nothing
+       behind it, which read as floating domes — at night and against the sky especially. Now the
+       sprite is the LENS of a fixture: a housing box on a stem under the truss, the glow sitting
+       proud of the lens face. depthTest stays on (the hull occludes it — see prior note), and the
+       disc is smaller than the housing pattern it emits from. */
+    const lx = -13.5 + i * 9;
+    box(0.5, 0.5, 2.6, steel, lx, -34, 24.6, true);            // stem from the truss
+    box(2.6, 1.4, 1.6, steel, lx, -34, 22.8, true, false, true); // housing
+    const l = new THREE.Sprite(new THREE.SpriteMaterial({ map: glowMap, color: 0xfff2c9, transparent: true, opacity: 0.5, blending: THREE.AdditiveBlending, depthWrite: false }));
+    l.position.set(lx, -33.4, 22.8); l.scale.setScalar(3.4); g.add(l);
   }
+  /* Crawler track shoes + operator cab. The deck used to be one unbroken concrete slab, and a
+     40 × 35 m crawler with no track reads as a building foundation. The shoe row rides the
+     OUTBOARD face of the +y skirt (the −y face carries the banner): a row tried inside the
+     skirt volume was simply geometry the deck swallowed. */
+  for (let i = 0; i < 12; i++) {
+    const sx = -29 + i * 5.3;
+    box(2.4, 0.8, 3.0, blast, sx, 27.85, 1.3);
+  }
+  box(8, 6.5, 4.5, steel, 26, -19, 5.6, true, false, true);   // cab
+  box(8, 0.6, 2.2, blast, 26, -22.6, 6.4, false);             // cab rear window band
   // banner stripe painted along the outboard crawler skirt
   const banner = new THREE.Mesh(new THREE.PlaneGeometry(64, 2.8), blast);
   banner.position.set(0, -27.6, 1.5); banner.rotation.x = Math.PI / 2; g.add(banner);
@@ -627,11 +659,17 @@ export function updateSky(pos) {
      above ~150 km there is nothing between the eye and the stars. The fog keeps the un-squared
      clock — near-field haze is optical depth, not mood. */
   const vis = _skyMix * _skyMix;
+  /* ...and the dome + background fall on the QUARTIC. Apollo 8's "the sky is black even at
+     30 000 feet" is the calibration: zenith optical depth is exp(−alt/8 km), so the sky OVERHEAD
+     dies far faster than the horizon glow (which the shell draws independently, from grazing
+     rays). On the quadratic alone the 68 km sky measured (77,91,100) — a flat slate poster with
+     the stars suppressed; on the quartic it goes deep indigo by 40 km and black by 100. */
+  const skyVis = vis * vis;
   if (sky) {
     sky.position.copy(pos);
-    sky.material.uniforms.atmoMix.value = vis;
+    sky.material.uniforms.atmoMix.value = skyVis;
   }
-  _sky.copy(SKY_NULL).lerp(HORIZON, vis * 0.9);
+  _sky.copy(SKY_NULL).lerp(HORIZON, skyVis * 0.9);
   scene.background.copy(_sky);
   scene.fog.color.copy(_sky);
   scene.fog.density = 0.0038 * _skyMix * _skyMix;

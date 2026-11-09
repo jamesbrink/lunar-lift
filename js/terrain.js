@@ -323,7 +323,7 @@ function colour(p, u, v, sd, f, k, col) {
     pxColor(p.soft, uu, vv, _c2);                      // the BIOME colour, from the blurred copy
     const wt = padShoreWeight(u, v);
     if (wt > 0.02) {
-      const a = padAuthored(u, v);                   // authored Merritt Island tones at the pad
+      const a = padAuthored(u, v, 1);               // authored Merritt Island tones at the pad, incl. apron & crawlerway
       if (a) { _c2.r += (a[0] / 255 - _c2.r) * wt; _c2.g += (a[1] / 255 - _c2.g) * wt; _c2.b += (a[2] / 255 - _c2.b) * wt; }
     }
     // the smoothstep land fraction IS the anti-aliased shoreline: wet tone → biome tone

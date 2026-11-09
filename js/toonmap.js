@@ -30,11 +30,13 @@ const C = {
   forest: [58, 104, 60],
   grass: [120, 154, 84],
   desert: [212, 184, 120],
+  dune: [176, 168, 104],        // dune grass behind the beach line — the seam between sand and field
   rock: [150, 138, 122],
   boreal: [52, 80, 66],
   tundra: [126, 132, 114],
   ice: [233, 241, 246],
   iceEdge: [196, 214, 228],
+  concrete: [168, 166, 156],    // LC-39 apron (near level only)
 };
 
 const MOON = {
@@ -957,12 +959,33 @@ export function padShoreZone(u, v) {
    water (a real barrier island is dunes), grassland and marsh inland with 2 km forest patches,
    plain ocean beyond the cape. The concrete footprint stays concrete because the pad's own meshes
    sit on top of all of it. */
-export function padAuthored(u, v) {
-  const zone = padShoreZone(u, v);
+export function padAuthored(u, v, near = 0) {
+  const zone = padShoreZone(u, v);           // fills _tp
   if (!zone) return null;
+  if (near && _tp.a > 0) {
+    /* The built world, in the ground colour: the LC-39 concrete apron. The reviewer's "flat green
+       sheet" — nothing on the map said a launch complex stood here. It sits at the finest vertex
+       spacing (25 m under the vehicle) so its edge survives sampling. A crawlerway was tried and
+       deleted: 560 m wide against a cap whose spacing widens to >1 km, it aliased into dashes —
+       the exact "faster than the mesh" failure this file's rules already name. */
+    const r = Math.hypot(_tp.x, _tp.y);
+    if (r < 0.85) {
+      const t = THREE.MathUtils.clamp((0.85 - r) / 0.3, 0, 1);       // soft edge into the grass
+      const g = C.grass, k = C.concrete;
+      return [g[0] + (k[0] - g[0]) * t, g[1] + (k[1] - g[1]) * t, g[2] + (k[2] - g[2]) * t];
+    }
+  }
   if (zone === 'lagoon' || zone === 'river') return C.shelf;
   if (zone === 'ocean') return C.ocean;
-  if (padShoreSd(u, v) > -1.4) return C.desert;                     // beach band, landward side
+  /* Beach → dune grass → field in three graduated bands. The old single 1.4 km C.desert board
+     is the brown plank that ringed the pad horizon: from 6 km back the two shores of the
+     island stack into one saturated sand stripe. Half the width, and the landward half is
+     dune grass, so the transition is a gradient the eye reads as coast, not a painted stripe.
+     Gradation by signed distance only — no noise lattice: colour that varies faster than the
+     coarsest vertex on the cap aliases into wedges (see the ground-shade rule in AGENTS.md). */
+  const sd = padShoreSd(u, v);
+  if (sd > -0.55) return C.desert;
+  if (sd > -1.7) return C.dune;
   /* Flat grassland. This line used to threshold a 2.2 km lattice, then to ease a 60 km one; both were
      wrong in the same way. The ground mesh samples it at 25 m under the vehicle and 3 km at its rim, so
      a hard decision aliased into a fan of wedges, and a smooth decision on a value-noise lattice is a
