@@ -254,10 +254,14 @@ const BAND_C = [
   bandRGB(0xff8a2a),      // saturated flame
   bandRGB(PALETTE.accent),// cooling ember
   bandRGB(0x8a8276),      // Earth smoke: warm grey-brown, darker than the daytime sky
-  bandRGB(0x9aa0a6),      // lunar dust: pale concrete grey, brighter than regolith and than space
+  bandRGB(0xdce1e6),      // lunar dust: near-white grey — see the note below, it has to beat regolith
   bandRGB(0xdad5c9),      // cloud foot: the ground-hugging blast roll, seen against grass, not sky
 ];
-const BAND_A = [0.0, 0.16, 0.36, 0.62, 0.34, 0.8];    // composited coverage
+/* BAND_C[4] used to be 0x9aa0a6, "brighter than regolith". Measured against the rendered surface it
+   was not: the painted Moon lands at about the same 8-bit value as that band, so a whole ejecta sheet
+   disappeared into the ground it came off and the lunar burn showed only the flame. There is no shadow
+   and no atmosphere out there to separate them with, so the tone has to do the work on its own. */
+const BAND_A = [0.0, 0.16, 0.36, 0.62, 0.45, 0.8];    // composited coverage
 const BAND_G = [1.0, 0.6, 0.4, 0.10, 0.05, 0.03];     // additive glow
 
 /* One slot = one parcel; `alive` is the live index list, freeSlots[] the recycle stack. */
@@ -618,6 +622,12 @@ function stepParcel(i, h) {
       px = _mo.x + nx * gr; py = _mo.y + ny * gr; pz = _mo.z + nz * gr;
       if (_hit) {
         vx = _bx; vy = _by; vz = _bz;
+        /* Regolith ejecta is pulverised cold rock, not flame, so heat drops below ember on first
+           contact. Nothing else cools it here: the vacuum branch has no drag and its cooling term is
+           barely half Earth's, so a deflected parcel used to run outward still incandescent for a
+           second and a half and the surface event read as a shower of glowing sparks rather than the
+           low grey sheet Apollo filmed. The band floor below turns it to dust from 20 ms. */
+        if (!pSmoke[i]) pHeat[i] = Math.min(pHeat[i], 0.3);
         pSmoke[i] = 1;                                              // deflected; age gate decides sheet vs dust
         pR[i] = Math.min(R_CAP, pR[i] * 1.25 + 0.2);
       }
@@ -728,7 +738,12 @@ function stepParcel(i, h) {
   /* Bookkeeping: cooling, smoke growth, life. In vacuum nothing entrains and nothing cools fast,
      so the same numbers keep lunar parcels hot, small and flying several times longer. */
   if (pMode[i] === 1) {
-    pHeat[i] -= h * (moon ? 0.55 : 1.25) * (pSmoke[i] ? 2.2 : 1);
+    /* Radiation is the only cooling available in vacuum, but a vacuum plume that holds its fire for
+       0.75 s at 2 km/s draws a kilometre of glowing beads behind the vehicle, and that light show is
+       what the lunar surface event read as. Real exhaust in vacuum is faint — the visible event is
+       the dust it lifts — so lunar parcels radiate away their incandescence faster than Earth parcels
+       lose it to air. */
+    pHeat[i] -= h * (moon ? 1.7 : 1.25) * (pSmoke[i] ? 2.2 : 1);
     /* Entrainment: ground-marked smoke swells fast — a Saturn's blast cloud doubles and redoubles
        in its first second, and a sprite that stays 2 m never dwarfs the crawler. Vacuum smoke
        (lunar dust) grows far less: there is no air to roll in. */
