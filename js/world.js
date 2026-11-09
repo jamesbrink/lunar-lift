@@ -336,7 +336,7 @@ function setShadowBox(extent) {
   sc.updateProjectionMatrix();
 }
 
-/* the shadow box tracks the vehicle: tight enough that pad structures resolve at 2048² (~6 m/texel
+/* the shadow box tracks the vehicle: tight enough that pad structures resolve at 4096² (~3 m/texel
    grounded), growing only as fast as the far detail actually needs it, and never past ±48 km —
    cloud weather does NOT come through this box (js/clouds.js supplies it), so it no longer has to be huge
    to hold cloud silhouettes, and hardware shadows no longer have to be coarse to fit weather in. */

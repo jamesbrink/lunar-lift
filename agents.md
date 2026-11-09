@@ -140,8 +140,27 @@ state differs from the ship's real trajectory by ~100 km, which would make the r
   at 32 km — ground beyond that is a grazing sliver — and samples a box-filtered, mip-free copy of the
   field, because shrinking the radius is what keeps it honest where changing scale would not. Both
   planet-scale decks keep `castShadow = false` — at 2 and 9 km a
-  low sun drags their silhouettes hundreds of kilometres, and the ±136 km tower-resolution shadow box
+  low sun drags their silhouettes hundreds of kilometres, and the ±48 km vehicle-tracking shadow box
   cuts them into slabs that read as architecture. See `docs/reference/painted-planets.md`.
+- **A texel-sized caster cannot be filtered by the die.** `BasicShadowMap` compares one depth sample,
+  so a 2 m lightning tower inside a ±6 km box at 2048² (5.9 m/texel) rendered its shadow as a black
+  staircase. `js/main.js` now uses `PCFShadowMap` with a 4096² map: p90 17.1 ms against 17.9 for
+  `PCFSoftShadowMap` over 90 rAF deltas at the pad, and the softer kernel sanded off the edge the drawn
+  look wants. Filtering the depth map cannot hurt the cloud shade, because that shade is not a shadow-map
+  caster (js/clouds.js projects its own alpha) — the old comment claiming Basic "gives the cloud shadows
+  the soft filter blurs away" was never true, which is worth knowing before anyone reverts this to protect
+  them. `logarithmicDepthBuffer` is unrelated: the compare uses `vShadowCoord` from the light's projection.
+- **A factor written on one component of three is a bug wearing a tuning knob.** `groundHit` bled the
+  tangential velocity of deflectate with `keep = 0.12` on `rx` while `ry`/`rz` kept `(1 + out·k)`, so two
+  thirds of the deflected flow left the trench at near exhaust speed and every attempt to tune the blast
+  cloud's spread "did nothing". When a parameter appears to have no effect, read the arithmetic that
+  consumes it before changing its value.
+- **A frame's particles did not all leave at the same instant.** Charging `emitAcc` and spawning the whole
+  budget at the current vehicle position put a fresh clump every 16 ms while the vehicle moved 1.9 m on,
+  and the ascent trail came out as a ringed fir tree spaced by the frame rate. `spawnPlume` now
+  back-projects parcel *c* along the velocity by the slice of `simDt` it represents and starts its age,
+  remaining life and heat there.
+
 - **Camera collision is applied twice per frame** — to `desired` and again to the interpolated
   `camPos`. A lerp between two points outside a sphere is a chord, and chords are inside, so before
   this the camera cut 6 019 km through the Earth whenever `reset()`, `teleport()` or `ff()` moved the

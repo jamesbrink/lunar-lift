@@ -17,14 +17,19 @@ renderer.setSize(innerWidth, innerHeight);
    ocean charcoal; cel shading wants the palette exactly as authored.
 
    Shadows are PCF-filtered, not Basic. BasicShadowMap compared one texel, and the box tracking the
-   vehicle is ±6 km at the pad at 2048² — 5.9 m per texel — so the launch tower's 2 m shadow arrived as
+   vehicle is ±6 km at the pad — 5.9 m per texel at 2048² — so the launch tower's 2 m shadow arrived as
    a black staircase marching across the pad, worst at a low sun where it runs for kilometres. The
    thing the old comment was protecting is the *cloud* shade, which is not a shadow-map caster at all
    (js/clouds.js projects its own alpha), so filtering the map cannot blur it away. What the cel look
-   needs from the map is the terminator on the planet, and that comes from the ramp, not from the die. */
+   needs from the map is the terminator on the planet, and that comes from the ramp, not from the die.
+
+   PCFShadowMap, not PCFSoftShadowMap: measured over 90 rAF deltas at the pad, the soft variant cost
+   p90 17.9 ms against 17.1 here, and its wider kernel took the edge off the tower shadows that the
+   drawn look wants to keep. logarithmicDepthBuffer is not an obstacle either way — the shadow compare
+   uses vShadowCoord from the light's own projection, which the camera's depth encoding never touches. */
 renderer.toneMapping = THREE.NoToneMapping;
 renderer.shadowMap.enabled = true;
-renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+renderer.shadowMap.type = THREE.PCFShadowMap;
 const scene = new THREE.Scene();
 scene.background = new THREE.Color(0x04060b);
 scene.fog = new THREE.FogExp2(0x04060b, 0);
