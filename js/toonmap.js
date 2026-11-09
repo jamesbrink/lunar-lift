@@ -379,10 +379,35 @@ async function paintMoonJob(path) {
      5139 runs → 1 976, corners per 100 boundary texels 56.7 → 48.7. The maria in the painting are
      then one flat tone inside one round outline, which is what a cartoon mare looks like. */
   const wide = blur.slice();
-  boxSignal(wide, w, h, 3);
+  boxSignal(wide, w, h, 7);
   const mareCut = quantile(wide, shareBelow(blur, 0.36));
+  const rawMare = new Uint8Array(w * h);
+  for (let i = 0; i < w * h; i++) rawMare[i] = wide[i] < mareCut ? 1 : 0;
+  /* Field smoothing fixes WHERE the boundary sits; this fixes what it looks like. The cut still
+     wears the 34 km staircase of the canvas lattice — measured on the painted sheet, 38.9 corner
+     texels per 100 boundary texels, and from 9 km that staircase IS the polygon: flat maria with
+     seven straight edges and hard lozenge corners (round-5 review frame, the mare at right). A
+     binary open (erode, erode, dilate, dilate on the 4-neighbourhood) shaves convex corners and
+     one-texel spikes; the following close fills concave notches. Both are area-preserving to
+     first order — the painted mare share measured 3.65 % before and after on the shipped canvas
+     — and 34 km is under a tenth of the smallest mare anyone views whole, so shapes survive.
+     Edges clamp to self so polar maria are not shaved at the map border. */
   const mare = new Uint8Array(w * h);
-  for (let i = 0; i < w * h; i++) mare[i] = wide[i] < mareCut ? 1 : 0;
+  {
+    const near = (a, x, y) => a[Math.max(0, Math.min(h - 1, y)) * w + Math.max(0, Math.min(w - 1, x))];
+    const step = (a, keep) => {
+      const o = new Uint8Array(w * h);
+      for (let y = 0; y < h; y++) for (let x = 0; x < w; x++)
+        o[y * w + x] = keep(near(a, x - 1, y), near(a, x + 1, y), near(a, x, y - 1), near(a, x, y + 1), a[y * w + x]);
+      return o;
+    };
+    const ero = (a) => step(a, (l, r, u, d, v) => v && l && r && u && d ? 1 : 0);
+    const dil = (a) => step(a, (l, r, u, d, v) => v || l || r || u || d ? 1 : 0);
+    let s = rawMare;
+    s = dil(dil(ero(ero(s))));                              // open
+    s = ero(ero(dil(dil(s))));                              // close
+    mare.set(s);
+  }
   const out = new Uint8ClampedArray(w * h * 4);
   for (let i = 0; i < w * h; i++) {
     const v = blur[i];
@@ -888,6 +913,18 @@ function moonSmallCraters() {
   return _smallCraters;
 }
 
+/* Bilinear value noise on a world-km lattice, hash2 at the corners: C0, deterministic, and fixed
+   to the Moon (uv-derived), so a patch rebuild re-samples the same field and the pitting never
+   swims as the vehicle moves. */
+function pitNoise(x, y, s) {
+  const xi = Math.floor(x), yi = Math.floor(y), fx = x - xi, fy = y - yi;
+  const ux = fx * fx * (3 - 2 * fx), uy = fy * fy * (3 - 2 * fy);
+  const a = hash2(xi, yi, s), b = hash2(xi + 1, yi, s);
+  const c = hash2(xi, yi + 1, s), e = hash2(xi + 1, yi + 1, s);
+  const lo = a + (b - a) * ux, hi = c + (e - c) * ux;
+  return lo + (hi - lo) * uy;
+}
+
 /* globe uv → { h: rim km (≥ 0), tone: albedo multiplier }. baseLum is the painted canvas here
    (0..1); the dark maria catch the young craters' ray fans brighter, as they do on the map pass.
    sun is the sun direction as a unit vector in the caller's mesh-local frame (the frame the uv is
@@ -903,7 +940,7 @@ function moonSmallCraters() {
    near field rendered 0.004 linear — 0.58 to the fifth). The deepest floor and the brightest rim at
    a point win; rim HEIGHTS take the max too, so two rims that touch never stack into a spike the
    lander could perch on. Both profiles stay C0 — a stepped floor would print a ring in vertex colour. */
-export function moonPatchDetail(u, v, baseLum, sun) {
+export function moonPatchDetail(u, v, baseLum, sun, pitAmp = 1) {
   const L = moonSmallCraters();
   const lon = (u - 0.5) * Math.PI * 2, lat = (v - 0.5) * Math.PI;
   const list = L.buckets.get(Math.floor((lon + Math.PI) / L.B) * 977 + Math.floor((lat + Math.PI / 2) / L.B));
@@ -972,8 +1009,9 @@ export function moonPatchDetail(u, v, baseLum, sun) {
       }
     }
   }
-  const tone = 1 - 0.42 * dark + lit + ray;
-  return { h, tone };
+  const pit = 0.86 + 0.28 * (0.6 * pitNoise(lon * RM * 4, lat * RM * 4, 913)      // 250 m pitted regolith
+                            + 0.4 * pitNoise(lon * RM * 1.43, lat * RM * 1.43, 57)); // 700 m mare churn
+  return { h, tone: (1 - 0.42 * dark + lit + ray) * (1 + (pit - 1) * pitAmp) };
 }
 
 function stampCraters(km, hi, w, h) {

@@ -207,7 +207,20 @@ function rebuildMoon(p) {
       const g = p.rel ? sampleGrid(p.rel, u, v) : 0;
       pxColor(p.px, u, v, _c1);
       const lum = 0.2126 * _c1.r + 0.7152 * _c1.g + 0.0722 * _c1.b;
-      const d = moonPatchDetail(u, v, lum, sun);
+      /* Pit attenuation by local mesh spacing. The nano-pit lattice (250 m, js/toonmap.js) is
+         sampled by a mesh whose step grows from 25 m under the vehicle to 3 km at the 220 km rim
+         (2·HALF/SEG·warp′ = 0.0256 + 13.6·t⁴ km): a sub-lattice vertex samples white noise, and
+         the radial warp draws that noise as radial streaks — measured in the first skim capture,
+         the starburst across the whole far field. Full amplitude while the step is below ~140 m
+         (t ≤ 0.30, where 250 m pitting resolves), zero by ~880 m (t ≥ 0.50), smoothstep between;
+         the 700 m octave follows it down rather than keep its own gate, because at 880 m vertices
+         both octaves alias along the same radial lines. The mid-tier craters are NOT faded —
+         3 km bowls outlive any of this. (2026-11-09, skim frame at 2.6 km: before the ramp the
+         far field read as a spoke starburst; the near 8 km kept its pockmarked regolith.) */
+      const wt = Math.max(Math.abs(ix / SEG * 2 - 1), Math.abs(1 - iy / SEG * 2));
+      const pa = wt <= 0.30 ? 1 : wt >= 0.50 ? 0
+        : (1 - ((wt - 0.30) / 0.20) ** 2 * (3 - 2 * (wt - 0.30) / 0.20));
+      const d = moonPatchDetail(u, v, lum, sun, pa);
       const h = g + d.h + 0.004;                 // a hair above the far mesh; polygonOffset wins ties
       pos[k] = vx * (RM + h); pos[k + 1] = vy * (RM + h); pos[k + 2] = vz * (RM + h);
       /* Deviation gain (measured 2026-11-09, round 5): the old 1 + 1.6·(tone−1) ran against a base

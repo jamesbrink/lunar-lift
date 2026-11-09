@@ -430,6 +430,17 @@ const plumeMat = new THREE.ShaderMaterial({
       vA = alpha;
       vAdd = add;
       vec4 mv = modelViewMatrix * vec4(position, 1.0);
+      /* Parcels fade out inside 35 m of the lens, BOTH blend halves. A composited smoke disc 2 m
+         off-camera is a circle a sixth of the frame; an additive one a tenth. The 9 m moon chase
+         capture ran ~40 such discs across the vehicle they were meant to be evidence for
+         (parcelAudit at h=11 m: 188 live deflected parcels, and the deflected sheet passes right
+         through the camera position) — the reviewer's "bokeh", at a smaller radius. The sheet
+         itself still reads, because the radial ground flow extends well past 35 m; the pad's
+         camera sits ~30 m back, outside the fade, where the plume is meant to be one body.
+         Depth is view-space km like every position here. */
+      float nearFade = smoothstep(0.003, 0.035, -mv.z);
+      vA *= nearFade;
+      vAdd *= nearFade;
       /* Two caps. Smoke is allowed 220 px: it is the cloud body and it has to merge. Glow-dominant
          parcels get 80 px — a metre from the lens a fully additive puff otherwise blooms into a fat
          lantern a tenth of the screen, and the trench read as a dozen separate lamps instead of one
@@ -438,7 +449,7 @@ const plumeMat = new THREE.ShaderMaterial({
       gl_PointSize = clamp(size * (uScale / max(-mv.z, 1e-6)), 1.0, cap);
       gl_Position = projectionMatrix * mv;
       #include <logdepthbuf_vertex>
-    }`,
+    `,
   fragmentShader: /* glsl */`
     #include <common>
     #include <logdepthbuf_pars_fragment>
@@ -720,9 +731,10 @@ function spawnPlume(set, pos, quat, vel, throttle, simDt) {
      near-black of earlier cuts read to the reviewer as "dark smoke spheres … combustion smoke,
      wrong on an airless body". An airless scorch is displaced dust, not soot.
    · Spray fan: N ground-launched parcels (SM_SPRAY) on explicit ballistic arcs — elevation
-     10°…68° off the surface, ±30° azimuth about the exhaust axis as the ground reflected it
-     (that IS the deflected flow t: groundHit turns the jet tangentially), launch speed scaled
-     to the engine's footprint, birth scatter inside the footprint itself. See the block inside.
+     2°…30° cubic-dense flat (a low radial sheet, apex median ~1 m), ±30° azimuth about the
+     exhaust axis as the ground reflected it (that IS the deflected flow t: groundHit turns the
+     jet tangentially), launch speed scaled to the engine's footprint, birth scatter inside the
+     footprint itself. See the block inside.
    Both ride spawnParticle (mode 2: fixed colour, no heat machinery, generic colliders). The
    clock is frozen across a frame's substeps, so the throttle is per rendered frame regardless
    of h or warp; a reset()/teleport clock rewind re-arms the timers (t < last ⇒ rewound). */
@@ -762,9 +774,10 @@ function ejectaEvents(gx, gy, gz, nx, ny, nz, rx, ry, rz) {
     for (let c = 0; c < nF; c++) {
       /* Launch state sampled from a cone about the exhaust axis as the ground reflected it —
          that reflection IS t, the deflected flow (groundHit turns the jet tangentially and
-         keeps 0.45 of it here) — ±30° in azimuth, elevation β 10°…68° (denser low, β ∝ u²).
-         Every parcel therefore leaves on a ballistic arc (apex v²sin²β/2g): the old launch had
-         vn ≤ 1.5 m/s — an apex under 0.7 m, no arc to see, just a disc crawling sideways. */
+         keeps 0.45 of it here) — ±30° in azimuth. Every parcel therefore leaves on a ballistic
+         arc (apex v²sin²β/2g): the old launch had vn ≤ 1.5 m/s — an apex under 0.7 m, no arc to
+         see, just a disc crawling sideways; the 10-68° law that replaced it put the field in the
+         air (see the beta note below). */
       const phi = (Math.random() - 0.5) * (Math.PI / 3);
       const cp = Math.cos(phi), spn = Math.sin(phi);
       const tpx = tx * cp + hx * spn, tpy = ty * cp + hy * spn, tpz = tz * cp + hz * spn;
@@ -775,7 +788,15 @@ function ejectaEvents(gx, gy, gz, nx, ny, nz, rx, ry, rz) {
          more than vmax ≤ 0.59 km/s inside any plausible burn height (128 km/sqrt… beyond the
          game's own ceiling), and min() keeps the cap explicit for whoever scales vmax next. */
       const vv = Math.min(1.5, vmax * (0.14 + 0.86 * u * u * u));   // steep cubic: median 0.25·vmax
-      const beta = (10 + 58 * Math.random() * Math.random()) * Math.PI / 180;
+      /* Elevation 2°…30°, cubic-dense at the flat end (median 5.5°, p90 21°). The previous law
+         (10° + 58°·r²) drew a MEDIAN of 24.5° — with the cubic speed law that put the common
+         parcel on an apex of tens of metres and the fast ones (v·sinβ = 27 m/s at 68°) on
+         1.4 km arcs: the 6 m capture frame showed the field as cream bokeh drifting at CAMERA
+         height around the vehicle, the same defect review 4 called horizon scatter, just
+         gathered closer. Apollo's dust was a low radial sheet hugging the ground — apex is
+         v²sin²β/2g_moon with g = 1.62, and 30° cubic caps the median apex at ~1 m with the
+         top parcel (65 m/s @ 29°) at ~350 m, 1.7 km out, where it reads as distance, not fog. */
+      const beta = (2 + 28 * Math.pow(Math.random(), 3)) * Math.PI / 180;
       const cb = Math.cos(beta), sb = Math.sin(beta);
       /* birth scatter inside the footprint, denser toward the axis (r ∝ √u over the disc):
          near-engine density comes from where parcels are BORN now, not from a uniform point
@@ -860,7 +881,16 @@ function stepParcel(i, h) {
            longer balloon itself to the 16 m ceiling by re-contacting every step. ejectaEvents
            fires only on these real plume-deflection hits, never on settling. */
         pSmoke[i] = 1;                                    // deflected; age gate decides sheet vs dust
-        pR[i] = Math.min(R_CAP, pR[i] * 1.25 + 0.2);
+        /* The 16 m entrainment ceiling is an AIR rule — a smoke puff grows by dragging air with
+           it, and there is no air here. Vacuum ejecta churns at fragment scale: capping the
+           contact swell at 7 m is what the physics says, and it is also what the 9 m capture
+           frame demanded: with the old ×1.25+0.2 walking to R_CAP, 450 live deflected parcels
+           (parcelAudit) drifted between the descending vehicle and the chase camera as
+           camera-facing 16 m discs — the lens-bokeh field review 4 punished, back in a paler
+           palette. At 7 m and the shorter vacuum life below the near-camera coverage per parcel
+           falls by ~4.5x and the sheet reads as ground-hugging dust again. */
+        pR[i] = Math.min(7, pR[i] * 1.25 + 0.2);
+        pLife[i] = Math.min(pLife[i], 1.3);
         ejectaEvents(px, py, pz, nx, ny, nz, _bx - _mv.x, _by - _mv.y, _bz - _mv.z);
         }
       }
