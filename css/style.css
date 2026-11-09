@@ -58,11 +58,13 @@
      opacity .38 multiplied the 11px --muted (#9aa4b5) down to an effective
      rgb(0.38·154+0.62·8, 0.38·164+0.62·11, 0.38·181+0.62·18) ≈ rgb(64,69,80) over the ~rgb(8,11,18)
      panel — 2.1:1 contrast, the reviewer's "near-invisible dark-on-dark"
-     for depleted stages (15-ejecta). Strike-through plus the dead pip still read as spent,
-     and the name keeps a deliberate rgba white .55 that survives the dark panel. */
+     for depleted stages (15-ejecta). Strike-through plus the dead pip still read as spent.
+     Round 3 still called .55 marginal: composited over rgb(8,11,18) it is rgb(131,135,142) =
+     5.45:1 (AA, but thin at 11px). .72 composites to rgb(169,173,181) = 8.75:1 — WCAG AAA,
+     and the row is unmistakably legible while the strike + dead pip carry the "spent" meaning. */
   .stageRow.gone{text-decoration:line-through}
   .stageRow.gone .pip,.stageRow.gone .bar{opacity:.5}
-  .stageRow.gone .name{color:rgba(232,236,244,.55)}
+  .stageRow.gone .name{color:rgba(232,236,244,.72)}
   .stageRow .bar{height:8px;border-radius:4px;background:#222b3a;overflow:hidden}
   .stageRow .bar i{display:block;height:100%;background:linear-gradient(90deg,#7ee0a0,#57c07f);transition:width .15s}
   .stageRow .bar i.low{background:linear-gradient(90deg,#ffb45c,#ff7a5c)}

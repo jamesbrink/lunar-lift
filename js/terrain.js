@@ -210,7 +210,12 @@ function rebuildMoon(p) {
       const d = moonPatchDetail(u, v, lum, sun);
       const h = g + d.h + 0.004;                 // a hair above the far mesh; polygonOffset wins ties
       pos[k] = vx * (RM + h); pos[k + 1] = vy * (RM + h); pos[k + 2] = vz * (RM + h);
-      const tone = Math.min(1.6, d.tone);
+      /* Deviation gain (measured 2026-11-09): tone spans 0.61–1.29 but the bright painted base
+         (~0.62–0.75) and the min(1,·) clamp left the near bake at render std ~0.05 against the
+         painted map's punch — the 2 km view read as smooth mottle, not bowls. 1 + 1.6·(tone−1)
+         keeps the mean (tone mean measures 0.996, so no overall brightening) and doubles crater
+         contrast on the patch; the 0.35 floor stops holes going black. */
+      const tone = Math.max(0.35, Math.min(1.6, 1 + 1.6 * (d.tone - 1)));
       col[k] = Number.isFinite(_c1.r) ? s2l(Math.min(1, _c1.r * tone)) : 0.3;
       col[k + 1] = Number.isFinite(_c1.g) ? s2l(Math.min(1, _c1.g * tone)) : 0.3;
       col[k + 2] = Number.isFinite(_c1.b) ? s2l(Math.min(1, _c1.b * tone)) : 0.3;

@@ -22,8 +22,10 @@ import { RE } from './constants.js';
    casts it, and the offset grows as the sun drops — the penumbra rule from the art direction,
    at near scale, for free.
 
-   Nothing here is alpha-tested: the tile carries a soft rim, the vertex colour carries the radial
-   fade, and both blend. Mipmapped, so a grazing plate does not shimmer. */
+   The deck is not alpha-tested: the tile carries a soft rim, the vertex colour carries the radial
+   fade, and both blend; it is mipmapped, so a grazing plate does not shimmer. The ground SHADE is
+   alpha-quantised in the fragment to two hard cel steps (shadow / no shadow) — see makeCloudLayer:
+   its tile deliberately has no mip chain, which is what makes a hard step safe there. */
 
 const SEG = 44;                       // deck cap: 45×45 vertices over 440 km, 10 km per cell
 const SEG_SHADE = 28;                 // shade cap: 29×29 over 140 km, 5 km per cell
@@ -159,6 +161,20 @@ export function makeCloudLayer(body, groundKm) {
     side: THREE.DoubleSide, vertexColors: true, fog: false,
     polygonOffset: true, polygonOffsetFactor: -4, polygonOffsetUnits: -4,
   });
+  /* Two cel steps on the ground shade: shadow or no shadow, hard-edged. The tile's bilinear
+     shoulder is exactly the photographic penumbra-smear the cel direction rejects — a puff's
+     shadow wants the puff's silhouette. Safe where a hard step usually isn't: this texture has
+     NO mip chain (see shadeTile — that absence is what keeps per-triangle mip selection, and
+     with it the wedge failure, unreachable), and the step is AA'd by its own derivative width,
+     so the boundary is a line, never a block staircase. The radial vertex fade (× SHADE_ALPHA)
+     still rides in diffuseColor.a, so the cap dissolves smoothly at its rim regardless. */
+  shadeMat.onBeforeCompile = (sh) => {
+    sh.fragmentShader = sh.fragmentShader.replace('#include <map_fragment>',
+      '#include <map_fragment>\n' +
+      '  float sm = texture2D( map, vMapUv ).a;\n' +
+      '  float sf = max(fwidth( sm ), 1.0 / 255.0);\n' +
+      '  diffuseColor.a *= smoothstep(0.5 - sf, 0.5 + sf, sm);');
+  };
   const cloud = makePlate(cloudMat, 4, SEG);            // after the decks and the terrain
   const shadow = makePlate(shadeMat, 2, SEG_SHADE);     // over the ground, under the clouds
   body.add(cloud);

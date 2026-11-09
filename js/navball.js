@@ -62,7 +62,11 @@ function compass(c, cx, cy, R, dir, label) {
   c.save();
   c.globalAlpha = b.z > 0 ? 0.85 : 0.3;
   c.fillStyle = '#c9cbd2'; c.font = '10px ui-monospace,monospace';
-  c.fillText(label, cx + Math.cos(a) * R * 0.86 - 4, cy + Math.sin(a) * R * 0.86 + 4);
+  /* Ticks ride 0.78R, not the old 0.86R: at 0.86R the lowest tick box reached y ≈ 139 and sat
+     directly in the ball's bottom label band (the round-3 'N' + status-string mush). The band
+     0.78R·71 px keeps every tick glyph inside y ∈ [15.6, 134.4], clear of the fixed top legend
+     (box ends y 12) and the bottom status slot (starts y 137) in every attitude. */
+  c.fillText(label, cx + Math.cos(a) * R * 0.78 - 4, cy + Math.sin(a) * R * 0.78 + 4);
   c.restore();
 }
 
@@ -163,14 +167,14 @@ export function drawNavball() {
   compass(c, cx, cy, R, east, 'E');
   compass(c, cx, cy, R, north.clone().negate(), 'S');
 
+  let offDeg = 0;                                    // consumed by the bottom status slot below
   if (vel.lengthSq() > 1e-8) {
     const pp = marker(c, cx, cy, vel, R, '#5ddc9a', 6);
     marker(c, cx, cy, vel.clone().negate(), R, '#ffb45c', 5);
     if (pp) {
-      const off = Math.acos(Math.min(1, Math.max(-1, toBody(vel.clone().normalize()).z))) * 57.2958;
+      offDeg = Math.acos(Math.min(1, Math.max(-1, toBody(vel.clone().normalize()).z))) * 57.2958;
       c.strokeStyle = 'rgba(93,220,154,.4)'; c.lineWidth = 1; c.setLineDash([2, 3]);
       c.beginPath(); c.moveTo(cx, cy); c.lineTo(cx + pp.x, cy + pp.y); c.stroke(); c.setLineDash([]);
-      if (off > 4) { c.fillStyle = '#5ddc9a'; c.font = '10px ui-monospace,monospace'; c.fillText(`${off.toFixed(0)}° off prograde`, 4, NB - 4); }
     }
   }
 
@@ -199,9 +203,27 @@ export function drawNavball() {
   c.stroke();
   if (isBurning()) { c.fillStyle = 'rgba(255,122,60,.95)'; c.beginPath(); c.arc(cx, cy, 2.6, 0, 6.283); c.fill(); }
 
+  /* Top legend — 'prograde' names the green ring. Its box (x 57..100, y 0..12 incl. the 'g'
+     descender) is clear of the 0.78R tick band, whose topmost glyph box starts at y ≈ 15.6. */
   c.fillStyle = 'rgba(150,165,190,.45)'; c.font = '9px ui-monospace,monospace';
   c.fillText('prograde', cx - 18, 10);
-  c.fillText('nose = centre', cx - 26, NB - 4);
+
+  /* Status slot — the strip y ∈ [137, 149] is the one and only place a string lives at the
+     bottom of the ball area, backed by an opaque panel. Round 3 piled THREE strings onto the
+     old shared baseline y = NB−4: 'x° off prograde' at x = 4, 'nose = centre' at x = 49, and
+     any tick that swung near nadir — mush in every frame. With ticks at 0.78R (lowest glyph box
+     y ≈ 134.4) nothing on the dial enters this strip; the opaque panel also covers rim-pinned
+     marker labels ('EARTH', 8 px) that pass behind it, keeping the slot exclusive. Widths at
+     9px mono ≈ 5.4 px/char (established in this file): '58° off prograde' (16 chars) = 86 px,
+     'nose = centre' (12) = 65 px — the panel spans at most x ∈ [23, 127], inside the canvas.
+     The orbit status strings (escape/impact) live in the sub-map's own tagged slot — the ball
+     slot carries the ball's state only, so the two can never collide. */
+  const statusTxt = offDeg > 4 ? `${offDeg.toFixed(0)}° off prograde` : 'nose = centre';
+  const statusW = statusTxt.length * 5.4;
+  c.fillStyle = 'rgba(8,11,18,.92)';
+  c.fillRect(cx - statusW / 2 - 5, 137, statusW + 10, 12);
+  c.fillStyle = offDeg > 4 ? '#5ddc9a' : 'rgba(150,165,190,.7)';
+  c.fillText(statusTxt, cx - statusW / 2, 146);
 
   return { el, up, north, east, nearMoon, vel, centre, ecc };
 }
@@ -226,8 +248,15 @@ function drawOrbit(nearMoon, centre, vel, el, ecc) {
      straight-sided blocks (the 'unmasked rectangular crop' of the 05/09/12/13/15 review frames —
      no circular clip can mask an edge that lives on the canvas boundary). Fitted, the clip
      circle is the plot's outer boundary; apoapsis stays inside too for LEO/MLO
-     ((6671/6371)·36.1 = 37.8 px; the higher-apo tips clip as before, and always did). */
-  const scale = (Math.min(ORB_W, ORB_H * 1.9) / 2 - 10) / Math.max(reach, bodyR * 1.8);
+     ((6671/6371)·36.1 = 37.8 px; the higher-apo tips clip as before, and always did).
+     Finiteness guard: a NaN anywhere in the denominator would poison scale/bodyRpx, and Chrome
+     THROWS on non-finite drawImage args — which, wrapped by main.js's frame catch, used to erase
+     the whole panel down to its CSS background. A non-finite reach is not constructible from
+     orbitalElements (escape returns Infinity, which `isFinite` already reroutes), but the plot
+     now treats that as mathematically impossible rather than trusting it. */
+  let denom = Math.max(reach, bodyR * 1.8);
+  if (!Number.isFinite(denom)) denom = bodyR * 1.8;
+  const scale = (Math.min(ORB_W, ORB_H * 1.9) / 2 - 10) / denom;
   const ox = ORB_W / 2, oy = ORB_H / 2;
   const px = p => [ox + p.x * scale, oy - p.y * scale];
 
@@ -237,49 +266,66 @@ function drawOrbit(nearMoon, centre, vel, el, ecc) {
      the plot read as decoration; a chart you can pick Florida out of is navigation.
      The crop is linear in lon/lat, not true orthographic — at 150 px the difference is under a
      coastline's width, and every pixel here has to survive a 2× dpr canvas first. */
-  const bodyRpx = Math.max(2, bodyR * scale);
+  let bodyRpx = Math.max(2, bodyR * scale);
+  if (!Number.isFinite(bodyRpx)) bodyRpx = 2;
   const pcv = WORLD.planetCanvas(nearMoon ? 'moon' : 'earth');
   /* The blit gets its own save → clip → restore, and the clip radius is inset 0.75 px below the
      limb ring stroked after the restore: ring lineWidth is 1, so its stroke covers bodyRpx ± 0.5
      and the mask edge hides underneath it. A rectangular edge can then only reach the ring's
      outer antialiased pixels, which the ring itself paints over — the crop is masked regardless
-     of which draw escaped the old same-radius clip. */
+     of which draw escaped the old same-radius clip.
+     NaN/exception hardening (round-3 'empty black sub-map', both Earth and Moon sessions): the
+     spin comes off the live scene graph, and world.js latches a NaN into earth/moon rotation.y
+     permanently if syncTime/spinBodies ever sees a non-finite time — from there lon → cu → NaN
+     and drawImage THROWS (as does any non-finite arg, or a zero-pixel source canvas), which
+     main.js's frame catch swallows once and leaves the cleared canvas showing its CSS
+     background forever. So: non-finite spin reads as spin 0; a non-finite crop window skips
+     the blit; and anything that still throws falls back to the flat disc INSIDE the clip. The
+     disc, trajectory, dots and labels after this block are unconditionally drawn. */
   c.save();
   c.beginPath(); c.arc(ox, oy, Math.max(0.5, bodyRpx - 0.75), 0, 6.283); c.clip();
-  if (pcv && pcv.width > 1) {
-    const spin = WORLD.bodySpin(nearMoon ? 'moon' : 'earth');
-    const cs = Math.cos(spin), sn = Math.sin(spin);
-    const lx = cs * rel.x - sn * rel.z, lz = sn * rel.x + cs * rel.z;   // rotY(−spin), world→body
-    const lat = Math.asin(THREE.MathUtils.clamp(rel.y / rel.length(), -1, 1));
-    const lon = Math.atan2(-lz, lx);
-    const cu = ((lon / (2 * Math.PI)) + 0.5) * pcv.width;
-    const cvr = (0.5 - lat / Math.PI) * pcv.height;
-    /* The disc edge is 90° of ground from the centre in both axes: ±90° lon = quarter of the map
-       width, ±90° lat = half the height. (Ground km was the wrong currency here: the horizon of
-       an orthographic disc is πR/2 km away, not R.) */
-    const sxw = pcv.width / 4;
-    const syw = pcv.height / 2;
-    const drawWin = (sx, dx, w) => c.drawImage(pcv, sx, cvr - syw, w, syw * 2, dx, oy - bodyRpx, w * (bodyRpx / sxw), bodyRpx * 2);
-    const srcLeft = cu - sxw, srcRight = cu + sxw;
-    if (srcLeft >= 0 && srcRight <= pcv.width) {
-      drawWin(srcLeft, ox - bodyRpx, sxw * 2);
-    } else if (srcLeft < 0) {                       // window wraps the dateline: two true-offset draws
-      drawWin(srcLeft + pcv.width, ox - bodyRpx, -srcLeft);
-      drawWin(0, ox - bodyRpx - srcLeft, srcRight);
-    } else {
-      const w1 = pcv.width - srcLeft;
-      drawWin(srcLeft, ox - bodyRpx, w1);
-      drawWin(0, ox - bodyRpx + w1, srcRight - pcv.width);
-    }
-    /* night side: the anti-sun half in the plot's own basis */
-    const su = A.dot(WORLD.SUN_DIR), sv = B.dot(WORLD.SUN_DIR);
-    const sl = Math.hypot(su, sv) || 1;
-    const gx = ox + (su / sl) * bodyRpx, gy = oy - (sv / sl) * bodyRpx;
-    const g = c.createLinearGradient(gx, gy, ox - (su / sl) * bodyRpx, oy - (sv / sl) * bodyRpx);
-    g.addColorStop(0, 'rgba(4,8,16,0)'); g.addColorStop(0.52, 'rgba(4,8,16,0)');
-    g.addColorStop(0.62, 'rgba(4,8,16,.62)'); g.addColorStop(1, 'rgba(4,8,16,.86)');
-    c.fillStyle = g; c.fillRect(ox - bodyRpx, oy - bodyRpx, bodyRpx * 2, bodyRpx * 2);
-  } else {
+  let discPainted = false;
+  if (pcv && pcv.width > 1 && pcv.height > 1) {
+    try {
+      const raw = WORLD.bodySpin(nearMoon ? 'moon' : 'earth');
+      const spin = Number.isFinite(raw) ? raw : 0;
+      const cs = Math.cos(spin), sn = Math.sin(spin);
+      const lx = cs * rel.x - sn * rel.z, lz = sn * rel.x + cs * rel.z;   // rotY(−spin), world→body
+      const lat = Math.asin(THREE.MathUtils.clamp(rel.y / rel.length(), -1, 1));
+      const lon = Math.atan2(-lz, lx);
+      const cu = ((lon / (2 * Math.PI)) + 0.5) * pcv.width;
+      const cvr = (0.5 - lat / Math.PI) * pcv.height;
+      /* The disc edge is 90° of ground from the centre in both axes: ±90° lon = quarter of the map
+         width, ±90° lat = half the height. (Ground km was the wrong currency here: the horizon of
+         an orthographic disc is πR/2 km away, not R.) */
+      const sxw = pcv.width / 4;
+      const syw = pcv.height / 2;
+      const drawWin = (sx, dx, w) => c.drawImage(pcv, sx, cvr - syw, w, syw * 2, dx, oy - bodyRpx, w * (bodyRpx / sxw), bodyRpx * 2);
+      const srcLeft = cu - sxw, srcRight = cu + sxw;
+      if (Number.isFinite(cu) && Number.isFinite(cvr)) {
+        if (srcLeft >= 0 && srcRight <= pcv.width) {
+          drawWin(srcLeft, ox - bodyRpx, sxw * 2);
+        } else if (srcLeft < 0) {                       // window wraps the dateline: two true-offset draws
+          drawWin(srcLeft + pcv.width, ox - bodyRpx, -srcLeft);
+          drawWin(0, ox - bodyRpx - srcLeft, srcRight);
+        } else {
+          const w1 = pcv.width - srcLeft;
+          drawWin(srcLeft, ox - bodyRpx, w1);
+          drawWin(0, ox - bodyRpx + w1, srcRight - pcv.width);
+        }
+        /* night side: the anti-sun half in the plot's own basis */
+        const su = A.dot(WORLD.SUN_DIR), sv = B.dot(WORLD.SUN_DIR);
+        const sl = Math.hypot(su, sv) || 1;
+        const gx = ox + (su / sl) * bodyRpx, gy = oy - (sv / sl) * bodyRpx;
+        const g = c.createLinearGradient(gx, gy, ox - (su / sl) * bodyRpx, oy - (sv / sl) * bodyRpx);
+        g.addColorStop(0, 'rgba(4,8,16,0)'); g.addColorStop(0.52, 'rgba(4,8,16,0)');
+        g.addColorStop(0.62, 'rgba(4,8,16,.62)'); g.addColorStop(1, 'rgba(4,8,16,.86)');
+        c.fillStyle = g; c.fillRect(ox - bodyRpx, oy - bodyRpx, bodyRpx * 2, bodyRpx * 2);
+      }
+      discPainted = Number.isFinite(cu) && Number.isFinite(cvr);
+    } catch { discPainted = false; }
+  }
+  if (!discPainted) {
     c.fillStyle = nearMoon ? '#c9cbd2' : '#2f6ca8';
     c.fillRect(ox - bodyRpx, oy - bodyRpx, bodyRpx * 2, bodyRpx * 2);
   }
@@ -300,24 +346,50 @@ function drawOrbit(nearMoon, centre, vel, el, ecc) {
     for (let i = 0; i <= 90; i++) add(p / (1 + el.e * Math.cos(i / 90 * 6.283)), i / 90 * 6.283);
     c.closePath();
   } else if (isFinite(el.e) && el.e >= 1) {
+    /* Escape leg: drawn dashed so it reads as 'not a closed orbit' even where it enters the
+       bound window. Degenerate first — a radial flight or hover has h → 0, which collapses the
+       conic to a sub-pixel dot at the disc centre (r = p/(1+e·cos θ) with p → 0); drawing that
+       noise is what read as 'nothing but black', so a polyline that cannot reach 4 px is
+       skipped and the disc + status slot carry the state instead. */
     const p = h.lengthSq() / (nearMoon ? MU_M : MU_E);
-    const thMax = Math.acos(-1 / el.e) * 0.95;
-    for (let i = -70; i <= 70; i++) { const th = i / 70 * thMax; add(p / (1 + el.e * Math.cos(th)), th); }
+    if (Number.isFinite(p) && p * scale >= 4) {
+      c.setLineDash([5, 3]);
+      const thMax = Math.acos(-1 / el.e) * 0.95;
+      for (let i = -70; i <= 70; i++) { const th = i / 70 * thMax; add(p / (1 + el.e * Math.cos(th)), th); }
+    }
   }
   if (started) c.stroke();
+  c.setLineDash([]);
 
+  /* Label tags. Every string in the sub-map sits on a small opaque panel because the disc
+     blit is bright ground and the trajectory line crosses the corners (in 08 the orange
+     trajectory blob landed straight on 'Ap 323 k'). Slots, measured at 9px mono ≈ 5.4 px/char:
+       top-left   (4, 11)     'Ap …' bound-OR status — the two are branch-exclusive, one slot
+       bottom-left(4, ORB_H−5) 'Pe …' — longest value 'Pe −400,000 km' (14) ends x ≈ 79.6
+       bottom-right(ORB_W−4, ORB_H−5) body caption — 'earth' starts x ≈ 115.5: a 35 px gutter,
+                                and the caption finally left the band that visually merged
+                                with the ball's rim labels (the round-3 pile-up read).
+     No pair shares a line that can grow into it at any telemetry value. */
+  const tag = (txt, x, y, col, right) => {
+    const w = txt.length * 5.4;
+    const x0 = right ? x - w : x;
+    c.fillStyle = 'rgba(8,11,18,.85)';
+    c.fillRect(x0 - 3, y - 9, w + 6, 12);
+    c.fillStyle = col; c.font = '9px ui-monospace,monospace';
+    c.fillText(txt, x0, y);
+  };
   if (isFinite(el.ap) && el.ap > 0 && el.e < 1) {
     /* A is the eccentricity vector and points at periapsis: per is at +a(1-e) on the
        +x axis, apo at -a(1+e). The apo dot used to sit at +a(1+e), the mirror point. */
     const apo = px({ x: -el.a * (1 + el.e), y: 0 }), per = px({ x: el.a * (1 - el.e), y: 0 });
     c.fillStyle = '#8fdcff'; c.beginPath(); c.arc(apo[0], apo[1], 2.4, 0, 6.283); c.fill();
     c.fillStyle = '#ff6a5c'; c.beginPath(); c.arc(per[0], per[1], 2.4, 0, 6.283); c.fill();
-    c.fillStyle = 'rgba(143,220,255,.85)'; c.font = '9px ui-monospace,monospace';
-    c.fillText(`Ap ${Math.round(el.ap).toLocaleString()} km`, 4, 11);
-    c.fillText(`Pe ${Math.round(el.pe).toLocaleString()} km`, 4, ORB_H - 5);
+    tag(`Ap ${Math.round(el.ap).toLocaleString()} km`, 4, 11, 'rgba(143,220,255,.85)');
+    tag(`Pe ${Math.round(el.pe).toLocaleString()} km`, 4, ORB_H - 5, 'rgba(143,220,255,.85)');
   } else {
-    c.fillStyle = 'rgba(143,220,255,.85)'; c.font = '9px ui-monospace,monospace';
-    c.fillText(el.e >= 1 ? 'escape trajectory' : 'impact trajectory', 4, 11);
+    /* Degenerate element: the status line takes the top-left slot — a Moon orbit that escapes
+       (or a radial fall) still shows disc + dashed leg + this, never a blank plot. */
+    tag(el.escape ? 'escape trajectory' : 'impact trajectory', 4, 11, 'rgba(143,220,255,.85)');
   }
 
   const pos = plane(rel);
@@ -340,18 +412,13 @@ function drawOrbit(nearMoon, centre, vel, el, ecc) {
     c.lineTo(vx + ux * (L - 5) + uy * 2.6, vy + uy * (L - 5) - ux * 2.6);
     c.closePath(); c.fill();
   }
-  /* Caption lives in the top-right corner, right-aligned — not the old (124,75)/(4,62) spots
-     that sat inside the disc and read through the Ap/Pe lines ('Ap 1510 km' on the caption in
-     13, 'Ap 960 k…' over it in 09). Widths measured at 9px mono (≈5.4 px/char): the longest
-     value string 'Ap 384,400 km' (13 chars) ends by x ≈ 74, the longest status string
-     'impact trajectory' (17) by x ≈ 96, and the caption's longest word 'earth' starts at
-     ORB_W − 4 − 27 = 119 — two slots on one line that cannot touch at any telemetry value.
-     The corner also sits outside the now-fitted disc (r ≤ 36.1 px, centre (75,40)), so the
-     caption is never painted over ground; 'Pe' keeps the bottom line to itself. */
-  c.fillStyle = 'rgba(150,165,190,.6)'; c.font = '9px ui-monospace,monospace';
-  c.textAlign = 'right';
-  c.fillText(nearMoon ? 'moon' : 'earth', ORB_W - 4, 11);
-  c.textAlign = 'left';
+  /* Body caption: bottom-right, tagged like everything else. Round 2 moved it top-right to keep
+     it off the disc; round 3 then read it as part of the rim mush because that row sat directly
+     under the ball while the sub-map itself was blank. It now lives diagonally away from both
+     the ball and the Ap/status line: 'earth' (widest, ≈ 27 px) spans x 115.5..142, y 66..78,
+     while the bottom-left 'Pe' tag ends at x ≈ 79.6 even for 'Pe −400,000 km' — a 35 px gutter.
+     Drawn last, so it wins over any vehicle dot or velocity arrow passing through the corner. */
+  tag(nearMoon ? 'moon' : 'earth', ORB_W - 4, ORB_H - 5, 'rgba(150,165,190,.75)', true);
 }
 
 export function updateNavball() {

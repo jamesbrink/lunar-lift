@@ -275,9 +275,9 @@ await tab.evaluate(`(async () => {
 
 ## Structure
 
-One concern per file; no god files. Current sizes: `toonmap.js` 1088, `vehicle.js` 1070,
-`world.js` 685, `physics.js` 529, `hud.js` 380, `terrain.js` 368, `navball.js` 345,
-`clouds.js` 284, `camera.js` 216, `ribbon.js` 198, `textures.js` 197, `main.js` 160,
+One concern per file; no god files. Current sizes: `toonmap.js` 1401, `vehicle.js` 1350,
+`world.js` 822, `physics.js` 546, `navball.js` 435, `terrain.js` 404, `hud.js` 380,
+`clouds.js` 300, `camera.js` 216, `ribbon.js` 198, `textures.js` 231, `main.js` 160,
 `toon.js` 139, `constants.js` 119, `targeting.js` 108, `audio.js` 53. `vehicle.js` has grown past
 a comfortable size and now clearly holds two concerns — the vehicle meshes and the exhaust/blast
 particle field; if the next change to either pushes it higher, split the particle system out the

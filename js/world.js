@@ -36,6 +36,10 @@ export const SUN_DIR = PAD_UP.clone().multiplyScalar(Math.sin(SUN_ELEV))
 let scene = null, earth = null, pad = null, cumulus = null, cirrus = null, atmo = null, moon = null;
 let sun = null, sunTarget = null, flare = null, stars = null, sky = null;
 let spin = 0, cloudSpin = 0, cirrusSpin = 0, simT = 0;
+/* The floodlight LENS sprites, kept for the night gate in updateSunShadow. They were ungated —
+   created in buildPad and never touched again — so four additive warm discs baked daytime haze
+   into the pad lenses at all hours. The lamps themselves (housing, truss) stay year-round. */
+const padLamps = [];
 
 /* Ground cloud shade is a NEAR-SCALE projected texture now (js/clouds.js): the shade cap is the
    same 64 km tile as the deck above it, offset anti-sunward by deck height over tan(elevation) and
@@ -106,6 +110,48 @@ export function initWorld(target) {
     }));
   earth.geometry.setAttribute('aUv', earth.geometry.attributes.uv);   // shared, not copied
   earth.receiveShadow = true;
+  /* ---- crisp coastline band ----
+     Measured on w25-staging-clean at 68 km: across x 390..540 the land/sea boundary smears through
+     (44,68,68)→(31,49,71)→(47,74,95)→(69,101,126) before the open-sea (75,112,138) — a ~150 px
+     photographic gradient built from a painted C.coast ring that is ONE 20 km texel wide and a
+     shelf/ocean stack, all of it blurred further by bilinear sampling. The geometry staircase under
+     it is toonmap's (recommendations with line refs in /tmp/coast-patch-notes.md); the COLOUR of
+     the boundary is a world.js lever: sample the same signed-distance field the mask was carved
+     from (`coastField()` → {w,h,km}, 1-Lipschitz chamfer, same 2048×1024 grid as the map) and
+     re-colours the fragments around its zero line — dark ink stroke ±8 km, pale shelf band 0..24 km
+     on the water side, flat ocean tone to 150 km, map untouched beyond. Every step is AA'd by its
+     own derivative width, and each band fades out once a pixel spans more km than the band can
+     survive (system view sees the
+     plain map again), so nothing here can shimmer or wedge: a single-wrap sphere sampling a smooth
+     field is exactly the case AGENTS.md's mip-wedge rule EXEMPTS — that rule needs uv repeats.
+     R16F because the field must bilinear-filter: R8 would quantise km at ~8 per code and draw the
+     8 km stroke as an 8 km staircase; nearest would block it at texel size; WebGL2 filters
+     half-float natively. Night side unaffected: this recolours diffuse before the toon lighting. */
+  const coastU = { value: null };
+  earth.material.onBeforeCompile = (sh) => {
+    if (!coastU.value) return;
+    sh.uniforms.coastMap = coastU;
+    sh.uniforms.coastShelf = { value: new THREE.Color(0x66b0dc) };   // C.shelf  [102,176,220]
+    sh.uniforms.coastInk = { value: new THREE.Color(0x0e2842) };     // C.coast  [14,40,66]
+    sh.uniforms.coastSea = { value: new THREE.Color(0x3078c0) };     // C.ocean  [48,120,192]
+    sh.fragmentShader = 'uniform sampler2D coastMap; uniform vec3 coastShelf; uniform vec3 coastInk; uniform vec3 coastSea;\n' +
+      sh.fragmentShader.replace('#include <map_fragment>',
+        '#include <map_fragment>\n' +
+        '  float csd = texture2D( coastMap, vMapUv ).r;\n' +              // km from coast, <0 land
+        '  float cpx = max(fwidth( csd ), 0.5);\n' +                      // km per pixel at this fragment
+        '  float vShelf = 1.0 - smoothstep( 18.0, 44.0, cpx );\n' +
+        '  float shelf = step( 0.0, csd ) * ( 1.0 - smoothstep( 24.0 - cpx, 24.0 + cpx, csd ) );\n' +
+        '  diffuseColor.rgb = mix( diffuseColor.rgb, coastShelf, shelf * vShelf );\n' +
+        // flat ocean tone 24..150 km: the map's own pale ring runs ~140 km wide (dilate [5,2])
+        // and its blend to C.ocean is part of the soft smear; past 150 km the map already reads
+        // C.ocean, so handing back at that boundary is seam-free (measured: identical rgb).
+        '  float vSea = 1.0 - smoothstep( 60.0, 160.0, cpx );\n' +
+        '  float sea = step( 24.0 + cpx, csd ) * ( 1.0 - smoothstep( 150.0 - 2.0 * cpx, 150.0 + 2.0 * cpx, csd ) );\n' +
+        '  diffuseColor.rgb = mix( diffuseColor.rgb, coastSea, sea * vSea );\n' +
+        '  float vInk = 1.0 - smoothstep( 7.0, 16.0, cpx );\n' +
+        '  float ink = 1.0 - smoothstep( 8.0 - cpx, 8.0 + cpx, abs( csd ) );\n' +
+        '  diffuseColor.rgb = mix( diffuseColor.rgb, coastInk, ink * vInk );');
+  };
   /* Planet-scale bodies are exempt from the fog: FogExp2 is measured from the camera, so at
      0.002/km a system-view camera 20 000 km out would erase the planet entirely. The haze the
      fog models is the near-field air around the vehicle; the day sky itself comes from
@@ -114,7 +160,34 @@ export function initWorld(target) {
   scene.add(earth);
   applyRelief(earth.geometry, 'earth');
   reliefField('earth').then((f) => { earthField = f; });
-  coastField().then((c) => { shore = c; });
+  coastField().then((c) => {
+    shore = c;
+    if (!c || !earth) return;
+    /* Encode the signed coast distance (km, Float32, 2048×1024 — the map's own grid) as half
+       floats for the coastline band above. f16 by hand: Float32/Uint32 union, exponent rebias
+       127→15, mantissa 23→10; flush denormals to zero (|sd| < 6e-5 km is on the line anyway)
+       and clamp to f16 max (the field's extremes are ~±10 000 km, well inside 65 504). */
+    const n = c.w * c.h;
+    const px = new Uint16Array(n);
+    const f32 = new Float32Array(1), u32 = new Uint32Array(f32.buffer);
+    for (let i = 0; i < n; i++) {
+      f32[0] = c.km[i];
+      const x = u32[0], sign = (x >>> 16) & 0x8000;
+      let e = ((x >>> 23) & 0xff) - 127 + 15;
+      if (e <= 0) { px[i] = sign; continue; }
+      if (e >= 31) { px[i] = sign | 0x7c00; continue; }
+      px[i] = sign | (e << 10) | ((x & 0x7fffff) >>> 13);
+    }
+    const tex = new THREE.DataTexture(px, c.w, c.h, THREE.RedFormat, THREE.HalfFloatType);
+    tex.wrapS = THREE.RepeatWrapping;
+    tex.wrapT = THREE.ClampToEdgeWrapping;
+    tex.magFilter = THREE.LinearFilter;    // the band samples the field with derivatives, so it
+    tex.minFilter = THREE.LinearFilter;    // must be filterable; no mips — R16F filters natively
+    tex.generateMipmaps = false;
+    tex.needsUpdate = true;
+    coastU.value = tex;
+    earth.material.needsUpdate = true;     // recompile with the injection live
+  });
   /* The near level: ONE mesh, 161×161 vertices, dense (≈70 m) under the vehicle and stretched to a
      220 km rim — the horizon from altitude h is √(2·RE·h), and the rim stays beyond it until the
      patch's remaining difference from the globe mesh is sub-pixel. It rides the spin as a child of
@@ -164,18 +237,28 @@ export function initWorld(target) {
      actually hold a puff's shape; it costs the shadow box nothing. */
   cumulus.castShadow = false;
   cumulus.material.fog = false;   // same reason as the ground: a deck 2 km up is a planet-scale body
-  /* The mip chain averages alpha toward the global mean (~0.26 at deep mips, measured), which is
-     exactly what turned the deck into a uniform veil above a few hundred km. Re-steepening the
-     sampled alpha in the fragment restores the cell edges — the same bias trick every planet
-     renderer in a game engine uses — while the `ca * 0.14` floor keeps a soft haze where the
-     threshold eats itself, so from the
-     Moon the Earth still wears weather rather than going bare. This is NOT the dead `discard`
-     threshold of the old note: it operates on the mip-averaged value, not on a texel. */
+  /* The mip chain averages alpha toward the global mean (~0.26, measured), which is exactly what
+     turned the deck into a uniform veil above a few hundred km, so the sampled alpha is
+     re-steepened in the fragment — the same bias trick every planet renderer in a game engine
+     uses. The quantization that replaced the original version is documented on the injection
+     below it. This is NOT the dead `discard` threshold of the old note: it operates on the
+     mip-averaged value, not on a texel. */
+  /* Three cel steps, measured over the real texture (node harness over cumulusTex, mip chain box-
+     built): source cover(a≥0.42) = 0.27 and it HOLDS through mip5 (the field stays hard-edged under
+     averaging), so the old `max(smoothstep(0.42,0.66,ca), ca*0.14)` was fine where cells resolve —
+     its defect was the FLOOR: ca*0.14 is proportional to the mip mean, and across a clear-ocean
+     view the local mean drifts 0.05→0.25, drawing a continuous 0→5/255 gradient haze — measured on
+     07-sky-68km as exactly ±3/255 "soft blurry smudges" over an otherwise dead-flat disc. Now: a
+     cell above thH keeps alpha 1 with a derivative-AA'd edge; the haze is a CONSTANT step over
+     thL (no gradient at all); below is bare planet. fwidth AA is required, not optional: on a deep
+     mip the decision lands on texel-sized blocks otherwise. The deck is a single-wrap sphere —
+     the multi-repeat mip-wedge failure of AGENTS.md cannot apply to it. */
   cumulus.material.onBeforeCompile = (sh) => {
     sh.fragmentShader = sh.fragmentShader.replace('#include <map_fragment>',
       '#include <map_fragment>\n' +
       '  float ca = diffuseColor.a;\n' +
-      '  diffuseColor.a = max(smoothstep(0.42, 0.66, ca), ca * 0.14);');
+      '  float cw = max(fwidth(ca), 0.004);\n' +
+      '  diffuseColor.a = mix(mix(0.0, 0.06, smoothstep(0.18 - cw, 0.18 + cw, ca)), 1.0, smoothstep(0.34 - cw, 0.34 + cw, ca));');
   };
   scene.add(cumulus);
 
@@ -186,6 +269,20 @@ export function initWorld(target) {
     }));
   cirrus.castShadow = false;        // see the cumulus note: 9 km up is enough to wreck the ground
   cirrus.material.fog = false;
+  /* Two cel steps, same rule and same harness as the cumulus deck above: the streak field covers
+     0.21 of the planet at any threshold in [0.15,0.25] (mip0→mip4 measured — the fbm's ramped
+     upper tail survives box-averaging essentially intact), so the threshold is dead centre of
+     that plateau, 0.25; everything the old wide smoothstep(0.42,0.75) left as a proportional
+     mid-gray veil between its shoulders is now either streak or bare, with a derivative-AA'd
+     edge. The thin constant floor keeps the planet wearing weather rather than going bare from
+     the Moon without drawing a gradient. */
+  cirrus.material.onBeforeCompile = (sh) => {
+    sh.fragmentShader = sh.fragmentShader.replace('#include <map_fragment>',
+      '#include <map_fragment>\n' +
+      '  float wa = diffuseColor.a;\n' +
+      '  float ww = max(fwidth(wa), 0.004);\n' +
+      '  diffuseColor.a = mix(0.025, 1.0, smoothstep(0.25 - ww, 0.25 + ww, wa));');
+  };
   scene.add(cirrus);
 
   /* ---- atmosphere: back-side limb shell. Intensity comes from the optical depth still in front of
@@ -498,6 +595,7 @@ function buildPad(glowMap) {
     box(2.6, 1.4, 1.6, steel, lx, -34, 22.8, true, false, true); // housing
     const l = new THREE.Sprite(new THREE.SpriteMaterial({ map: glowMap, color: 0xfff2c9, transparent: true, opacity: 0.5, blending: THREE.AdditiveBlending, depthWrite: false }));
     l.position.set(lx, -33.4, 22.8); l.scale.setScalar(3.4); g.add(l);
+    padLamps.push(l);
   }
   /* Crawler track shoes + operator cab. The deck used to be one unbroken concrete slab, and a
      40 × 35 m crawler with no track reads as a building foundation. The shoe row rides the
@@ -524,6 +622,18 @@ export function updateSunShadow(pos) {
   sun.target.updateMatrixWorld();
   flare.position.copy(pos).addScaledVector(SUN_DIR, SUN_DIST);   // flare stays on the sun's bearing
   updateShadowBox(pos);
+  /* Pad lamps burn at night only. PAD_UP is body-local; its world direction is rotY(current spin)
+     of it — the exact inverse of spinLocal — and dotting that with the inertial SUN_DIR is the
+     sine of the sun's elevation over the pad. The lamps light across twilight (el +0.05 → −0.10)
+     and hold through the night side; daytime additive lens sprites over the ground were the warm
+     haze the review frames caught. */
+  if (padLamps.length && earth) {
+    const a = earth.rotation.y, cb = Math.cos(a), sb = Math.sin(a);
+    const el = PAD_UP.y * SUN_DIR.y + (cb * PAD_UP.x + sb * PAD_UP.z) * SUN_DIR.x
+             + (-sb * PAD_UP.x + cb * PAD_UP.z) * SUN_DIR.z;
+    const on = THREE.MathUtils.clamp((0.05 - el) / 0.15, 0, 1);
+    for (const l of padLamps) { l.visible = on > 0.02; l.material.opacity = 0.5 * on; }
+  }
   updateReliefPatches(pos);
 }
 
@@ -632,28 +742,40 @@ export function bodySpin(which) { return which === 'moon' ? (moon ? moon.rotatio
    recomputed from the absolute time rather than nudged, and a state is fully determined by
    (pos, vel, t). */
 export function syncTime(t) {
-  simT = t;
-  spin = EARTH_SPIN * t;
-  cloudSpin = EARTH_SPIN * 1.08 * t;
-  cirrusSpin = EARTH_SPIN * 1.22 * t;
+  /* Non-finite time must not reach the rotations: `spin = EARTH_SPIN * NaN` and
+     moon.rotation.y = NaN latch PERMANENTLY (spinBodies then only accumulates NaN), and every
+     consumer that multiplies through the angle — js/navball.js's drawOrbit blit chief among
+     them — starts throwing inside main.js's swallowed frame catch. Observed as the round-3
+     'empty black orbit sub-map' that no finite-state math could reproduce. A bad t re-bases
+     to 0 (the angle recomputation's own origin); valid t is untouched — frames for finite
+     time are bit-identical to before. js/navball.js also keeps its own NaN-immunity layer. */
+  const ts = Number.isFinite(t) ? t : 0;
+  simT = ts;
+  spin = EARTH_SPIN * ts;
+  cloudSpin = EARTH_SPIN * 1.08 * ts;
+  cirrusSpin = EARTH_SPIN * 1.22 * ts;
   earth.rotation.y = spin;
   cumulus.rotation.y = cloudSpin;
   cirrus.rotation.y = cirrusSpin;
-  moon.rotation.y = MOON_RATE * t;
+  moon.rotation.y = MOON_RATE * ts;
   moonPos(simT, moon.position);
 }
 
 /* the planet and its weather turn; the cloud decks drift a little faster than the ground (real
    superrotation), at rates of the same order as EARTH_SPIN, never orders of magnitude faster */
 export function spinBodies(simDt) {
-  simT += simDt;
-  spin += EARTH_SPIN * simDt;
-  cloudSpin += EARTH_SPIN * 1.08 * simDt;
-  cirrusSpin += EARTH_SPIN * 1.22 * simDt;
+  /* A non-finite step is SKIPPED, not accumulated (see syncTime): += 0 keeps every angle at its
+     last good value, so one poisoned frame cannot destroy the spin clock forever. Finite simDt
+     runs the identical arithmetic, in the same order, as before. */
+  const dt = Number.isFinite(simDt) ? simDt : 0;
+  simT += dt;
+  spin += EARTH_SPIN * dt;
+  cloudSpin += EARTH_SPIN * 1.08 * dt;
+  cirrusSpin += EARTH_SPIN * 1.22 * dt;
   earth.rotation.y = spin;
   cumulus.rotation.y = cloudSpin;
   cirrus.rotation.y = cirrusSpin;
-  moon.rotation.y += MOON_RATE * simDt;
+  moon.rotation.y += MOON_RATE * dt;
   moonPos(simT, moon.position);
 }
 

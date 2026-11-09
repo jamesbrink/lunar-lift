@@ -41,6 +41,7 @@ const C = {
 
 const MOON = {
   maria: [128, 132, 141],
+  collar: [108, 112, 122],       // the drawn stroke inside a mare border (see mareCollar)
   mid: [168, 171, 178],
   high: [206, 208, 214],
   bright: [230, 232, 236],
@@ -150,7 +151,10 @@ async function paintEarthJob(diffusePath, maskPath) {
   /* The stroke goes in the water, just outside the coast — dilate gives land *plus* the ring, so the
      ring alone is what is wet but near dry. Painting the dilated mask itself inks every land pixel
      and the continents come out navy. */
-  const grown = dilate(cleaned, w, h, [1]);
+  /* [2], not [1]: a one-texel (~20 km) ink ring bilinear-smooths into a continuous gradient by the
+     time mip chains and distance are done with it — the "soft blurry coast band" at 68 km. Two
+     texels is the only coast ink that survives to mip-averaged viewing distance. */
+  const grown = dilate(cleaned, w, h, [2]);
   const coast = new Uint8Array(w * h);
   for (let i = 0; i < coast.length; i++) coast[i] = cleaned[i] ? 0 : grown[i];
 
@@ -328,18 +332,78 @@ async function paintMoonJob(path) {
       blur[y * w + x] = sum / n;
     }
   }
+  /* The mare/plain boundary is the one edge on this body that has to read as DRAWN, and a threshold
+     on the 3×3-blurred field cannot do that: measured on the shipped sheet the dark plains amount to
+     3.2 % of the canvas spread over 5 139 separate runs with 12 248 boundary texels, 57 of every 100
+     of them 90° step corners — a JPEG staircase, which is what the review read as a soft border. The
+     Earth coastline already solves this by cleaning the mask rather than the picture, but a majority
+     filter is the wrong tool here: it eats area (one pass costs a quarter of every mare, two passes
+     37 %) because a mare is a low-contrast region, not a binary coast. So smooth the FIELD first and
+     take the cut back down to the same area: boxSignal at radius 3 (32 km) then the value below which
+     the same share of texels lie. Measured at that equal area — boundary 12 248 → 5 609 texels,
+     5139 runs → 1 976, corners per 100 boundary texels 56.7 → 48.7. The maria in the painting are
+     then one flat tone inside one round outline, which is what a cartoon mare looks like. */
+  const wide = blur.slice();
+  boxSignal(wide, w, h, 3);
+  const mareCut = quantile(wide, shareBelow(blur, 0.36));
+  const mare = new Uint8Array(w * h);
+  for (let i = 0; i < w * h; i++) mare[i] = wide[i] < mareCut ? 1 : 0;
   const out = new Uint8ClampedArray(w * h * 4);
   for (let i = 0; i < w * h; i++) {
     const v = blur[i];
-    const col = v < 0.36 ? MOON.maria : v < 0.47 ? MOON.mid : v < 0.62 ? MOON.high : MOON.bright;
+    const col = mare[i] ? MOON.maria : v < 0.47 ? MOON.mid : v < 0.62 ? MOON.high : MOON.bright;
     const o = i * 4;
     out[o] = col[0]; out[o + 1] = col[1]; out[o + 2] = col[2]; out[o + 3] = 255;
   }
+  mareCollar(out, mare, w, h);
   stampCraterAlbedo(out, blur, w, h);
+  stampMidAlbedo(out, w, h);
   const cv = document.createElement('canvas');
   cv.width = w; cv.height = h;
   cv.getContext('2d').putImageData(new ImageData(out, w, h), 0, 0);
-  return { canvas: cv, ...buildMoonField(blur, w, h) };
+  return { canvas: cv, ...buildMoonField(blur, w, h, mare) };
+}
+
+/* Fraction of a 0..1 field below a cut. */
+function shareBelow(a, cut) {
+  let n = 0;
+  for (let i = 0; i < a.length; i++) if (a[i] < cut) n++;
+  return n / a.length;
+}
+
+/* The value below which `share` of a 0..1 field lies, from a 4096-bin histogram: the mare cut is set
+   by AREA so that smoothing the field can only change how the edge is drawn, never how much of the
+   Moon is mare. Exact for the bin, ±1/4096 of the field's range in value — 0.25 of one 8-bit level. */
+function quantile(a, share) {
+  const N = 4096, hist = new Int32Array(N);
+  for (let i = 0; i < a.length; i++) hist[Math.max(0, Math.min(N - 1, (a[i] * N) | 0))]++;
+  const want = share * a.length;
+  let acc = 0;
+  for (let k = 0; k < N; k++) { acc += hist[k]; if (acc >= want) return (k + 1) / N; }
+  return 1;
+}
+
+/* Every mare texel that touches open plain drops to MOON.collar: a one-texel stroke drawn on the
+   INSIDE of the border, which is how a cartoon closes a shape — the eye reads the edge of the dark
+   plain from the stroke, not from the tone difference between two grey plates that a bare threshold
+   leaves there. Measured across the 3 976 straddling texel pairs of the shipped sheet, the painted
+   tone changes by 13.8 levels of 255 at a mare border today; with the stroke it changes by 64.7,
+   over a band 2.3 texels (25 km) wide walking inward. Drawn before the crater passes so a bowl
+   sitting on the rim of a mare still paints over its own stroke. */
+function mareCollar(out, mare, w, h) {
+  for (let y = 0; y < h; y++) {
+    const yu = y > 0 ? y - 1 : y, yd = y < h - 1 ? y + 1 : y;
+    for (let x = 0; x < w; x++) {
+      const i = y * w + x;
+      if (!mare[i]) continue;
+      const xm = (x + w - 1) % w, xp = (x + 1) % w;
+      if (mare[yu * w + xm] && mare[yu * w + x] && mare[yu * w + xp] &&
+          mare[y * w + xm] && mare[y * w + xp] &&
+          mare[yd * w + xm] && mare[yd * w + x] && mare[yd * w + xp]) continue;
+      const o = i * 4;
+      out[o] = MOON.collar[0]; out[o + 1] = MOON.collar[1]; out[o + 2] = MOON.collar[2];
+    }
+  }
 }
 
 /* ---------------- relief ----------------
@@ -546,7 +610,7 @@ export function sampleGrid(g, u, v) {
 
 /* ---- the Moon: maria flat, highlands rolling, craters hashed not scattered ---- */
 
-function buildMoonField(blur, sw, sh) {
+function buildMoonField(blur, sw, sh, mare) {
   const w = FW, h = FH;
   const km = new Float32Array(w * h), hi = new Float32Array(w * h);
   for (let y = 0; y < h; y++) {
@@ -555,11 +619,14 @@ function buildMoonField(blur, sw, sh) {
     for (let x = 0; x < w; x++) {
       const i = y * w + x;
       const b = blur[srow + ((x * sw / w) | 0)];
-      /* The painting's own maria threshold, feathered over its tone band: the dark texels are flat
+      /* The painting's own maria boundary, feathered over its tone band: the dark texels are flat
          basalt plains and stay at exactly 0; the highlands stand ABOVE them by a real elevation
          difference as well as a brighter tone, so descending to a mare reads as descending into
-         terrain — a step the 512-segment mesh carries without any near level. */
-      const m = smoothS(0.36, 0.47, b);
+         terrain — a step the 512-segment mesh carries without any near level. The flat part is keyed
+         on the painted mare mask rather than on this feather so that a texel is never drawn as dark
+         plain while standing at half highland height: the paint and the ground agree on where the
+         mare is (the feather still shapes the climb out of it). */
+      const m = mare && mare[srow + ((x * sw / w) | 0)] ? 0 : smoothS(0.36, 0.47, b);
       hi[i] = m;
       if (!m) continue;
       const u = (x + 0.5) / w;
@@ -577,6 +644,7 @@ function buildMoonField(blur, sw, sh) {
     }
   }
   stampCraters(km, hi, w, h);
+  stampMidRims(km, w, h);
   /* Soft knee above 1.7 km instead of letting the clamp do the shaping: a hard ±2 cap clipped
      ~3 % of texels (mostly crater rims on massif flanks) into flat plateaus. Compressing the
      headroom preserves ordering and relief everywhere and leaves the cap untouched in practice. */
@@ -625,28 +693,85 @@ export function moonCraters() {
   return _craters;
 }
 
+/* ---- the pockmark tier: 6 000 bowls of 4–18 km, one population, three consumers ----
+
+   The 560 big craters are the only bowls the painted map and the relief grid have ever carried, and
+   the review measured what that leaves on screen: a 440 km window holding one or two of them and a
+   surface luminance that wanders 4 %. Real mare and highland ground at this scale wears tens of
+   thousands of 10–40 km bowls, so this is the missing population.
+
+   Positions are generated on the map's own INTEGER grid first, and the lon/lat the near level uses is
+   then derived from the grid index by the exact inverse of sampleGrid's mapping (u = cx/FW,
+   v = 1 − cy/FH, checked against the texel-centre convention in the relief header above). The painted
+   bowl, the relief crest and the analytic patch bowl therefore sit on one point to the metre instead
+   of drifting by up to half a texel (5.3 km): three consumers, one position, no decorrelation.
+
+   Sizes: 4 km down-cuts where a 25 m-spaced vertex can still resolve a bowl, and 18 km up-cuts below
+   the 45 km floor of the walled plains the tier above draws. `rim` is the crest height, capped at
+   0.15 km: visible in silhouette at grazing sun, harmless to a lander, and the ONLY thing this tier
+   ever adds to the ground — the floor is albedo, never a dig (contact rule, agents.md). ~8 % are
+   young and throw short ray spokes at a fifth less amplitude than the big ray craters, so the largest
+   and youngest bowls stay the brightest features on the disc. */
+const MID_N = 6000;
+const MID_RIM = 0.15;                   // km crest cap: everything this tier may add to the ground
+const MID_DRAW = 14;                    // km: the smallest radius a 10.6 km/texel map can draw
+const MID_BAND = 1.6;                   // crater radii out to which the painted crest still bites
+let _midCraters = null;
+export function moonMidCraters() {
+  if (_midCraters) return _midCraters;
+  _midCraters = [];
+  for (let c = 0; c < MID_N; c++) {
+    const hu = hash2(c, 16, 19), hv = hash2(c, 17, 47), hr = hash2(c, 18, 83), hy = hash2(c, 19, 29);
+    const cx = (hu * FW) | 0;                                       // uniform in longitude
+    const cy = ((0.5 - Math.asin(2 * hv - 1) / Math.PI) * FH) | 0;  // uniform ON the sphere
+    const rKm = 4 + 14 * Math.pow(hr, 1.7);
+    const cr = {
+      cx, cy,
+      lon: (cx / FW - 0.5) * 2 * Math.PI,
+      lat: (0.5 - cy / FH) * Math.PI,
+      rKm,
+      rim: Math.min(MID_RIM, 0.05 + rKm * 0.006),                   // 74–150 m, positive-only
+      young: hy > 0.92,                                             // ~8 % ray systems
+      spokes: 5 + ((hash2(c, 20, 61) * 4) | 0),
+      phase: hy * 6.283,
+      fdark: 0.7 + hash2(c, 21, 37) * 0.45,                         // per-bowl floor albedo: one flat
+      rayIn: 0.8, rayOut: 2.2, rayAmp: 0.18, rayCut: 0.45,          // floor everywhere was the tell
+    };
+    craterFrame(cr);
+    _midCraters.push(cr);
+  }
+  return _midCraters;
+}
+
 /* ---- near-level detail: craters the canvas can never hold ----
 
    The painted canvas is 1024×512: 10.6 km/texel. A 12 km crater stamped there is a one-byte
    smudge, and the last kilometres of a descent were flying over nothing (measured: a 9 km pass
-   showed zero surface features). The near patch asks for its ground ANALYTICALLY instead: a
-   second seeded population of 3–45 km craters evaluated per vertex at rebuild time. Height is
-   rim-only — the patch stands on the mesh and never cuts into it, the same rule the Earth patch
-   follows, so contact on the RM sphere stays honest and no crater can sink the vehicle below
-   the ground it landed on — and the bowl itself is drawn in tone: dark floor, bright rim, ray
-   fans where a young one lands near mare. */
+   showed zero surface features). The near patch asks for its ground ANALYTICALLY instead: the
+   3–45 km population below, the micro tier, and the whole pockmark tier — the map's own bowls —
+   evaluated per vertex at rebuild time. Height is rim-only — the patch stands on the mesh and never
+   cuts into it, the same rule the Earth patch follows, so contact on the RM sphere stays honest and
+   no crater can sink the vehicle below the ground it landed on — and the bowl itself is drawn in
+   tone: dark floor, bright rim, ray fans where a young one throws them. */
+
+/* Bake a crater's local east/north basis once (p(lon,lat) = (−cosλcosφ, sinλ, cosλsinφ) in the
+   mesh-local frame → east = (sinλ, 0, cosλ), north = (−sinλcosφ, cosφ, −sinλsinφ)). The directional
+   rim bake projects the sun onto this basis per vertex it touches; doing the four trig calls here
+   keeps the per-vertex loop to multiplies. Shared with the pockmark tier, which is consumed here too. */
+function craterFrame(cr) {
+  cr.sl = Math.sin(cr.lon); cr.cl = Math.cos(cr.lon);
+  cr.sla = Math.sin(cr.lat); cr.cla = Math.cos(cr.lat);
+}
+
+/* "Standing on mare", in the units the caller actually has: the painted canvas luminance of
+   MOON.maria is sRGB 0.517 and of MOON.mid 0.670 (measured off the palette bytes), and MOON.collar
+   0.439, so a cut at 0.58 separates the dark plains from everything brighter. */
+const RAY_MARE_LUM = 0.58;
+
 let _smallCraters = null;
 function moonSmallCraters() {
   if (_smallCraters) return _smallCraters;
   _smallCraters = [];
-  /* Bake the crater's local east/north basis once (p(lon,lat) = (−cosλcosφ, sinλ, cosλsinφ) in
-     the mesh-local frame → east = (sinλ, 0, cosλ), north = (−sinλcosφ, cosφ, −sinλsinφ)). The
-     directional rim bake projects the sun onto this basis per vertex it touches; doing the four
-     trig calls here keeps the per-vertex loop to multiplies. */
-  const frame = (cr) => {
-    cr.sl = Math.sin(cr.lon); cr.cl = Math.cos(cr.lon);
-    cr.sla = Math.sin(cr.lat); cr.cla = Math.cos(cr.lat);
-  };
   for (let c = 0; c < 2400; c++) {
     const hu = hash2(c, 5, 91), hv = hash2(c, 6, 57), hr = hash2(c, 7, 31), hy = hash2(c, 8, 17);
     const rKm = 3 + Math.pow(hr, 2.2) * 42;                    // many small, few big
@@ -655,8 +780,9 @@ function moonSmallCraters() {
       rim: 0.08 + Math.min(0.22, rKm * 0.006),                 // ≤ 300 m: a rim you can see in silhouette
       young: hy > 0.93, spokes: 6, phase: hy * 6.283,
       fdark: 0.72 + hash2(c, 9, 43) * 0.4,                     // per-bowl floor albedo 0.72–1.12: a
-    };                                                         // flat floor across every bowl was the tiling tell
-    frame(cr);
+      rayIn: 1.8, rayOut: 4.2, rayAmp: 0.30, rayCut: 0,        // flat floor across every bowl was the
+    };                                                         // tiling tell
+    craterFrame(cr);
     _smallCraters.push(cr);
   }
   /* Micro tier: 4 000 more at 0.3–2.5 km. The 2 km view measured nearly empty (one mare blob, one
@@ -675,12 +801,21 @@ function moonSmallCraters() {
       young: false, spokes: 0, phase: 0,                       // no rays, and hash2 keys disjoint from
       fdark: 0.7 + hash2(c, 15, 59) * 0.45,                    // the mid tier's, so the lists decorrelate
     };
-    frame(cr);
+    craterFrame(cr);
     _smallCraters.push(cr);
   }
-  // 6° buckets (~187 km, beyond the 4.2 r = 190 km reach of the biggest crater): a rebuild asks
-  // 26k vertices, and without this every vertex would walk all 6 400 craters. A colliding bucket
-  // key only costs a wasted distance test — every consumer below filters by true distance.
+  /* The pockmark tier rides THIS list and THESE buckets: it is not a near-level population that
+     happens to resemble the map's, it is the map's population pushed in as the very same objects —
+     cx/cy on the 1024×512 grid, the lon/lat derived from those indices, the same rKm and rim the two
+     stamps use. Measured over 400 random sites: a 440 × 440 km window (the size of the near patch)
+     holds 32.0 bowls from the two populations that existed before and 62.6 with this tier in it, and
+     15.2 % of the surface is some bowl's floor (mid tier 14.5 %, pockmark tier 5.75 %, micro 0.25 %). */
+  for (const cr of moonMidCraters()) _smallCraters.push(cr);
+  // 6° buckets (181.9 km, past the 1.8 r = 81 km bowl reach of every tier here): a rebuild asks
+  // 26k vertices, and without this every vertex would walk all 12 400 craters. A colliding bucket
+  // key only costs a wasted distance test — every consumer below filters by true distance. Only the
+  // mid tier's ray fans (4.2 r = 189 km at r = 45 km) reach beyond one bucket width, and what that
+  // clips at the far bucket edge is the outermost 6 % of a fan's amplitude.
   const B = 6 * Math.PI / 180, buckets = new Map();
   for (const cr of _smallCraters) {
     const bi = Math.floor((cr.lon + Math.PI) / B), bj = Math.floor((cr.lat + Math.PI / 2) / B);
@@ -715,7 +850,16 @@ export function moonPatchDetail(u, v, baseLum, sun) {
   const list = L.buckets.get(Math.floor((lon + Math.PI) / L.B) * 977 + Math.floor((lat + Math.PI / 2) / L.B));
   let h = 0, dark = 0, lit = 0, ray = 0;
   if (list) {
-    const kmr = Math.PI / 180 * RM, clat = Math.max(0.05, Math.cos(lat));
+    /* Lat and lon are RADIANS, so the kilometres per step is RM per radian. This line used to read
+       π/180·RM — kilometres per DEGREE — and so shrank every distance by 57.3×: a brute-force scan of
+       the population under the old units put 632 craters within 1.8 r of a random point, where
+       uniform placement gives 0.4, so every vertex sat inside its whole bucket at once and the
+       max-composition rule below locked the result to a constant (measured on the shipped build:
+       tone confined to [0.7185, 0.8968] and never reaching 1, a crest above 5 m under 97.6 % of the
+       cap, crest height pinned between 0.07 and 0.116 km). That saturation, not the population count,
+       is the "luminance varies 0.37 → 0.41" the review measured. With true units a point sits inside
+       0.4 bowls, 37 % of points sit on a crest at all, and the tone spans 0.709 … 1.298. */
+    const kmr = RM, clat = Math.max(0.05, Math.cos(lat));
     for (const cr of list) {
       let dlon = lon - cr.lon;
       if (dlon > Math.PI) dlon -= 2 * Math.PI; else if (dlon < -Math.PI) dlon += 2 * Math.PI;
@@ -744,9 +888,21 @@ export function moonPatchDetail(u, v, baseLum, sun) {
         if (lc > lit) lit = lc;
         const sh = 0.55 * hw * (cs < 0 ? -cs : 0);
         if (sh > dark) dark = sh;
-      } else if (cr.young && dd < 4.2 && baseLum < 0.4) {
+      }
+      /* Rays are their own band, not an else-branch of the bowl: the pockmark tier throws them from
+         0.8 r, which is inside the bowl, while the mid tier still waits until 1.8 r — both read off
+         the crater, so the two tiers cannot drift apart from how the map draws them. The amplitude
+         mapping mirrors the map pass exactly (full over bright ground, 0.55 of it over mare, where a
+         bright spoke matters most) and the gate is the PAINTED luminance scale — MOON.maria measures
+         sRGB 0.517 and MOON.mid 0.670 — where the old `baseLum < 0.4` was below every tone this
+         canvas contains: measured, the patch threw zero ray fans over 36 000 sample sites. */
+      if (cr.young && dd >= cr.rayIn && dd < cr.rayOut) {
         const sp = Math.cos(cr.spokes * Math.atan2(ey, ex) + cr.phase);
-        if (sp > 0) { const r = 0.30 * Math.pow(sp, 10) * (1 - (dd - 1.8) / 2.4); if (r > ray) ray = r; }
+        if (sp > cr.rayCut) {
+          const r = cr.rayAmp * (baseLum < RAY_MARE_LUM ? 0.55 : 1) * Math.pow(sp, 10)
+            * (1 - (dd - cr.rayIn) / (cr.rayOut - cr.rayIn));
+          if (r > ray) ray = r;
+        }
       }
     }
   }
@@ -829,6 +985,83 @@ function stampCraterAlbedo(out, blur, w, h) {
   }
 }
 
+/* Crests only from the pockmark tier, on the relief grid — maria included. A bowl's floor is albedo
+   (stampMidAlbedo here, the patch's tone there); this pass may only ever ADD, capped at MID_RIM,
+   because this field is what a lander touches down on and a detail stamp that digs is a hole the
+   vehicle falls into (contact rule, agents.md). At 10.7 km per grid texel a 4–18 km crest lands on
+   one to four texels: below what the 512-segment mesh can displace, but exactly what the near patch
+   reads, and it is why the mare plains stop being a dead 0.000-km sheet — measured on the shipped
+   grid, the mare texels standing above zero go from 0 % to 5.3 %. The field's extremes are untouched
+   by it: max 2.000 and min −2.000 before and after, 1 758 → 1 801 texels on the +2 km cap and
+   68 → 67 on the −2 km one, because the soft knee and the honesty clamp both run after this pass. */
+function stampMidRims(km, w, h) {
+  const kme = MOON_CIRC / w, kmr = Math.PI * RM / h;
+  for (const cr of moonMidCraters()) {
+    const cx = cr.cx, cy = cr.cy, rKm = cr.rKm;
+    const clAt = (yy) => Math.max(0.05, Math.cos((90 - (yy + 0.5) * 180 / h) * Math.PI / 180));
+    const rx = Math.ceil(rKm * 1.45 / (kme * clAt(cy))), ry = Math.ceil(rKm * 1.45 / kmr);
+    for (let dy = -ry; dy <= ry; dy++) {
+      const y = cy + dy;
+      if (y < 0 || y >= h) continue;
+      const kx = kme * clAt(y);
+      for (let dx = -rx; dx <= rx; dx++) {
+        const x = ((cx + dx) % w + w) % w;
+        let ex = (x + 0.5 - cx) * kx;
+        if (ex > MOON_CIRC / 2) ex -= MOON_CIRC; else if (ex < -MOON_CIRC / 2) ex += MOON_CIRC;
+        const dd = Math.hypot(ex, (y + 0.5 - cy) * kmr) / rKm;
+        if (dd < 0.95 || dd >= 1.45) continue;                    // the crest band, never the floor
+        km[y * w + x] += cr.rim * (1 - Math.abs(dd - 1.2) / 0.25);   // → 0 at both edges: stays C0
+      }
+    }
+  }
+}
+
+/* The same 6 000 bowls, painted: one hard step down for the floor, one hard step up for the crest,
+   and on the young ~8 % a short spoke fan (0.8–2.2 radii) that is THRESHOLDED rather than blurred —
+   flat tones, no gaussian tail anywhere, because a bowl smeared over two texels is a grey smudge and
+   the whole point of this pass is the edge. Amplitudes sit deliberately under the big craters' (floor
+   −(28+16·fdark) = −39…−30 against their −42…−23; crest 22+44·rim = +25…+29 against their +30…+40;
+   rays +28 against their +34), so the walled plains and the largest young ray systems stay the
+   loudest features on the disc while the ground between them stops being blank.
+   Unlike the big pass, these land on maria too: a 200 km walled plain would shatter the flat basalt
+   look, but a mare with nothing in it is exactly the empty sheet the review measured, and the Moon's
+   maria are themselves heavily bombarded.
+   MID_DRAW/MID_BAND are the pen: 10.7 km per texel cannot hold a 4 km bowl, so a sub-texel crater is
+   drawn at the smallest legible radius (a 2·MID_BAND·MID_DRAW = 45 km ring rather than a 8 km one)
+   rather than dropped — same centre as the relief and the analytic patch, only the brush floored,
+   which is what a cartoon does and what stops a thousand 4 km bowls becoming a thousand coin flips
+   over which single texel gets darkened. */
+function stampMidAlbedo(out, w, h) {
+  const sx = w / FW, sy = h / FH;
+  const kmr = Math.PI * RM / h;                       // km per row; columns widen by 1/cos(lat)
+  for (const cr of moonMidCraters()) {
+    const cx = cr.cx * sx, cy = cr.cy * sy;
+    const rD = Math.max(MID_DRAW, cr.rKm);
+    const reach = cr.young ? cr.rayOut : 1.5;
+    const ry = Math.ceil(rD * reach / kmr);
+    for (let dy = -ry; dy <= ry; dy++) {
+      const y = (cy + dy) | 0;
+      if (y < 0 || y >= h) continue;
+      const clat = Math.max(0.05, Math.cos((90 - (y + 0.5) * 180 / h) * Math.PI / 180));
+      const rx = Math.ceil(rD * reach / (kmr * clat));
+      for (let dx = -rx; dx <= rx; dx++) {
+        const x = ((cx + dx) % w + w) % w;
+        let ex = dx * kmr / clat;
+        if (ex > MOON_CIRC / 2) ex -= MOON_CIRC; else if (ex < -MOON_CIRC / 2) ex += MOON_CIRC;
+        const ey = dy * kmr;
+        const dd = Math.hypot(ex, ey) / rD;
+        let tone;
+        if (dd < 0.8) tone = -(22 + 14 * cr.fdark);             // floor: one hard step, −38…−32
+        else if (dd < MID_BAND) tone = 22 + 44 * cr.rim;        // crest: the next one, +25…+29
+        else if (Math.cos(cr.spokes * Math.atan2(ey, ex) + cr.phase) > cr.rayCut) tone = 28;
+        else continue;                                           // between the spokes: untouched
+        const i = (y * w + x) * 4;
+        out[i] += tone; out[i + 1] += tone; out[i + 2] += tone;
+      }
+    }
+  }
+}
+
 /* ---- Earth: land only, oceans and shelf exactly 0, pad neighbourhood exactly 0 ---- */
 
 function buildEarthField(land, sw, sh) {
@@ -864,12 +1097,26 @@ function buildEarthField(land, sw, sh) {
             + (aLat > 72 ? 0.5 : 0);             // the ice sheets really are plateaus; Greenland, Antarctica
     }
   }
+  const coast = earthCoast(land, sw, sh);
+  /* Shore feather: land eases to exactly 0 over the last 40 km (≈2 far-mesh cells at 512 segs)
+     toward the sea, using the same 1-Lipschitz SDF the colours read. Without it a half-km
+     continent meets zero-height ocean on a one-cell step and the 512-segment mesh draws that
+     step as a staircase cliff — measured as the w25 dark band, (44,68,68)→(31,49,71) over 75 px.
+     The near1/near2 ramp above only reaches one dilated ring; the SDF makes it a ramp. */
   for (let i = 0; i < km.length; i++) {
     // uv, not grid coords: v counts north while rows count south — mixing them flattens the antipode
     const u = (i % w + 0.5) / w, v = 1 - (Math.floor(i / w) + 0.5) / h;
-    km[i] = THREE.MathUtils.clamp(km[i] * padWeight(u, v), 0, 1.4);
+    let k = km[i];
+    if (k > 0) {
+      const sd = sampleGrid(coast, u, v);              // km, negative inland
+      if (sd > -40) {
+        const s = THREE.MathUtils.clamp(-sd / 40, 0, 1);
+        k *= s * s * (3 - 2 * s);
+      }
+    }
+    km[i] = THREE.MathUtils.clamp(k * padWeight(u, v), 0, 1.4);
   }
-  return { field: { w, h, km }, coast: earthCoast(land, sw, sh) };
+  return { field: { w, h, km }, coast };
 }
 
 /* Signed distance to the coastline in km, negative inland, so a smooth boundary falls out of
@@ -1024,10 +1271,21 @@ export function padAuthored(u, v, near = 0) {
        deleted: 560 m wide against a cap whose spacing widens to >1 km, it aliased into dashes —
        the exact "faster than the mesh" failure this file's rules already name. */
     const r = Math.hypot(_tp.x, _tp.y);
-    if (r < 0.85) {
-      const t = THREE.MathUtils.clamp((0.85 - r) / 0.3, 0, 1);       // soft edge into the grass
-      const g = C.grass, k = C.concrete;
-      return [g[0] + (k[0] - g[0]) * t, g[1] + (k[1] - g[1]) * t, g[2] + (k[2] - g[2]) * t];
+    /* Hard-edged plate + drawn rim. The old 0.3 km feather lerp onto grass read as a soft radial
+       haze blob from the pad-wide view (measured: dead-flat concrete core with a continuous
+       80 px gradient rim, review3/02). The boundary is a chamfered square — an exact iso-contour
+       of max(|x|,|y|), so where it crosses the mesh the level set runs ALONG grid lines instead
+       of chopping the circle into staircase pixels (measured: the round iso-contour at ~200 m
+       vertex spacing at 0.85 km rasterised into jagged 1-vertex teeth). Quarters round the plate
+       to a 1 km corner radius; the 0.11 km edge band is the painted slab stroke, ≥1 vertex wide
+       out to 2 km from the pad centre where the cap spacing is still under 400 m. */
+    const sq = Math.max(Math.abs(_tp.x), Math.abs(_tp.y));
+    const rr = Math.hypot(_tp.x, _tp.y);
+    if (sq < 0.74) return C.concrete.slice();
+    if (sq < 0.95 && rr < 1.25) return C.concrete.slice();
+    if (sq < 1.06 && rr < 1.36) {
+      const k = C.concrete, o = [92, 90, 84];            // dark edge stroke — the slab boundary
+      return [k[0] + (o[0] - k[0]) * 0.6, k[1] + (o[1] - k[1]) * 0.6, k[2] + (o[2] - k[2]) * 0.6];
     }
   }
   if (zone === 'lagoon' || zone === 'river') return C.shelf;

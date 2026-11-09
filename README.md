@@ -66,7 +66,7 @@ Repo-wide convention (see `docs/reference/README.md`): **km, s, tonnes, kN**.
 
 ## Architecture
 
-- `js/physics.js` (521 lines) — the integrator and the reference-frame helpers. Two-body
+- `js/physics.js` (546 lines) — the integrator and the reference-frame helpers. Two-body
   inverse-square gravity for Earth and Moon, exponential drag, mass burn, staging, attitude
   dynamics, SAS, the trajectory predictor, and `impact()`. Its frame rule matters: `navVel()` is
   Moon-relative inside the lunar SOI and inertial outside (it drives SAS and the navball),
@@ -75,26 +75,26 @@ Repo-wide convention (see `docs/reference/README.md`): **km, s, tonnes, kN**.
   vector has no direction worth steering by. The Moon moves at ~1 023 m/s through the game frame, so
   anything judged against a surface must not use the raw state vector `S.v`. Also owns `LES_ALT`
   (90 km) and the launch-escape-tower jettison, which is visual only and sheds no mass.
-- `js/world.js` (591 lines) — Earth, Moon, sky gradient, starfield, the two cloud decks (cumulus at
+- `js/world.js` (822 lines) — Earth, Moon, sky gradient, starfield, the two cloud decks (cumulus at
   2 km, cirrus at 9 km, which deliberately **do not** cast shadows — see `agents.md`), the sun whose
   shadow camera follows the vehicle, and the launch pad welded to the rotating planet. Drives
   `js/clouds.js` with the ground point and the sun in body-local space. Exposes the terrain queries
   `groundHeight`, `moonGroundHeight` and `fineGroundHeight` (km above the reference sphere), plus
   `planetCanvas` and `bodySpin` for the orbital map.
-- `js/terrain.js` (274 lines) — the near level: one 161 × 161 mesh warped radially, ~25 m spacing
+- `js/terrain.js` (404 lines) — the near level: one 161 × 161 mesh warped radially, ~25 m spacing
   under the vehicle stretching to a ±220 km rim, hidden above 30 km and re-centred in place after
   ground travel, so the ground the vehicle touches is always the authored ground.
-- `js/toonmap.js` (921 lines) — where the planets are *painted*, once at boot, from data rather than
+- `js/toonmap.js` (1401 lines) — where the planets are *painted*, once at boot, from data rather than
   from imagery: the specular sheet is read as a land mask and the diffuse sheet as a biome signal, and
   the result is a flat cartoon surface map — ocean, shelf, a hard coastline stroke, grass, forest,
   desert, tundra, boreal, ice — plus the relief fields, the authored Merritt Island shore lines and the
   cloud sheets. No photographic pixel reaches the screen. Look and its limits:
   `docs/reference/painted-planets.md` and `docs/reference/cartoon-art-direction.md`.
-- `js/toon.js` (129 lines) — the cel shading itself: `toon()` materials on a quantising ramp
+- `js/toon.js` (139 lines) — the cel shading itself: `toon()` materials on a quantising ramp
   (`RAMP_EARTH` is four texels with the top two equal, so its steps sit at N·L = −0.5, 0, +0.5 — out by
   the terminator; three samples the ramp at `dotNL · 0.5 + 0.5`, see `agents.md`), `PALETTE`, and
   `outline()` for the single dark edge on hardware.
-- `js/vehicle.js` (1017 lines) — the three rocket-stage meshes, staging visuals, LES jettison, debris,
+- `js/vehicle.js` (1350 lines) — the three rocket-stage meshes, staging visuals, LES jettison, debris,
   the gimballing flame, the thrust/velocity arrows drawn beside the vehicle (`initNavVectors` /
   `updateNavVectors`), and the exhaust: a 1 600-slot pool of physics parcels spawned on the real bell
   exit discs, integrated against drag, gravity and the ground/pad/hull colliders, composited in one
@@ -102,11 +102,11 @@ Repo-wide convention (see `docs/reference/README.md`): **km, s, tonnes, kN**.
 - `js/ribbon.js` (198 lines) — the trajectory prediction as a screen-space ribbon (a 3 px core under an
   11 px additive halo, two draw calls, `PRED_MAX` 2 700 points) rather than a thin `Line`, so it stays
   legible against both the planet and black space.
-- `js/hud.js` (378 lines) — telemetry panel, flight computer, stage fuel pips, throttle gauge with
+- `js/hud.js` (380 lines) — telemetry panel, flight computer, stage fuel pips, throttle gauge with
   engine output in kN, logs, end overlay, and the full-screen orbital map (`M`): both bodies drawn as
   polar azimuthal discs painted from the same canvas the meshes use, with the terminator, the vehicle
   track and the launch site on them.
-- `js/navball.js` (286 lines) — the KSP-style attitude ball: an orthographic view of the sky from
+- `js/navball.js` (435 lines) — the KSP-style attitude ball: an orthographic view of the sky from
   the nose, prograde/retrograde markers, apsis markers, the Moon as a target.
 - `js/camera.js` (216 lines) — chase, orbit and system cameras; drag/zoom input; damping plus collision
   against the vehicle, the pad, the Earth and the Moon, applied twice per frame because a chord between
@@ -123,11 +123,11 @@ Repo-wide convention (see `docs/reference/README.md`): **km, s, tonnes, kN**.
   dry/fuel/thrust/Isp), `LAND_SAFE` (0.032 km/s), `WARPS`, `DTPHYS`, the SAS pitch program `TURN`,
   and `MOON_PHASE0` — the solved launch window (the Moon's angle along its orbit at MET 0 for which
   a TLI at the first perigee after insertion arrives at the Moon).
-- `js/textures.js` (155 lines) — the generated sheets: the two cloud decks and the shared glow
+- `js/textures.js` (231 lines) — the generated sheets: the two cloud decks and the shared glow
   sprite, deterministic so the weather is the same every run. The photographic diffuse/normal/specular maps
   under `assets/` are inputs to the painter in `js/toonmap.js` (mask and biome signal); the normal
   map is no longer bound to any surface, per `docs/reference/cartoon-art-direction.md`.
-- `js/clouds.js` (284 lines) — weather at human scale: a 440 km cloud cap at 7 km altitude and a
+- `js/clouds.js` (300 lines) — weather at human scale: a 440 km cloud cap at 7 km altitude and a
   64 km shade cap, both re-centred under the vehicle. The deck samples one tileable puff field at 390 m
   per texel; the shade samples the same field box-filtered to 64 × 64 with no mip chain, because a cap
   that size minifies hard and mip selection is per triangle. Shadows land under their clouds, offset

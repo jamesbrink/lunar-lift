@@ -230,6 +230,13 @@ const MAX_SUB = 30;                       // dt/MAX_SUB ≈ 33 ms per substep at
 const BAL0 = 0.018, BAL_CAP = 0.055;      // m²/kg normalised as BAL0/r² (r = parcel radius, m)
 const R_CAP = 16;                         // m: entrainment ceiling. Density has to come from parcel COUNT;
                                         // at 38 m the few live parcels overlapped into soft lanterns around the pad
+const R_YOUNG = 9;                        // m: radius hold for deflected Earth parcels in their first 0.5 s —
+                                        // the blast dome must form from entrained parcels, not instant inflation
+/* pSmoke codes past 1 are drawn generically but behave specially (fillBuffers / stepParcel):
+   2 = staging-seam silhouette puff — low-alpha dark grey, air-gated growth like smoke;
+   3 = lunar scorch patch — dark, ground-pinned, slow creep, never additive;
+   4 = lunar ground-hugging spray — pale dust crawling radially, never additive. */
+const SM_SEAM = 2, SM_SCORCH = 3, SM_SPRAY = 4;
 const PAD_RP2 = (455 * PAD_SCALE) * (455 * PAD_SCALE);   // pad complex footprint, km²
 /* Pad ground as the exhaust actually meets it: the flame trench is a bowl (its floor is BELOW the
    map sphere — the F-1 exit plane itself sits below it), and around the trench a low berm stands
@@ -265,8 +272,17 @@ const BAND_C = [
 const BAND_A = [0.0, 0.16, 0.36, 0.62, 0.45, 0.8];    // composited coverage
 const BAND_G = [1.0, 0.6, 0.4, 0.10, 0.05, 0.03];     // additive glow
 
-/* One slot = one parcel; `alive` is the live index list, freeSlots[] the recycle stack. */
-const pPos = new Float32Array(NP * 3);    // world km — physics only, slot-indexed
+/* One slot = one parcel; `alive` is the live index list, freeSlots[] the recycle stack.
+   pPos is Float64Array on purpose: lunar coordinates sit ~384,000 km from the origin, where
+   Float32 quantises to a ~31 m grid, and a settling dust parcel moves 1.6 cm per substep —
+   position += velocity·h rounds back to the SAME stored value every step, so slow parcels
+   froze in space while the Moon travelled on at 1.02 km/s (measured: a scorch parcel's ground
+   separation grew at exactly the Moon's z-velocity, 376 m/s, with its own relative velocity at
+   1 m/s — that is review3/14's "dots floating mid-air with no ground interaction", and it
+   applies to ANY slow parcel at the Moon, not just the new ones). The GPU mirror rPos stays
+   Float32 (it is an attribute); its own 31 m grid near the Moon is neutralised by re-anchoring
+   the draw call near the vehicle — see plumeAnchor in fillBuffers. */
+const pPos = new Float64Array(NP * 3);    // world km — physics only, slot-indexed
 const pVel = new Float32Array(NP * 3);    // inertial km/s
 const pR = new Float32Array(NP);          // parcel radius, metres (sprite size, bal, entrainment)
 const pLife = new Float32Array(NP);       // seconds remaining
@@ -383,7 +399,17 @@ const plumeMat = new THREE.ShaderMaterial({
     varying float vAdd;
     void main() {
       #include <logdepthbuf_fragment>
-      float g = texture2D(uMap, gl_PointCoord).a;
+      float raw = texture2D(uMap, gl_PointCoord).a;
+      /* Cel quantisation of the sprite itself. glowTex ramps alpha to zero over its outer 60 %
+         of radius, and a pile of those ramps composited into the photographic softness the review
+         measured as "one giant blurred tan disc swallowing the rocket" (review3/03): every parcel
+         edge was a gradient, so no overlap ever read as a layered puff. Two hard steps quantise
+         the sampled density into three flat bands — nothing below 0.30 (the whole soft skirt,
+         where parcels used to bleed into each other invisibly), a mid lobe, and a core — so each
+         parcel is a crisp disc with a disc inside it, and neighbouring parcels stack as banded
+         cel puffs instead of mushing. Same single texture fetch as before; two step() built-ins
+         added, no more samples. */
+      float g = step(0.30, raw) * (0.55 + 0.35 * step(0.62, raw));
       float a = g * vA;                                   // composited coverage
       if (a + g * vAdd < 0.004) discard;
       gl_FragColor = vec4(vTint * g * (vAdd + vA), a);    // premultiplied
@@ -564,7 +590,12 @@ function spawnPlume(set, pos, quat, vel, throttle, simDt) {
   emitAcc += set.rate * throttle * simDt;              // parcels/s: the mass flow at rendering resolution
   let n = emitAcc | 0; emitAcc -= n;
   if (n > 240) n = 240;                     // 240 = the busiest set × the warp clamp's frame budget
-  const jit = veEff * (onMoon ? 0.02 : 0.05);
+  /* review3/04/06: ±74 m/s per axis of turbulence at the exit scattered the column into a
+     300 m-wide confetti cone — consecutive parcels left the SAME streamline 25 m apart sideways
+     within 0.2 s, which no sane sprite can bridge. The bell divergence (b.th ≈ 0.28 rad ≈ 16°)
+     is the real cone; this jitter only has to keep it from looking like a solid sheet —
+     halved to ±37 m/s (Moon keeps its own 0.02, the certified Apollo spray). */
+  const jit = veEff * (onMoon ? 0.02 : 0.025);
   const bells = set.bells, nb = bells.length;
   /* One frame charges n parcels, and they all left the nozzle at different instants of the interval
      the frame represents. Emitting them together put a fresh clump at the vehicle every 16 ms while
@@ -598,8 +629,14 @@ function spawnPlume(set, pos, quat, vel, throttle, simDt) {
     pVel[i3 + 2] = _svv.z + vel.z + (Math.random() - .5) * jit;
     /* `rate` is a rendering-resolution knob, not mass flow (that lives in js/physics.js), so dropping
        the throttle drops the parcel count and the trail came out as separated beads at 40 %. Give the
-       survivors proportionally more radius: the same exhaust column, drawn with fewer sprites. */
-    pR[i] = (0.8 + Math.random() * 0.8) * (1 + (1 - throttle) * 1.3);
+       survivors proportionally more radius: the same exhaust column, drawn with fewer sprites.
+       The base was raised 0.8→1.6 m for review3/04/06: with the sprite now band-quantised (crisp
+       disc out to 0.63 of its quad instead of a glowing point with a gradient skirt), the old
+       birth radius put hard gaps between consecutive silhouettes — at the S-IC's 900/s the parcels
+       leave 3.2 m apart at 2.9 km/s, and a banded silhouette is only ≈3× the parcel radius, so
+       anything under ~1.5 m draws as a string of confetti, not a column. Overlap is finished off
+       by stepParcel's early-growth boost below. */
+    pR[i] = (1.6 + Math.random() * 1.4) * (1 + (1 - throttle) * 1.3);
     /* low throttle also shortens the parcel's life — slow flow does not carry soot to orbit.
        On the Moon the multiplier buys the long, bright, lingering spray of Apollo 11's ascent. */
     const life = (1.1 + Math.random() * 1.2) * (0.6 + 0.4 * throttle) * (onMoon ? 2.2 : 1);
@@ -610,8 +647,85 @@ function spawnPlume(set, pos, quat, vel, throttle, simDt) {
        untouched; only an early death is refused. */
     pLife[i] = rope ? Math.max(0.9, life - tau) : life - tau;
     pInv[i] = 1 / life; pAge[i] = tau;
-    pHeat[i] = Math.max(0, 1 - tau * 1.25);              // the same cooling rate stepParcel applies
+    pHeat[i] = Math.max(0, 1 - tau * 2.4);               // the same cooling rate stepParcel applies
     pTh[i] = 0;
+  }
+}
+
+/* Lunar ground-event extras — review3/14/15: ejecta read as "dots floating mid-air with no
+   ground interaction". The deflected parcels themselves crawl away; what was missing was the
+   record on the surface. Two events, both throttled on SIM seconds, not hit counts — during a
+   hover burn every substep carries dozens of ground contacts and an unthrottled spawn would
+   eat the 1 600-slot pool:
+   · Scorch: 3-4 dark, long-life (6-10 s) parcels pinned at the contact point with near-zero
+     relative velocity (SM_SCORCH: coverage only, additive OFF — the certified young-lunar ×3
+     lift is a mode-1 path and must never brighten these; their ad is 0 at the source). They
+     creep outward at 1.3 m/s and read as a dark patch under the plume.
+   · Spray fan: 5 ground-hugging parcels (SM_SPRAY) inheriting the deflected TANGENTIAL flow at
+     0.55-1.3× and a fresh normal component of at most 2.4 m/s — lunar g is 1.62 m/s², so the
+     ballistic apex is v²/2g ≤ 1.8 m: the sheet stays within ~2 m of the surface for its first
+     second and crawls radially out instead of floating.
+   Both ride spawnParticle (mode 2: fixed colour, no heat machinery, generic colliders). The
+   clock is frozen across a frame's substeps, so the throttle is per rendered frame regardless
+   of h or warp; a reset()/teleport clock rewind re-arms the timers (t < last ⇒ rewound). */
+const SCORCH_COLOUR = [0.13, 0.125, 0.135];   // burnt regolith: clearly darker than the painted Moon
+const SPRAY_COLOUR = [0.86, 0.88, 0.90];      // dust tone, in family with BAND_C[4]
+let lastScorchT = -99, lastFanT = -99;
+function ejectaEvents(gx, gy, gz, nx, ny, nz, rx, ry, rz) {
+  const t = getSimTime();
+  if (t < lastScorchT) { lastScorchT = -99; lastFanT = -99; }
+  const fan = t - lastFanT >= 0.16;
+  const scor = t - lastScorchT >= 0.5;
+  if (!fan && !scor) return;
+  const tl = Math.sqrt(rx * rx + ry * ry + rz * rz);
+  // ground-plane basis at the contact: t along the deflected flow, h ⊥ t in the tangent plane
+  let vn = rx * nx + ry * ny + rz * nz;
+  let tx = rx - vn * nx, ty = ry - vn * ny, tz = rz - vn * nz;
+  let td = Math.sqrt(tx * tx + ty * ty + tz * tz);
+  if (td < 1e-9) { tx = -ny; ty = nx; tz = 0; td = Math.sqrt(tx * tx + ty * ty); }
+  if (td < 1e-9) { tx = 1; ty = 0; tz = 0; td = 1; }
+  const q = 1 / td; tx *= q; ty *= q; tz *= q;
+  let hx = ty * nz - tz * ny, hy = tz * nx - tx * nz, hz = tx * ny - ty * nx;
+  const hl = Math.sqrt(hx * hx + hy * hy + hz * hz) || 1;
+  hx /= hl; hy /= hl; hz /= hl;
+  if (fan && tl > 1e-9) {
+    lastFanT = t;
+    for (let c = 0; c < 5; c++) {
+      const lat = (Math.random() - 0.5) * 0.8;                 // fan spread about the flow axis
+      let dx = tx + hx * lat, dy = ty + hy * lat, dz = tz + hz * lat;
+      const dl = Math.sqrt(dx * dx + dy * dy + dz * dz) || 1;
+      /* dir is exactly TANGENTIAL (t ⊥ n and h = t×n ⊥ n by construction), so the only
+         off-surface speed is vn below. Cap it at 1.5 m/s: the lunar ballistic apex is
+         v²/2g = 1.5²/3.24 ≈ 0.7 m, so the fan sheet stays under 2 m of the surface for
+         its whole first second. The ground collider re-snaps it whenever the terrain
+         rises, and the settle rule in stepParcel's moon branch stops it from being
+         flung by the deflection response on those re-contacts. */
+      const spd = Math.min(1.5, tl * (0.55 + Math.random() * 0.75));
+      /* Cap at 1.5 km/s — under lunar orbit speed (1.68 km/s): at v the convex ground falls away
+         at v²/2R, so above ~1.6 km/s the parcel outruns its own contact and floats (measured:
+         uncapped fans left tl at 2.4-4.5 km/s after a grazing full-jet hit and gained up to
+         8 m of altitude inside their first second). At 1.5 km/s the curvature deficit is
+         0.65 m/s² against 1.62 m/s² of gravity — the sheet keeps contact, crawls a kilometre
+         per second, and with vn ≤ 1.5 m/s never leaves more than ~0.7 m above the ground. */
+      const vn = Math.random() * 0.0015;                    // ≤ 1.5 m/s off the surface
+      _sp.set(gx, gy, gz);
+      _svv.set(_mv.x + dx / dl * spd + nx * vn,
+               _mv.y + dy / dl * spd + ny * vn,
+               _mv.z + dz / dl * spd + nz * vn);
+      spawnParticle(_sp, _svv, 1.6 + Math.random() * 1.4, SPRAY_COLOUR, 2 + Math.random() * 2, SM_SPRAY);
+    }
+  }
+  if (scor) {
+    lastScorchT = t;
+    const n2 = 3 + ((Math.random() * 2) | 0);                   // 3-4 patches
+    for (let c = 0; c < n2; c++) {
+      const j1 = Math.random() - 0.5, j2 = Math.random() - 0.5; // scatter ±~5 m about the contact
+      _sp.set(gx + (tx * j1 + hx * j2) * 0.01,
+              gy + (ty * j1 + hy * j2) * 0.01,
+              gz + (tz * j1 + hz * j2) * 0.01);
+      _svv.set(_mv.x + tx * j1 * 0.0006, _mv.y + ty * j1 * 0.0006, _mv.z + tz * j1 * 0.0006);
+      spawnParticle(_sp, _svv, 6 + Math.random() * 4, SCORCH_COLOUR, 3.5 + Math.random() * 2.5, SM_SCORCH);
+    }
   }
 }
 
@@ -639,6 +753,20 @@ function stepParcel(i, h) {
       groundHit(vx, vy, vz, nx, ny, nz, _mv.x, _mv.y, _mv.z, 1);   // the ground travels with the Moon
       px = _mo.x + nx * gr; py = _mo.y + ny * gr; pz = _mo.z + nz * gr;
       if (_hit) {
+        if (pSmoke[i] === SM_SCORCH || pSmoke[i] === SM_SPRAY) {
+          /* Ground-pinned extras settle WITHOUT bouncing. groundHit's straight-on fallback
+             (tl < 1e-6) builds `tx = -ny; ty = nx` — a unit DIRECTION consumed as a VELOCITY —
+             so anything landing exactly vertically gets the full keep(0.45) km/s tangential
+             kick; measured: a scorch parcel crawled +376 m/s upslope, riding that fallback
+             every step it re-settled. That fallback is a corner case for the certified blast
+             flow and stays untouched; the correct response for a settling patch of dust is to
+             cancel the into-ground velocity component and keep the tangential, position-snapped
+             to the surface above. */
+          let vrx = vx - _mv.x, vry = vy - _mv.y, vrz = vz - _mv.z;
+          const vrn = vrx * nx + vry * ny + vrz * nz;
+          if (vrn < 0) { vrx -= nx * vrn; vry -= ny * vrn; vrz -= nz * vrn; }
+          vx = vrx + _mv.x; vy = vry + _mv.y; vz = vrz + _mv.z;
+        } else {
         vx = _bx; vy = _by; vz = _bz;
         /* Regolith ejecta is pulverised cold rock, not flame, so heat drops below ember on first
            contact. Nothing else cools it here: the vacuum branch has no drag and its cooling term is
@@ -646,8 +774,14 @@ function stepParcel(i, h) {
            second and a half and the surface event read as a shower of glowing sparks rather than the
            low grey sheet Apollo filmed. The band floor below turns it to dust from 20 ms. */
         if (!pSmoke[i]) pHeat[i] = Math.min(pHeat[i], 0.3);
-        pSmoke[i] = 1;                                              // deflected; age gate decides sheet vs dust
+        /* Reaching here excludes SM_SCORCH/SM_SPRAY (settled above), so the smoke conversion and
+           the ×1.25 contact inflation apply once per real deflection — a pinned patch can no
+           longer balloon itself to the 16 m ceiling by re-contacting every step. ejectaEvents
+           fires only on these real plume-deflection hits, never on settling. */
+        pSmoke[i] = 1;                                    // deflected; age gate decides sheet vs dust
         pR[i] = Math.min(R_CAP, pR[i] * 1.25 + 0.2);
+        ejectaEvents(px, py, pz, nx, ny, nz, _bx - _mv.x, _by - _mv.y, _bz - _mv.z);
+        }
       }
     }
   } else {
@@ -663,8 +797,17 @@ function stepParcel(i, h) {
         if (vMps > 1e-6) {
           let bal = BAL0 * (pMode[i] === 2 ? 6 : 1) / (pR[i] * pR[i]);
           /* Ground-marked smoke drags like the air-full puff it has become; a 1/r² law alone lets
-             it coast at hundreds of m/s for its whole life, which reads as shrapnel, not soot. */
-          if (pMode[i] === 1 && pSmoke[i] && pAge[i] > 0.03) bal = Math.max(bal, 0.005);
+             it coast at hundreds of m/s for its whole life, which reads as shrapnel, not soot.
+             review3/04/06 extends the SAME floor to every mode-1 parcel: a fresh jet that keeps
+             2.9 km/s for a second and a half (the old regime — entrainment grows pR, and bal is
+             1/r², so growth made the parcels FLY) stretched the ascent trail into a 2 km cone of
+             dots ~75 m apart, which no 1600-parcel pool can fill. A real F-1 column couples to
+             the air within a few hundred metres and piles into the rope the launch actually
+             drags; the floor does exactly that — τ ≈ 0.1 s against the ground-slip at the pad's
+             air, and nothing at all where there is no air (vacuum CSM stays ballistic, which is
+             correct and is fixed instead by cooling to smoke). The pad's jet meets the trench
+             floor within one or two substeps, before drag can shape it. */
+          if (pMode[i] === 1) bal = Math.max(bal, 0.005);
           bal = Math.min(BAL_CAP, bal);
           const f = 1 / (1 + bal * rho * vMps * h);                 // exact linearised drag step
           const diss = (1 - f) * vMps;                              // m/s of slip shed → entrainment
@@ -766,8 +909,16 @@ function stepParcel(i, h) {
        0.75 s at 2 km/s draws a kilometre of glowing beads behind the vehicle, and that light show is
        what the lunar surface event read as. Real exhaust in vacuum is faint — the visible event is
        the dust it lifts — so lunar parcels radiate away their incandescence faster than Earth parcels
-       lose it to air. */
-    pHeat[i] -= h * (moon ? 1.7 : 1.25) * (pSmoke[i] ? 2.2 : 1);
+       lose it to air.
+       review3/04/06 measured the bead problem again AFTER the birth-size fix: the merge into smoke
+       is what makes the column continuous, and parcels still took 0.62 s (Earth) / 0.46 s (Moon) to
+       cool below the smoke threshold — at 2-3 km/s relative flow that is a 1.3-1.8 km streak of
+       individual hot dots no sprite budget can fill (the drawn cone covers ~30 m). Cooling is now
+       ~2× faster (Earth 1.25 → 2.4 /s, Moon 1.7 → 3.4/s, keeping the certified asymmetry that
+       vacuum loses its fire FASTER): the incandescent/ember streak shrinks to a few hundred metres
+       behind the drawn cone, and by then the early-growth boost has carried the parcel to ~4 m,
+       whose smoke silhouette is ~16 m — overlapping the 3.2 m neighbour spacing several times. */
+    pHeat[i] -= h * (moon ? 3.4 : 2.4) * (pSmoke[i] ? 2.2 : 1);
     /* Entrainment: ground-marked smoke swells fast — a Saturn's blast cloud doubles and redoubles
        in its first second, and a sprite that stays 2 m never dwarfs the crawler. Vacuum smoke
        (lunar dust) grows far less: there is no air to roll in. */
@@ -782,15 +933,45 @@ function stepParcel(i, h) {
        the rope on its own: 1.9 m/s below 40 km, where the column is the whole read. The bead-merge
        rule from AGENTS.md still holds at the top of the regime — at 720 m/s and 520/s, spacing is
        1.4 m against a 21 m sprite diameter. */
+    /* The first 0.45 s of a NON-deflected parcel's life grows at 2.6× the rate below. The
+       sprite is band-quantised now (hard silhouette), so the old growth left measurable gaps
+       between consecutive silhouettes in the ascent column (review3/04: scattered dots at
+       222 m/s, 2.7 parcels/m); the boost closes them where the column is newest and hottest,
+       then hands off to the certified steady rates — the bead-merge rule quoted above is a
+       steady-state number and is untouched. Deflected (pSmoke) parcels deliberately skip the
+       boost: the pad sheet is tuned, and R_YOUNG below already fights the blast dome. */
+    const early = pAge[i] < 0.45 ? 2.6 : 1;
     pR[i] = Math.min(R_CAP, pR[i] + (pSmoke[i] ? (moon ? 5 : 10)
-                                             : (moon ? 0.4 : (px * px + py * py + pz * pz < ALT40_R2 ? 1.9 : 1.2))) * h);
+                                             : (moon ? 0.4 : (px * px + py * py + pz * pz < ALT40_R2 ? 1.9 : 1.2)) * early) * h);
+    /* review3/03: the blast read as one giant blurred tan dome because the deflectate inflated
+       to the 16 m ceiling within its first half-second — dome first, definition never. A young
+       deflected parcel on Earth is now held at R_YOUNG for its first 0.5 s: the sheet climbing
+       out of the trench stays a crisp column (its fire is the held trench heat + the drawn
+       cone), and the dome is rebuilt from parcels that have already survived the young regime
+       and entrain on their own. Lunar deflectate is exempt — the certified Apollo-style spray
+       grows at its own 5 m/s — and so is everything older than 0.5 s. The 0.12 tangential
+       bleed and the smoke-band age gate are untouched. */
+    if (pSmoke[i] && !moon && pAge[i] < 0.5 && pR[i] > R_YOUNG) pR[i] = R_YOUNG;
   } else {
     /* Generic puffs: sparks keep their size; smoke-flagged ones entrain — but entrainment IS air.
        At 67 km staging there is nothing to roll in, and the ungated growth bloomed 26 puffs into
        kilometre-soft bokeh discs against the black: the reviewer's worst frame. The law now reads
        the same atmosphere the plume physics uses — full billow at the pad, ~nothing up high. */
     let grow = 2.4;
-    if (pSmoke[i]) {
+    if (pSmoke[i] === SM_SEAM) {
+      /* Staging-seam puffs entrain exactly like certified smoke — the airDensity gate — but with
+         a low ceiling: they read as dark silhouettes against the flash for 0.4-0.8 s, and at a
+         67 km separation ρ≈0 keeps them at a few tenths of m/s. The ceiling matters down low:
+         staging at the pad (the 'x' key) must not hand a young 14 m/s billow to a 0.5 s puff. */
+      grow = moon ? 1.5 : 14 * THREE.MathUtils.clamp(
+        airDensity(Math.sqrt(px * px + py * py + pz * pz) - RE) / 0.25, 0.02, 0.3);
+    } else if (pSmoke[i] === SM_SCORCH || pSmoke[i] === SM_SPRAY) {
+      /* Lunar ejecta extras (see ejectaEvents): the Moon has no air, so the air gate is trivially
+         satisfied — a slow creep constant is the honest ceiling for a ground patch that must stay
+         flat. Off-Moon spawn sites (a staging at the pad also uses SM_SEAM, never these two)
+         still grow, but bounded. */
+      grow = pSmoke[i] === SM_SCORCH ? (moon ? 1.3 : 3) : (moon ? 1.8 : 6);
+    } else if (pSmoke[i]) {
       if (moon) grow = 5;
       else {
         const rho = airDensity(Math.sqrt(px * px + py * py + pz * pz) - RE);
@@ -803,6 +984,10 @@ function stepParcel(i, h) {
   return pLife[i] <= 0 ? 1 : 0;
 }
 
+/* Draw-call anchor for the Float32 render mirror — see the note in fillBuffers. Chosen per frame
+   before the mirror is refilled; the dense rebuild makes a moving anchor free. */
+const plumeAnchor = new THREE.Vector3();
+
 /* Refill the dense render prefix for the live set. The colour is a hard lookup on the heat index —
    no interpolation between bands anywhere; that step is the same quantisation the hull's
    gradientMap uses, applied to the flame. Hot parcels lean on `add` (glow, order-free), smoke
@@ -812,6 +997,7 @@ function stepParcel(i, h) {
    renders as a black band no material toggle can remove, and a NaN position can smear the whole
    primitive — and the failure would be reported as "tuning", not as data. Every drop increments a
    named counter on plumeDebug so the same frame that looks wrong can be interrogated. */
+
 function fillBuffers() {
   let w = 0, zs = 0;
   for (let k = 0; k < nAlive; k++) {
@@ -823,7 +1009,24 @@ function fillBuffers() {
     if (pMode[i] === 2) {
       cr = pColB[i3]; cg = pColB[i3 + 1]; cb = pColB[i3 + 2];
       const fade = Math.min(1, pLife[i] * 2) * Math.min(1, pAge[i] * 10 + 0.1);
-      if (pSmoke[i]) {
+      if (pSmoke[i] === SM_SEAM) {
+        /* Staging-seam silhouette: tighter than a billowing cloud and LOW alpha — it has to read
+           against the flash and the lit Earth without becoming another glowing puff. ad is 0 at
+           the source: no additive anywhere near the separation event. */
+        sz = pR[i] * 0.008;
+        a = 0.22 * fade; ad = 0;
+      } else if (pSmoke[i] === SM_SCORCH) {
+        /* Scorch patch: a flat stain (0.004 = 4 m of disc per m of parcel radius, against the
+           cloud disc's 11.5), coverage-only, additive OFF — the review's ejecta complaint was
+           brightness floating with no ground; this is its floor. */
+        sz = pR[i] * 0.004;
+        a = 0.4 * fade; ad = 0;
+      } else if (pSmoke[i] === SM_SPRAY) {
+        /* Ground-hugging spray: pale dust sheet, coverage-only (the ×3 young-lunar lift belongs
+           to deflected mode-1 dust on its own flight, not to the settled fan). */
+        sz = pR[i] * 0.009;
+        a = 0.3 * fade; ad = 0;
+      } else if (pSmoke[i]) {
         sz = pR[i] * 0.0115;               // wide disc: the burst must overlap into one cloud
         a = 0.30 * fade; ad = 0.04 * fade;  // coverage, almost no light — it is smoke, not sparks
       } else { a = 0.45 * fade; ad = 0.95 * fade; }  // sparks: mostly light, some body
@@ -870,7 +1073,14 @@ function fillBuffers() {
       continue;
     }
     const w3 = w * 3;
-    rPos[w3] = x; rPos[w3 + 1] = y; rPos[w3 + 2] = z;
+    /* GPU coordinates ride a Float32 grid: at lunar distance (~384,000 km) one unit-in-the-last-
+       place is ~31 m, which is a third of the screen-height at a 50 m hover camera — sprites
+       would wobble against a ground that THREE positions with float64 matrices. The dense mirror
+       is rebuilt every frame anyway, so it is stored RELATIVE to plumeAnchor (the vehicle, which
+       always lives within tens of km of any live parcel: ejecta outlives its burn by ≤10 s) and
+       the Points node carries the anchor. Earth-side this changes nothing measurable (0.5 m grid
+       at 6,371 km either way); Moon-side it is the difference between a dust sheet and confetti. */
+    rPos[w3] = x - plumeAnchor.x; rPos[w3 + 1] = y - plumeAnchor.y; rPos[w3 + 2] = z - plumeAnchor.z;
     rCol[w3] = cr; rCol[w3 + 1] = cg; rCol[w3 + 2] = cb;
     rSiz[w] = sz; rAlp[w] = a; rAdd[w] = ad;
     w++;
@@ -905,6 +1115,13 @@ export function updateParticles(dt) {
       for (let k = nAlive - 1; k >= 0; k--)          // back-to-front: swap-remove keeps unvisited k valid
         if (stepParcel(alive[k], h)) killSlot(k);
   }
+  /* Re-anchor the Float32 draw mirror at the vehicle every frame (see fillBuffers). Parcels
+     only ever live within ~15 km of a burning ship; ejecta outlives its burn by ≤10 s, so the
+     anchor and the cloud stay in the same float32-resolvable neighbourhood whatever body is
+     underneath. With no live ship the anchor is the Moon, then the origin — the status quo. */
+  if (shipLive) plumeAnchor.copy(shipPos);
+  else moonPos(getSimTime(), plumeAnchor);
+  plume.position.copy(plumeAnchor);
   fillBuffers();
 }
 
@@ -928,7 +1145,26 @@ export function detachStage(mesh, pos, quat) {
   scene.add(mesh);
 }
 
-export function addDebris(entry) { debris.push(entry); }
+export function addDebris(entry) {
+  debris.push(entry);
+  /* Staging-seam puffs (review3/05/06 ask): the trail flag marks exactly one event in this
+     game — separateStage hands over a flying booster (separateLES and the explosion never set
+     it). A real separation seam bursts a short ring of grey smoke with the flash and the
+     sparks; 6-10 puffs, 0.4-0.8 s, dark and LOW ALPHA (SM_SEAM's fillBuffers pass), drawn as
+     silhouettes against the flash rather than more glowing beads. They stay SMALL in vacuum
+     by construction: growth rides the certified airDensity gate (at the 67 km staging altitude
+     ρ≈0 caps them at a few tenths of m/s over a 0.5 s life), and the ±3 m birth scatter plus
+     5-13 m/s spread keeps them at the seam instead of orbiting it. */
+  if (entry.trail) {
+    const n = 6 + ((Math.random() * 5) | 0);           // 6..10
+    for (let k = 0; k < n; k++) {
+      _trailRnd.randomDirection();
+      _sp.copy(entry.mesh.position).addScaledVector(_trailRnd, 0.003);
+      _svv.copy(entry.vel).addScaledVector(_trailRnd, 0.005 + Math.random() * 0.008);
+      spawnParticle(_sp, _svv, 0.4 + Math.random() * 0.4, SEAM_COLOUR, 2.5 + Math.random() * 2, SM_SEAM);
+    }
+  }
+}
 
 /* Debris falls under the same gravity the ship uses. trail-flagged pieces (staged boosters) also
    bleed a continuous smoke ribbon: the old staging event spawned one puff per frame at the release
@@ -966,6 +1202,7 @@ export function updateDebris(simDt, accelAt) {
   }
 }
 const TRAIL_COLOUR = [0.82, 0.83, 0.86];
+const SEAM_COLOUR = [0.32, 0.33, 0.36];   // staging-seam smoke: dark grey against the flash
 const _trailPos = new THREE.Vector3(), _trailVel = new THREE.Vector3(), _trailRnd = new THREE.Vector3();
 
 export function clearDebris() {
