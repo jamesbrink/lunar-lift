@@ -3,6 +3,7 @@ import { RE, RM, MU_E, MU_M, SOI_M, MOON_DIST, PAD_UP, PAD_POS, WARPS, SPECS, mo
 import { stages } from './vehicle.js';
 import { S, getState, getSimTime, getEngineOn, getThrottle, getWarpIndex, getSasOn, getSasRetro, getDistFlown, getMaxQ, getTrail, activeStage, totalMass, orbitalElements, getControlAuthority, airDensity, groundVel, bodyUp, navVel } from './physics.js';
 import { initNavball, updateNavball } from './navball.js';
+import { aim } from './targeting.js';
 
 const $ = id => document.getElementById(id);
 
@@ -92,6 +93,18 @@ export function updateHUD(dt) {
   const km = n => !isFinite(n) ? 'ESCAPE' : n < 0 ? 'IMPACT' : n >= 1000000 ? (n / 1000).toFixed(1) + ' Mm' : Math.round(n).toLocaleString() + ' km';
   $('oPe').textContent = km(el.pe); $('oAp').textContent = km(el.ap);
   $('oMoon').textContent = Math.round(rM).toLocaleString() + ' km' + (nearMoon ? ' · SOI' : '');
+  /* Predicted closest lunar approach, from js/targeting.js. The translunar aim is worth about
+     130 km of periselene per 1e-3 rad of launch phase and periselene decides whether the landing is
+     soft, so this is the number a human has to steer by. Green inside the corridor the mission has
+     actually been flown to a soft touchdown in (100-320 km); dim while the look-ahead propagation is
+     still running, which it is for most of a frame at high warp. */
+  const aimEl = $('oAim');
+  if (!isFinite(aim.altKm)) { aimEl.textContent = aim.status === 'na' ? '—' : 'scanning…'; aimEl.className = aim.status === 'na' ? '' : 'run'; }
+  else if (aim.altKm < 0) { aimEl.textContent = 'IMPACT in ' + fmtMET(aim.tMet - getSimTime()); aimEl.className = 'impact'; }
+  else {
+    aimEl.textContent = Math.round(aim.altKm).toLocaleString() + ' km in ' + fmtMET(aim.tMet - getSimTime());
+    aimEl.className = (aim.corridor ? 'ok' : 'bad') + (aim.status === 'running' ? ' run' : '');
+  }
   $('oSas').textContent = getSasOn() ? (getSasRetro() ? 'RETRO' : 'PRO') : 'off';
   const auth = getControlAuthority().py;
   $('oCtrl').textContent = '×' + (auth > 9.95 ? '9.9' : auth.toFixed(1));

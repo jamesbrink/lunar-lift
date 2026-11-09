@@ -228,6 +228,16 @@ function mission(phase, { trace = false, capture = true, stopAtPeri = false } = 
       prevRadial = L.radial;
       if (P.getSimTime() > 400000) break;
     } else if (mode === 'mcc') {
+      /* Throttle run-down. The cutoff above commands targetThrottle 0; the engine keeps pushing
+         until the actual throttle reaches zero, and the surplus is not negligible — coasting
+         forward from the commanded state misses the Moon by more than 16,000 km, while this state
+         reaches the 203 km periselene that the flight records. So this, not the command, is the
+         trajectory the mission is actually on, and js/targeting.js is validated against it. */
+      if (!ev.tliDone && P.getThrottle() < 0.01) {
+        ev.tliDone = { t: +P.getSimTime().toFixed(3), vInert: +P.S.v.length().toFixed(4),
+                       surplus: +((P.S.v.length() - ev.tli.vInert) * 1000).toFixed(1),
+                       pos: P.S.pos.toArray().map(x => +x.toFixed(3)), vel: P.S.v.toArray().map(x => +x.toFixed(6)) };
+      }
       /* Aim. The transfer crosses the lunar orbit radius at a time set by its energy, and the
          Moon's position at that time is set by the launch phase. Along-track Δv moves the crossing
          time, so a small prograde/retrograde pulse closes the miss; the sensitivity comes from a
@@ -238,7 +248,13 @@ function mission(phase, { trace = false, capture = true, stopAtPeri = false } = 
         const now = predictPeri(P.S.pos, P.S.v, P.getSimTime());
         const errKm = (now.r - C.RM) - AIM_PERI;
         if (now.r > C.RM + 120 && now.r - C.RM < 2500) {
-          ev.aimed = { t: +P.getSimTime().toFixed(0), peri: +(now.r - C.RM).toFixed(0), burns: mccDone };
+          /* The state at this instant is the one the game then coasts to the Moon, and the flight
+             below proves where it goes (see ev.peri). pos/vel are recorded so the encounter can be
+             reproduced — js/targeting.js is checked against exactly this. The TLI cutoff above is
+             NOT such a state: the throttle is still running down, and roughly 3 m/s of leftover
+             burn there moves the encounter by 20,000 km. */
+          ev.aimed = { t: +P.getSimTime().toFixed(0), peri: +(now.r - C.RM).toFixed(0), burns: mccDone,
+                       pos: P.S.pos.toArray().map(x => +x.toFixed(3)), vel: P.S.v.toArray().map(x => +x.toFixed(6)) };
           mark('mcc');
           mode = 'approach'; prevRadial = L.radial;
         } else {
@@ -377,9 +393,12 @@ function mission(phase, { trace = false, capture = true, stopAtPeri = false } = 
       if (P.getSimTime() > 800000) break;
     }
 
-    /* The game's 0.1 s cap whenever anything fast is happening; 1 s through the gravity-only
-       coast, where nothing changes on that scale. */
-    const step = (P.isBurning() || altE < 400 || L.r < 30000) ? H : 1.0;
+    /* Always H, never a coarser coast step. js/main.js splits warp into substeps capped at
+       DTPHYS = 0.1 s, so 0.1 s is the ONLY step the game can produce, and the translunar encounter
+       is sensitive enough that stepping the coast at 1 s changes the periselene by ~870 km — the
+       whole difference between a nominal landing and a correction burn. A faster coast step would
+       certify a trajectory no player can fly. */
+    const step = H;
     const mBefore = P.totalMass(), stageBefore = P.activeStage(), burnBefore = P.isBurning();
     P.physStep(step);
     /* On the pad js/physics.js meters propellant while the launch clamp still holds the vehicle, so
@@ -450,7 +469,7 @@ if (!Number.isFinite(phase)) {
 }
 
 const r = mission(phase, { trace: TRACE });
-console.log(`\nphase=${phase.toFixed(5)} -> ${r.state} / ${r.mode}   closest Moon-centred range ${(r.closest / 1000).toFixed(1)}k km`
+console.log(`\nphase=${phase.toFixed(7)} -> ${r.state} / ${r.mode}   closest Moon-centred range ${(r.closest / 1000).toFixed(1)}k km`
   + `   mission ${(r.t / 86400).toFixed(3)} d   wall ${r.ev.wall}s`);
 console.log('\n--- delta-v by phase (rocket equation over the propellant each step spent) ---');
 console.log('  phase        t(s)     dv m/s   mass t   fuel left');

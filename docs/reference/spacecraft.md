@@ -105,8 +105,8 @@ extends into the interstage skirt. Ratios O/F match the engine specs (2.27 / 4.5
 
 | stack | ignition mass | stage Δv (m/s) | TWR | burn times | ideal total | vs 15,142 m/s requirement | flown |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| **shipped `SPECS`** | 3,433 t | 2,215 / 6,518 / 8,357 | 1.37 / 1.09 / 0.19 | 117 / 305 / 1,905 s | **17,090 m/s** | 1.13× | **WON**, 20.2 m/s, 7.5 t spare |
-| previous (`retro`) | 3,780 t | 2,599 / 2,737 / 10,967 | 1.24 / 0.98 / 0.71 | 135 / 194 / 549 s | 16,303 m/s | 1.08× | LOST — 1,233 m/s impact, tank dry |
+| **shipped `SPECS`** | 3,433 t | 2,215 / 6,518 / 8,357 | 1.37 / 1.09 / 0.19 | 117 / 305 / 1,905 s | **17,090 m/s** | 1.13× | **WON**, 20.1 m/s, 7.6 t spare |
+| previous (`retro`) | 3,780 t | 2,599 / 2,737 / 10,967 | 1.24 / 0.98 / 0.71 | 135 / 194 / 549 s | 16,303 m/s | 1.08× | LOST — 5,577 m/s impact, tank dry |
 | NOVA candidate | 5,475 t | 2,569 / 4,304 / 13,734 | 1.30 / 0.96 / 0.83 | 139 / 288 / 526 s | 20,608 m/s | 1.36× | not flown |
 
 NOVA candidate = `S-1 130/3000/70000/330`, `S-2 110/1500/22000/430`, `CSM 25/700/6000/460`.

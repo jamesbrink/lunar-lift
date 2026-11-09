@@ -61,12 +61,12 @@ Repo-wide convention (see `docs/reference/README.md`): **km, s, tonnes, kN**.
   km gives **km/s²**.
 - State vectors are km/s internally; the HUD reads m/s.
 - `simTime` is real mission seconds — no time-scaling fudge anywhere. The measured mission clocks
-  3.436 days, as a real one does.
+  3.404 days, as a real one does.
 - Visuals ride at real planetary scale; the vehicle mesh is scaled by `VS` (≈105 m, Saturn-V sized).
 
 ## Architecture
 
-- `js/physics.js` (483 lines) — the integrator and the reference-frame helpers. Two-body
+- `js/physics.js` (487 lines) — the integrator and the reference-frame helpers. Two-body
   inverse-square gravity for Earth and Moon, exponential drag, mass burn, staging, attitude
   dynamics, SAS, the trajectory predictor, and `impact()`. Its frame rule matters: `navVel()` is
   Moon-relative inside the lunar SOI and inertial outside (it drives SAS and the navball),
@@ -82,11 +82,16 @@ Repo-wide convention (see `docs/reference/README.md`): **km, s, tonnes, kN**.
   (`initNavVectors` / `updateNavVectors`).
 - `js/navball.js` (286 lines) — the KSP-style attitude ball: an orthographic view of the sky from
   the nose, prograde/retrograde markers, apsis markers, the Moon as a target.
-- `js/hud.js` (202 lines) — telemetry panel, flight computer, minimap (auto / system views, lunar
+- `js/hud.js` (215 lines) — telemetry panel, flight computer, minimap (auto / system views, lunar
   SOI marked), stage fuel pips, throttle gauge with engine output in kN, logs, end overlay.
-- `js/main.js` (140 lines) — renderer bootstrap, keyboard input, the render loop (warp → substeps),
+- `js/main.js` (143 lines) — renderer bootstrap, keyboard input, the render loop (warp → substeps),
   camera cycling, and the `window.game` debug handle.
-- `js/constants.js` (114 lines) — every physical constant: `RE`/`MU_E`, `RM`/`MU_M`/`SOI_M`,
+- `js/targeting.js` (108 lines) — the predicted lunar aim: propagates the live state forward through
+  `gravityAt` at the game's own 0.1 s step and publishes the closest lunar approach, incrementally
+  (a fixed step budget per frame) and only re-seeding after thrust, past the predicted encounter, or
+  when the result goes stale. It reproduces the certified flights' periselene to under 0.5 km,
+  which means it predicts what this game will do rather than the converged two-body answer.
+- `js/constants.js` (119 lines) — every physical constant: `RE`/`MU_E`, `RM`/`MU_M`/`SOI_M`,
   `MOON_DIST`, Earth spin, LC-39 position, the exponential-atmosphere parameters, `SPECS` (stage
   dry/fuel/thrust/Isp), `LAND_SAFE` (0.032 km/s), `WARPS`, `DTPHYS`, the SAS pitch program `TURN`,
   and `MOON_PHASE0` — the solved launch window (the Moon's angle along its orbit at MET 0 for which
@@ -122,16 +127,16 @@ Measured (full breakdown in `docs/reference/mission-design.md`):
 | | |
 | --- | --- |
 | Parking orbit | 150 × 784 km at 7.3572 km/s |
-| TLI | to 10.3932 km/s inertial, apogee 385 295 km |
-| Lunar SOI entry | MET 234 479 s |
-| Periselene | 203 km at 2.4375 km/s Moon-relative |
-| LOI | 869 m/s to a lunar orbit with a = 1 990 km |
-| Deorbit | 57 m/s |
-| Powered descent | 2 008 m/s |
-| Touchdown | **20.2 m/s** against the 32 m/s `LAND_SAFE` limit |
-| Propellant spare | 7.5 t of CSM propellant unused |
-| Mission clock | 3.436 days |
-| Δv spent | 16 233 m/s vs an ideal staged budget of 17 090 m/s and a derived one-way requirement of 15 142 m/s |
+| TLI | to 10.4005 km/s inertial at coast start; apogee 384 202 km at the cutoff |
+| Lunar SOI entry | MET 232 147 s |
+| Periselene | 169 km at 2.4585 km/s Moon-relative |
+| LOI | 875 m/s to a lunar orbit with a = 1 957 km |
+| Deorbit | 51 m/s |
+| Powered descent | 2 003 m/s |
+| Touchdown | **20.1 m/s** against the 32 m/s `LAND_SAFE` limit |
+| Propellant spare | 7.6 t of CSM propellant unused |
+| Mission clock | 3.404 days |
+| Δv spent | 16 226 m/s vs an ideal staged budget of 17 090 m/s and a derived one-way requirement of 15 142 m/s |
 
 `python3 tools/mission-math.py` recomputes the derived numbers (derived requirement, budgets, the
 atmosphere comparison) from the primary constants in `docs/reference/`; it exits 0 when script and
@@ -139,17 +144,16 @@ docs agree.
 
 None of this means the mission is easy. The vehicle has ~5 % margin between spent and ideal, the
 descent is only survivable because its guidance flies an altitude-bounded velocity envelope rather
-than trying to hover, and an earlier, slightly smaller stack reached lunar orbit and then hit the
-surface at 1 233 m/s with a dry tank. Margin on paper is not margin; the descent has to be flown.
+than trying to hover, and an earlier, slightly smaller stack reached the Moon and then hit the
+surface at 5 577 m/s with a dry tank. Margin on paper is not margin; the descent has to be flown.
 
 ## Known gaps
 
-- **No predicted-periselene readout.** The HUD shows apoapsis/periapsis but nothing predicts the
-  periselene of a translunar coast, and that is what makes the aim hard for a human: near the window
-  the encounter moves about 130 km of periselene per 1e-3 rad of launch phase, so the tolerance is
-  roughly ±1e-3 rad — about ±3 s of lunar motion (measured in
-  `docs/reference/mission-design.md`). The mission sim solves this by finite differences; a player
-  cannot see it.
+- **The aim readout gives the closest approach, not the landing site.** `js/targeting.js` propagates
+  the live state at the game's own 0.1 s step and the orbit panel prints the predicted periselene —
+  169 km on the shipped window, against the simulation's 169 km — but it answers "how hard will the
+  encounter be", not "where will I touch down", and it takes ~11 s of frames to settle after each
+  manoeuvre. Nothing marks the launch window itself; the player finds it by waiting and warping.
 - **The Moon is a parametric circular orbit**, not an ephemeris: fixed 384 400 km radius, sidereal
   rate `MOON_RATE`, fixed 28.5° inclination, no eccentricity, no node regression.
 - **Drag is an exponential model** (8.5 km scale height), not USSA-1976/MSISE-90;

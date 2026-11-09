@@ -40,6 +40,10 @@ export const getThrottle = () => throttle;
 export const getTargetThrottle = () => targetThrottle;
 export const setTargetThrottle = v => { targetThrottle = v; };
 export const getSimTime = () => simTime;
+/* Put the mission clock somewhere else. Only used by the debug teleport handle, which otherwise
+   could not reproduce a recorded moment: the Moon's position, and therefore the whole translunar
+   geometry, is a function of simTime. */
+export const setSimTime = t => { simTime = t; };
 export const getWarpIndex = () => warpIdx;
 export const setWarpIndex = i => { warpIdx = i; };
 export const getSasOn = () => sasOn;

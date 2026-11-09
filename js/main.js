@@ -2,10 +2,11 @@ import * as THREE from 'three';
 import { RE, RM, WARPS, DTPHYS, PAD_POS, moonPos } from './constants.js';
 import { initWorld, spinBodies, updateSky, updateSunShadow } from './world.js';
 import { stages, initVehicle, initNavVectors, updateNavVectors, spawnParticle, addDebris, detachStage, setVisible, updateParticles, updateDebris, updateBurnVisuals, clearDebris, resetStages } from './vehicle.js';
-import { S, keys, initPhysics, getState, getSimTime, getEngineOn, getThrottle, getWarpIndex, setWarpIndex, setTargetThrottle, getSasOn, setSas, cycleWarp, toggleSas, toggleSasRetro, activeStage, fwd, isBurning, accelAt, physStep, predict, toggleIgnite, separateStage, addDistFlown, pushTrail, resetSim, clearPredictor, markTeleported, predLine, omega, getControlAuthority, navVel } from './physics.js';
+import { S, keys, initPhysics, getState, getSimTime, setSimTime, getEngineOn, getThrottle, getWarpIndex, setWarpIndex, setTargetThrottle, getSasOn, setSas, cycleWarp, toggleSas, toggleSasRetro, activeStage, fwd, isBurning, accelAt, physStep, predict, toggleIgnite, separateStage, addDistFlown, pushTrail, resetSim, clearPredictor, markTeleported, predLine, omega, getControlAuthority, navVel } from './physics.js';
 import { camera, initCamera, cycleCamera, updateCamera, resetCameraView, setCamMode, setCamDist, resizeCamera, getCamDist } from './camera.js';
 import { initHUD, addLog, updateHUD, drawMap, toggleMapView, endOverlay, setWarn, hideOverlay, clearLog } from './hud.js';
 import { audioInit, audioEngine, audioThud, audioExplosion, audioWin, updateEngineGain } from './audio.js';
+import { updateAim, resetAim } from './targeting.js';
 
 /* ---------------- renderer / scene ---------------- */
 const canvas = document.getElementById('gl');
@@ -28,6 +29,7 @@ function resetMission() {
   hideOverlay();
   clearLog();
   clearPredictor();
+  resetAim();
   setWarn(null);
   audioEngine(false);
   addLog('MISSION RESET — PAD-READY');
@@ -100,6 +102,7 @@ function frame() {
     updateDebris(simDt, accelAt);
     updateEngineGain(isBurning(), Math.max(0, S.pos.length() - RE));
     predTick += dtReal; if (predTick > .35) { predTick = 0; if (getState() === 'flying') predict(); }
+    updateAim();   // predicted lunar aim; spends a fixed step budget per frame and self-throttles
   }
   updateParticles(Math.min(1, dtReal * WARPS[getWarpIndex()]));
   updateCamera(dtReal);
@@ -134,7 +137,7 @@ window.game = {
   ff(sec) { let left = sec; while (left > 1e-9) { const h = Math.min(DTPHYS, left); physStep(h); left -= h; } },
   setThrottle(v) { setTargetThrottle(v); },
   nudge(ax, ay, az) { omega.set(ax, ay, az); },
-  teleport(pos, vel) { markTeleported(); S.pos.set(...pos); S.v.set(...vel); prevPos.copy(S.pos); omega.set(0, 0, 0); },
+  teleport(pos, vel, t) { markTeleported(); resetAim(); S.pos.set(...pos); S.v.set(...vel); if (t !== undefined) setSimTime(t); prevPos.copy(S.pos); omega.set(0, 0, 0); },
   reset: resetMission,
   _cam: camera, _pred: predLine, setCam: d => { setCamDist(d); },
 };
