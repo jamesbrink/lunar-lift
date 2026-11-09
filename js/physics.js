@@ -162,7 +162,7 @@ export function separateLES() {
     angVel: new THREE.Vector3(0.5, 0.15, 0.15), age: 0 });
   for (let k = 0; k < 16; k++) vehicleOps.spawnParticle(worldPos,
     S.v.clone().addScaledVector(up, 0.008 + Math.random() * 0.03)
-      .add(new THREE.Vector3().randomDirection().multiplyScalar(0.012)), 0.9 + Math.random() * 0.9, [0.92, 0.93, 0.98]);
+      .add(new THREE.Vector3().randomDirection().multiplyScalar(0.012)), 0.5 + Math.random() * 0.5, [0.92, 0.93, 0.98], 7 + Math.random() * 6, 1);
   hooks.addLog('LAUNCH ESCAPE TOWER JETTISONED', 'good');
   audio.thud();
 }
@@ -180,9 +180,9 @@ export function separateStage() {
   const worldPos = S.pos.clone();
   const lat = new THREE.Vector3(1, 0, 0).applyQuaternion(S.q);
   vehicleOps.addDebris({ mesh, vel: S.v.clone().addScaledVector(lat, 0.03).addScaledVector(PAD_UP, -0.005),
-    angVel: new THREE.Vector3(Math.random() * 0.6, Math.random() * 0.6, Math.random() * 0.6), age: 0 });
+    angVel: new THREE.Vector3(Math.random() * 0.6, Math.random() * 0.6, Math.random() * 0.6), age: 0, trail: 1 });
   for (let k = 0; k < 26; k++) vehicleOps.spawnParticle(worldPos,
-    S.v.clone().addScaledVector(lat, 0.02 + Math.random() * 0.05).add(new THREE.Vector3().randomDirection().multiplyScalar(0.015)), 1.2 + Math.random(), [1, .8, .4]);
+    S.v.clone().addScaledVector(lat, 0.02 + Math.random() * 0.05).add(new THREE.Vector3().randomDirection().multiplyScalar(0.015)), 0.6 + Math.random() * 0.6, [1, .8, .4], 9 + Math.random() * 8, 1);
   audio.thud();
   engineOn = false; targetThrottle = 0; throttle = 0;
 }
@@ -448,7 +448,7 @@ const PRED_MAX = 2700;
 const predPos = new Float32Array(PRED_MAX * 3), predCol = new Float32Array(PRED_MAX * 3);
 /* A 1 px THREE.Line cannot glow, and world-space thickness is hopeless across 0.001–3e6 km.
    The ribbon extrudes in the vertex shader at constant pixels; predLine is a Group. */
-export const predLine = ribbon({ widthPx: 3, glowWidthPx: 11, vertexColors: true, capacity: PRED_MAX + 2 });
+export const predLine = ribbon({ widthPx: 2.5, glowWidthPx: 7, vertexColors: true, capacity: PRED_MAX + 2 });
 
 export function clearPredictor() { predLine.clear(); }
 
@@ -492,6 +492,14 @@ export function predict() {
     if (rM <= RM + RHALF) { impactType = 'moon'; impactT = t - simTime; break; }
     if (p.length() <= RE + RHALF) { impactType = 'earth'; impactT = t - simTime; break; }
     if (p.length() > 900000 || rM > 900000) break;
+  }
+  /* Time taper: a constant-brightness beam reads as decoration and its far end — the part that
+     says "this is where you will BE" — competed with the near end for the eye. Brightness falls
+     along the ribbon as (1 − 0.72·frac^1.6), so hours-ahead dims toward the sky while the next
+     minutes stay loud. Applied before the impact marker is appended so the red stays red. */
+  for (let i = 0; i < n; i++) {
+    const f = 1 - 0.72 * Math.pow(i / Math.max(1, n - 1), 1.6);
+    predCol[i * 3] *= f; predCol[i * 3 + 1] *= f; predCol[i * 3 + 2] *= f;
   }
   if (!onSurface && impactType && (impactT < 3000 || impactType === 'moon')) {
     predPos.set([p.x, p.y, p.z], n * 3); predCol.set([1, .22, .18], n * 3); n++;

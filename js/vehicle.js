@@ -532,17 +532,22 @@ function groundHit(vx, vy, vz, nx, ny, nz, frx, fry, frz, moon) {
 
 /* Generic particle — the contract physics.js calls for staging puffs and the explosion. Same pool,
    same gravity, same colliders (debris sparks bounce off the pad too), but it keeps the exact
-   colour it was handed and skips the heat/band machinery. Signature unchanged. */
-export function spawnParticle(pos, vel, life, color) {
+   colour it was handed and skips the heat/band machinery. Signature extended with two OPTIONAL
+   trailing args (physics.js's 4-arg explosion calls are unchanged): `size0` in metres, and
+   `smoke` = 1 to make the parcel swell like an entraining cloud instead of a fixed spark. The
+   staging burst used to be 26 identical 3.5 m puffs strung along the spent stage's arc at one per
+   frame — a pearl necklace. Real staging events are a billowing cloud, so the callers now ask for
+   big smoke parcels, and updateDebris keeps that cloud fed along the whole debris fall. */
+export function spawnParticle(pos, vel, life, color, size0 = 3.5, smoke = 0) {
   const i = allocSlot(), i3 = i * 3;
-  pMode[i] = 2; pSmoke[i] = 0;
+  pMode[i] = 2; pSmoke[i] = smoke;
   moonPos(getSimTime(), _mo);     // ff() moves the sim clock without running updateParticles; don't trust the cache
   const dx = pos.x - _mo.x, dy = pos.y - _mo.y, dz = pos.z - _mo.z;
   pMoon[i] = dx * dx + dy * dy + dz * dz < SOI2 ? 1 : 0;
   pPos[i3] = pos.x; pPos[i3 + 1] = pos.y; pPos[i3 + 2] = pos.z;
   pVel[i3] = vel.x; pVel[i3 + 1] = vel.y; pVel[i3 + 2] = vel.z;
   pColB[i3] = color[0]; pColB[i3 + 1] = color[1]; pColB[i3 + 2] = color[2];
-  pR[i] = 3.5; pHeat[i] = 0; pAge[i] = 0; pLife[i] = life; pInv[i] = 1 / Math.max(0.05, life);
+  pR[i] = size0; pHeat[i] = 0; pAge[i] = 0; pLife[i] = life; pInv[i] = 1 / Math.max(0.05, life);
   pTh[i] = 0;
 }
 
@@ -754,7 +759,19 @@ function stepParcel(i, h) {
        rather than a column. Lunar parcels stay thin — a vacuum rolls in no air. */
     pR[i] = Math.min(R_CAP, pR[i] + (pSmoke[i] ? (moon ? 5 : 10) : (moon ? 0.4 : 1.2)) * h);
   } else {
-    pR[i] = Math.min(R_CAP, pR[i] + 2.4 * h);
+    /* Generic puffs: sparks keep their size; smoke-flagged ones entrain — but entrainment IS air.
+       At 67 km staging there is nothing to roll in, and the ungated growth bloomed 26 puffs into
+       kilometre-soft bokeh discs against the black: the reviewer's worst frame. The law now reads
+       the same atmosphere the plume physics uses — full billow at the pad, ~nothing up high. */
+    let grow = 2.4;
+    if (pSmoke[i]) {
+      if (moon) grow = 5;
+      else {
+        const rho = airDensity(Math.sqrt(px * px + py * py + pz * pz) - RE);
+        grow = 14 * THREE.MathUtils.clamp(rho / 0.25, 0.03, 1);
+      }
+    }
+    pR[i] = Math.min(R_CAP, pR[i] + grow * h);
   }
   pLife[i] -= h; pAge[i] += h;
   return pLife[i] <= 0 ? 1 : 0;
@@ -780,7 +797,10 @@ function fillBuffers() {
     if (pMode[i] === 2) {
       cr = pColB[i3]; cg = pColB[i3 + 1]; cb = pColB[i3 + 2];
       const fade = Math.min(1, pLife[i] * 2) * Math.min(1, pAge[i] * 10 + 0.1);
-      a = 0.45 * fade; ad = 0.95 * fade;  // sparks: mostly light, some body
+      if (pSmoke[i]) {
+        sz = pR[i] * 0.0115;               // wide disc: the burst must overlap into one cloud
+        a = 0.30 * fade; ad = 0.04 * fade;  // coverage, almost no light — it is smoke, not sparks
+      } else { a = 0.45 * fade; ad = 0.95 * fade; }  // sparks: mostly light, some body
     } else {
       const q = pHeat[i];
       let b = q > 0.75 ? 0 : q > 0.5 ? 1 : q > 0.22 ? 2 : (pMoon[i] ? 4 : 3);
@@ -875,15 +895,43 @@ export function detachStage(mesh, pos, quat) {
 
 export function addDebris(entry) { debris.push(entry); }
 
+/* Debris falls under the same gravity the ship uses. trail-flagged pieces (staged boosters) also
+   bleed a continuous smoke ribbon: the old staging event spawned one puff per frame at the release
+   point, so the vehicle flew away and left a string of separate coins (the reviewer's "pearl
+   chain"). A fed trail — one small parcel every ~11 m of fall — merges into a column the same way
+   the plume does, and it dies with the debris rather than the burst. */
 export function updateDebris(simDt, accelAt) {
   for (let i = debris.length - 1; i >= 0; i--) {
     const d = debris[i]; d.age += simDt;
     const a = accelAt(d.mesh.position, d.vel, 8, null);
     d.vel.addScaledVector(a, simDt); d.mesh.position.addScaledVector(d.vel, simDt);
     d.mesh.rotation.x += d.angVel.x * simDt; d.mesh.rotation.y += d.angVel.y * simDt;
+    if (d.trail) {
+      const fall = Math.hypot(d.vel.x, d.vel.y, d.vel.z);
+      /* Air-gated: a debris trail is smoke, and smoke needs air. The separation itself happens
+         at the edge of space, where the honest event is the flash (physics.js) and tumbling
+         metal, not a ribbon — the ribbon appears on the way down. */
+      const alt = d.mesh.position.length() - RE;
+      const rho = alt < 420 ? airDensity(alt) : 0;
+      if (rho > 0.004) {
+        d.smokeAcc = (d.smokeAcc || 0) + simDt;
+        const period = Math.max(0.033, 11 / Math.max(1, fall * 1000));   // ≥11 m apart, ≤30/s
+        while (d.smokeAcc >= period) {
+          d.smokeAcc -= period;
+          const spd = THREE.MathUtils.clamp(fall * 1000 / 700, 0.3, 3);
+          _trailPos.copy(d.mesh.position);
+          _trailVel.copy(d.vel).multiplyScalar(0.12).addScaledVector(
+            _trailRnd.randomDirection(), 0.004);
+          spawnParticle(_trailPos, _trailVel, 2.6 + Math.random() * 1.6, TRAIL_COLOUR,
+            (6 + Math.random() * 8) * spd, 1);
+        }
+      } else d.smokeAcc = 0;
+    }
     if (d.age > 400 || d.mesh.position.length() > 60000) { scene.remove(d.mesh); debris.splice(i, 1); }
   }
 }
+const TRAIL_COLOUR = [0.82, 0.83, 0.86];
+const _trailPos = new THREE.Vector3(), _trailVel = new THREE.Vector3(), _trailRnd = new THREE.Vector3();
 
 export function clearDebris() {
   debris.forEach(d => scene.remove(d.mesh)); debris.length = 0;
@@ -954,8 +1002,9 @@ export function updateNavVectors(pos, nose, vel, burning, camDist, groundSpeed =
   /* Sized off the vehicle, never off the camera distance. The old `camDist * 0.35` made each arrow
      35% of the distance to the camera, so pulling the chase view back for the horizon turned them
      into 30 km cones that swamped a 105 m rocket and the planet behind it. Growing with zoom is
-     still useful — hence a bounded allowance, so far out the arrow is at most three hull lengths. */
-  const len = SHIP_KM * THREE.MathUtils.clamp((camDist / SHIP_KM) * 0.055, 1.1, 3.0);
+     still useful — hence a bounded allowance; at the closest chase distance the old floor of 1.1
+     hull lengths drew a cone taller than the frame, over the HUD. */
+  const len = SHIP_KM * THREE.MathUtils.clamp((camDist / SHIP_KM) * 0.045, 0.8, 2.2);
   thrustArrow.line.visible = thrustArrow.head.visible = burning;
   if (burning) setArrow(thrustArrow, pos, nose, len);
   /* The direction is the steering frame (`navVel()`, so it agrees with the navball), but a vehicle
@@ -981,7 +1030,11 @@ export function updateBurnVisuals({ pos, quat, vel, throttle, activeIdx, burn, f
          two radial axes have to take the radius. It used to read (rx, L, L), which stretched the plume
          along one radial direction and drew the whole flame as a diamond under the rocket. */
       st.flame.scale.set((2 + throttle * 1.6) * flick, L * flick, (2 + throttle * 1.6) * flick);
-      st.glow.scale.setScalar((6 + throttle * 13) * flick);
+      /* The exit-plane bloom is sized by the ENGINE, not by a shared law: at 6+13·throttle the
+         CSM's single 91 kN bell wore the same white orb as five F-1s, and a round balloon bigger
+         than the flame next to a small cone is exactly the "stub, gap, bigger triangle" the
+         review saw. Measured against each stage's cone length (L above). */
+      st.glow.scale.setScalar(((idx === 0 ? 6 + throttle * 11 : idx === 1 ? 3.5 + throttle * 6 : 2 + throttle * 4)) * flick);
       // engine gimbal: the plume lags the turn, swinging opposite the body rate (clamped +/-0.22 rad).
       // Euler 'YXZ': Rx pitches apex toward +Y for omega.x > 0 (nose pitches toward -Y),
       // then Ry swings apex toward -X for omega.y > 0 (nose yaws toward +X) — both opposite the turn.
