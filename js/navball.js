@@ -219,7 +219,15 @@ function drawOrbit(nearMoon, centre, vel, el, ecc) {
   const plane = p => ({ x: p.dot(A), y: p.dot(B) });
 
   const reach = el.ap > 0 && isFinite(el.ap) ? el.ap : rel.length() * 1.7;
-  const scale = (Math.min(ORB_W, ORB_H * 1.9) / 2 - 10) / Math.max(reach, bodyR * 1.05);
+  /* The body-radius floor is 1.8, not the old 1.05, and it is what keeps the disc ON the plot:
+     bodyRpx = 65·bodyR / max(reach, k·bodyR) ≤ 65/k, so the disc can never exceed 36.1 px on a
+     canvas that is only 80 px tall. At k = 1.05 every bound orbit painted the body at r = 61.9
+     px: the circle overflowed the top and bottom edges and the canvas itself cropped it into
+     straight-sided blocks (the 'unmasked rectangular crop' of the 05/09/12/13/15 review frames —
+     no circular clip can mask an edge that lives on the canvas boundary). Fitted, the clip
+     circle is the plot's outer boundary; apoapsis stays inside too for LEO/MLO
+     ((6671/6371)·36.1 = 37.8 px; the higher-apo tips clip as before, and always did). */
+  const scale = (Math.min(ORB_W, ORB_H * 1.9) / 2 - 10) / Math.max(reach, bodyR * 1.8);
   const ox = ORB_W / 2, oy = ORB_H / 2;
   const px = p => [ox + p.x * scale, oy - p.y * scale];
 
@@ -231,8 +239,13 @@ function drawOrbit(nearMoon, centre, vel, el, ecc) {
      coastline's width, and every pixel here has to survive a 2× dpr canvas first. */
   const bodyRpx = Math.max(2, bodyR * scale);
   const pcv = WORLD.planetCanvas(nearMoon ? 'moon' : 'earth');
+  /* The blit gets its own save → clip → restore, and the clip radius is inset 0.75 px below the
+     limb ring stroked after the restore: ring lineWidth is 1, so its stroke covers bodyRpx ± 0.5
+     and the mask edge hides underneath it. A rectangular edge can then only reach the ring's
+     outer antialiased pixels, which the ring itself paints over — the crop is masked regardless
+     of which draw escaped the old same-radius clip. */
   c.save();
-  c.beginPath(); c.arc(ox, oy, bodyRpx, 0, 6.283); c.clip();
+  c.beginPath(); c.arc(ox, oy, Math.max(0.5, bodyRpx - 0.75), 0, 6.283); c.clip();
   if (pcv && pcv.width > 1) {
     const spin = WORLD.bodySpin(nearMoon ? 'moon' : 'earth');
     const cs = Math.cos(spin), sn = Math.sin(spin);
@@ -327,8 +340,18 @@ function drawOrbit(nearMoon, centre, vel, el, ecc) {
     c.lineTo(vx + ux * (L - 5) + uy * 2.6, vy + uy * (L - 5) - ux * 2.6);
     c.closePath(); c.fill();
   }
-  if (nearMoon) { c.fillStyle = 'rgba(150,165,190,.6)'; c.font = '9px ui-monospace,monospace'; c.fillText('moon', ORB_W - 26, ORB_H - 5); }
-  else { c.fillStyle = 'rgba(150,165,190,.6)'; c.font = '9px ui-monospace,monospace'; c.fillText('earth', 4, ORB_H - 18); }
+  /* Caption lives in the top-right corner, right-aligned — not the old (124,75)/(4,62) spots
+     that sat inside the disc and read through the Ap/Pe lines ('Ap 1510 km' on the caption in
+     13, 'Ap 960 k…' over it in 09). Widths measured at 9px mono (≈5.4 px/char): the longest
+     value string 'Ap 384,400 km' (13 chars) ends by x ≈ 74, the longest status string
+     'impact trajectory' (17) by x ≈ 96, and the caption's longest word 'earth' starts at
+     ORB_W − 4 − 27 = 119 — two slots on one line that cannot touch at any telemetry value.
+     The corner also sits outside the now-fitted disc (r ≤ 36.1 px, centre (75,40)), so the
+     caption is never painted over ground; 'Pe' keeps the bottom line to itself. */
+  c.fillStyle = 'rgba(150,165,190,.6)'; c.font = '9px ui-monospace,monospace';
+  c.textAlign = 'right';
+  c.fillText(nearMoon ? 'moon' : 'earth', ORB_W - 4, 11);
+  c.textAlign = 'left';
 }
 
 export function updateNavball() {
