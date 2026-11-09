@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { ribbon } from './ribbon.js';
 import { RE, MU_E, RM, MU_M, SOI_M, PAD_UP, PAD_POS, PAD_ANGULAR, RHALF, ATMO_H, RHO0, CD_AREA, WARPS, LAND_SAFE, SAFE_EARTH, SPECS, CAPSULE_MASS, EARTH_SPIN, SPIN_AXIS, PAD_EAST, MOON_DIST, TURN, moonPos, moonVel } from './constants.js';
 
 /* ---------------- injected dependencies (see initPhysics) ----------------
@@ -415,15 +416,15 @@ function checkMissionEvents() {
 }
 
 /* ---------------- trajectory prediction ---------------- */
-const PRED_MAX = 900;
-const predGeo = new THREE.BufferGeometry();
+// 3x the sample density of the old 900-point / every-6th-step scheme at the same integration
+// budget — chord faceting on a low orbit was visible as straight segments.
+const PRED_MAX = 2700;
 const predPos = new Float32Array(PRED_MAX * 3), predCol = new Float32Array(PRED_MAX * 3);
-predGeo.setAttribute('position', new THREE.BufferAttribute(predPos, 3));
-predGeo.setAttribute('color', new THREE.BufferAttribute(predCol, 3));
-predGeo.setDrawRange(0, 0);
-export const predLine = new THREE.Line(predGeo, new THREE.LineBasicMaterial({ vertexColors: true, transparent: true, opacity: .75 }));
+/* A 1 px THREE.Line cannot glow, and world-space thickness is hopeless across 0.001–3e6 km.
+   The ribbon extrudes in the vertex shader at constant pixels; predLine is a Group. */
+export const predLine = ribbon({ widthPx: 3, glowWidthPx: 11, vertexColors: true, capacity: PRED_MAX + 2 });
 
-export function clearPredictor() { predGeo.setDrawRange(0, 0); }
+export function clearPredictor() { predLine.clear(); }
 
 export function predict() {
   const i = activeStage();
@@ -451,7 +452,7 @@ export function predict() {
     }
     if (thAcc) g.add(thAcc);
     v.addScaledVector(g, dt); p.addScaledVector(v, dt); t += dt;
-    if (s % 6 === 0) {
+    if (s % 2 === 0) {
       predPos.set([p.x, p.y, p.z], n * 3);
       predCol.set([0.30, 0.85, 0.5], n * 3); n++;
     }
@@ -467,8 +468,8 @@ export function predict() {
     if (msg !== impactWarn) impactWarn = msg;
     hooks.setWarn(msg);
   } else { impactWarn = ''; hooks.setWarn(null); }
-  predGeo.setDrawRange(0, n);
-  predGeo.attributes.position.needsUpdate = predGeo.attributes.color.needsUpdate = true;
+  predLine.setPoints(predPos, n);
+  predLine.setColors(predCol, n);
 }
 
 /* ---------------- mission reset (sim side) ---------------- */
