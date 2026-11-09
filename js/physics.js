@@ -1,5 +1,6 @@
 import * as THREE from 'three';
-import { RE, MU_E, RM, MU_M, SOI_M, PAD_UP, PAD_POS, PAD_ANGULAR, RHALF, ATMO_H, RHO0, CD_AREA, WARPS, LAND_SAFE, SAFE_EARTH, SPECS, CAPSULE_MASS, EARTH_SPIN, SPIN_AXIS, PAD_EAST, MOON_DIST, TURN, moonPos, moonVel } from './constants.js';
+import { airDensity, aeroForce, aeroState, ATMO_TOP, CN_BODY } from './aero.js';
+import { RE, MU_E, RM, MU_M, SOI_M, PAD_UP, PAD_POS, PAD_ANGULAR, RHALF, CD_AREA, WARPS, LAND_SAFE, SAFE_EARTH, SPECS, CAPSULE_MASS, EARTH_SPIN, SPIN_AXIS, PAD_EAST, MOON_DIST, TURN, moonPos, moonVel } from './constants.js';
 
 /* ---------------- injected dependencies (see initPhysics) ----------------
    hooks:      addLog(msg, cls), showEndOverlay(title, body, btn)
@@ -30,6 +31,13 @@ let I0 = null;                       // fully loaded reference inertia, recomput
 let trail = [];
 let distFlown = 0;
 let sasHoldTime = 0;
+let rcsAssist = true, aeroLoad = 0;
+/* Lateral aerodynamic load the airframe survives, in g. Set against the measured nominal ascent
+   (see docs/reference/atmosphere.md): the stack is a pressure-stabilised tank and folds early. */
+export const LOAD_LIMIT_STACK = 1.2, LOAD_LIMIT_CSM = 6;
+export const getAeroLoad = () => aeroLoad;
+export const getRcsAssist = () => rcsAssist;
+export function toggleRcsAssist() { rcsAssist = !rcsAssist; hooks.addLog(`RCS STABILITY ASSIST ${rcsAssist ? 'ON' : 'OFF — ROTATION IS NOW UNDAMPED'}`); }
 
 export const getState = () => state;
 export const setState = v => { state = v; };
@@ -72,7 +80,7 @@ export function activeStage() { for (let i = 0; i < 3; i++) if (!stages[i].separ
 export function totalMass() { let m = CAPSULE_MASS; for (const st of stages) if (!st.separated) m += st.dry + st.fuel; return m; }   // tonnes
 export function fwd() { return UP_REF.clone().applyQuaternion(S.q); }
 export function isBurning() { const i = activeStage(); return engineOn && throttle > .01 && i >= 0 && stages[i].fuel > 0; }
-export function airDensity(alt) { return alt > 420 ? 0 : RHO0 * Math.exp(-Math.max(0, alt) / ATMO_H); }
+export { airDensity, aeroState };
 /* velocity relative to the rotating ground — what the telemetry and SAS actually care about */
 export function surfaceVel(out = new THREE.Vector3()) {
   return out.copy(S.v).add(new THREE.Vector3(-EARTH_SPIN * S.pos.z, 0, EARTH_SPIN * S.pos.x));
@@ -104,13 +112,20 @@ export function bodyUp(out = new THREE.Vector3()) {
   return out.copy(S.pos).normalize();
 }
 
-/* ---- moment of inertia from live mass distribution (build units, see vehicle.js) ---- */
+/* ---- mass and aerodynamic geometry of the hardware still attached ----
+   One table for both, in build units along the vehicle axis (1 u = 1.4 m; js/saturn.js draws the
+   same stations: S-1 tail at z −42, S-2 tail −11.8, CSM tail 6.8, apex 28.7). L and r are each
+   segment's length and radius, zc its middle. */
 const GEOM = [
-  { L: 34, r: 6.2, zc: -20.5 },    // S-1 booster
-  { L: 22, r: 5.2, zc: 7.5 },      // S-2 upper
-  { L: 19, r: 4.4, zc: 24.5 },     // CSM service body + cone
-  { L: 8,  r: 2.0, zc: 33.5 },     // capsule lump
+  { L: 30.2, r: 3.57, zc: -26.9 },   // S-1 booster: 42 m long, 10 m across
+  { L: 18.6, r: 3.57, zc: -2.5 },    // S-2 upper
+  { L: 15.9, r: 2.2,  zc: 14.75 },   // CSM service body + adapter
+  { L: 6,    r: 1.4,  zc: 25.7 },    // command module
 ];
+const U_M = 1.4;                                       // metres per build unit
+const FIN_AREA = 20, FIN_Z = -38;                      // m² of effective fin planform per plane, and its station
+const BLUNT_CA = 1.1;                                  // a capsule alone flies as a blunt body
+const CA_STACK = CD_AREA / (Math.PI * (GEOM[0].r * U_M) ** 2);   // so the full stack nose-on is CD_AREA
 function inertiaAxes() {
   let m = CAPSULE_MASS, mz = CAPSULE_MASS * GEOM[3].zc;
   for (let k = 0; k < 3; k++) if (!stages[k].separated) { const mk = stages[k].dry + stages[k].fuel; m += mk; mz += mk * GEOM[k].zc; }
@@ -122,7 +137,37 @@ function inertiaAxes() {
     py += mk * ((gm.zc - zc) ** 2 + gm.L * gm.L / 12 + gm.r * gm.r / 4);
     roll += mk * gm.r * gm.r / 2;
   }
-  return { py, roll };
+  return { py, roll, zc };                             // t·u², t·u², u
+}
+/* Reference area, planform and its centroid, fins — for whatever is still bolted on. `jA` is the
+   planform's second moment about the station z0 (m⁴), which is what pitch damping scales with. */
+const _shape = { aRef: 0, ca: CA_STACK, aPlan: 0, zPlan: 0, aFin: 0, zFin: FIN_Z };
+function aeroShape() {
+  let rMax = GEOM[3].r, aPlan = 0, az = 0;
+  for (let k = 0; k < 4; k++) if (k === 3 || !stages[k].separated) {
+    const g = GEOM[k], a = g.L * 2 * g.r;
+    aPlan += a; az += a * g.zc; rMax = Math.max(rMax, g.r);
+  }
+  const bare = activeStage() < 0;
+  _shape.aRef = Math.PI * (rMax * U_M) ** 2;
+  _shape.ca = bare ? BLUNT_CA : CA_STACK;
+  _shape.aPlan = aPlan * U_M * U_M; _shape.zPlan = az / aPlan;
+  _shape.aFin = stages[0].separated ? 0 : FIN_AREA;
+  return _shape;
+}
+function planformMoment(z0) {
+  let j = 0;
+  for (let k = 0; k < 4; k++) if (k === 3 || !stages[k].separated) {
+    const g = GEOM[k]; j += g.L * 2 * g.r * ((g.zc - z0) ** 2 + g.L * g.L / 12);
+  }
+  return j * U_M ** 4;
+}
+/* Static margin in metres: how far the centre of pressure sits BEHIND the centre of mass for a
+   small angle of attack. Positive weathervanes; negative diverges. Moves forward-heavy as tanks drain. */
+export function stability() {
+  const sh = aeroShape(), I = inertiaAxes();
+  const nb = CN_BODY * sh.aRef, nf = 3 * sh.aFin;
+  return nb + nf > 0 ? -((nb * (sh.zPlan - I.zc) + nf * (sh.zFin - I.zc)) / (nb + nf)) * U_M : 0;
 }
 export function getControlAuthority() { const I = inertiaAxes(); return { py: I0 ? I0.py / I.py : 1, roll: I0 ? I0.roll / I.roll : 1 }; }
 const UP_Z = new THREE.Vector3(0, 0, 1);
@@ -207,22 +252,27 @@ export function gravityAt(p, out, t = simTime) {
   moonPos(t, _moon);
   _md.subVectors(p, _moon);
   out.addScaledVector(_md, -MU_M / Math.pow(_md.length(), 3));
+  /* The frame is Earth-centred, and the Earth is itself falling toward the Moon at MU_M/d² =
+     3.3e-5 m/s². A frame that accelerates owes its contents the opposite of that — the indirect
+     term of the three-body problem. Without it the Earth is nailed to the origin and only the
+     ship feels the Moon, which is not Newton's third law. */
+  out.addScaledVector(_moon, -MU_M / Math.pow(_moon.length(), 3));
   return out;
 }
 const _g = new THREE.Vector3(), _d = new THREE.Vector3(), _moon = new THREE.Vector3(), _md = new THREE.Vector3(), _sv = new THREE.Vector3(), _up = new THREE.Vector3();
-const _spinQ = new THREE.Quaternion();
-export function accelAt(p, v, mass, thrustAcc, t = simTime) {
+const _spinQ = new THREE.Quaternion(), _fw = new THREE.Vector3(), _tq = new THREE.Vector3(), _qi = new THREE.Quaternion();
+const _aero = new THREE.Vector3();
+/* `axis` is the unit nose vector of the thing being accelerated; without one (debris) the air
+   sees a tumbling lump and only drags it. */
+export function accelAt(p, v, mass, thrustAcc, t = simTime, axis = null) {
   gravityAt(p, _d, t);
-  const r = p.length(), alt = r - RE;
-  if (alt < 420) {                                  // atmosphere rides on the planet's spin
-    const vrel = _g.copy(v).add(new THREE.Vector3(-EARTH_SPIN * p.z, 0, EARTH_SPIN * p.x));   // ω(0,1,0) × r
-    const rho = airDensity(alt);
-    const vrelKms = vrel.length();
-    const vrelMps = vrelKms * 1000;
-    // a(km/s²) = ½·ρ(kg/m³)·A(m²)·v(km/s)² / mass(t)
-    _d.addScaledVector(vrel, -0.5 * rho * CD_AREA * vrelKms / mass);
-    const q = 0.5 * rho * vrelMps * vrelMps; if (q > maxQ && flightStarted) maxQ = q;
-  } else _g.set(0, 0, 0);
+  const alt = p.length() - RE;
+  if (alt < ATMO_TOP) {                             // atmosphere rides on the planet's spin
+    const vrel = _g.set(v.x - EARTH_SPIN * p.z, v.y, v.z + EARTH_SPIN * p.x);   // v − ω(0,1,0) × r
+    aeroForce(_aero, vrel, alt, axis, axis ? aeroShape() : null);
+    _d.addScaledVector(_aero, 1 / mass);
+    if (axis && aeroState.q > maxQ && flightStarted) maxQ = aeroState.q;
+  } else if (axis) aeroForce(_aero, _g.set(0, 0, 0), alt, axis, null);   // zeroes the readout
   if (thrustAcc) _d.add(thrustAcc);
   return _d;
 }
@@ -271,7 +321,7 @@ export function physStep(dt) {
     }
   }
   const mass = totalMass();
-  const a = accelAt(S.pos, S.v, mass, thrustAcc);
+  const a = accelAt(S.pos, S.v, mass, thrustAcc, simTime, _fw.copy(UP_REF).applyQuaternion(S.q));
   S.v.addScaledVector(a, dt);
   S.pos.addScaledVector(S.v, dt);
 
@@ -281,10 +331,6 @@ export function physStep(dt) {
   const ratio = I0.py / I.py, ratioR = I0.roll / I.roll;
   const altE = S.pos.length() - RE;
   if (!lesSeparated && altE > LES_ALT) separateLES();
-  const surf = surfaceVel(_sv);        // the air moves with the planet: aero and prograde are ground-relative
-  const surfMps = surf.length() * 1000;
-  let qNorm = 0;
-  if (altE < 420) qNorm = Math.min(1.6, 0.5 * airDensity(altE) * surfMps * surfMps / 40000);   // dynamic pressure, normalised
   const pitchIn = (keys['w'] ? 1 : 0) - (keys['s'] ? 1 : 0) + (keys['arrowup'] ? 1 : 0) - (keys['arrowdown'] ? 1 : 0);
   const yawIn = (keys['a'] ? 1 : 0) - (keys['d'] ? 1 : 0) + (keys['arrowleft'] ? 1 : 0) - (keys['arrowright'] ? 1 : 0);
   const rollIn = (keys['e'] ? 1 : 0) - (keys['q'] ? 1 : 0);
@@ -345,17 +391,35 @@ export function physStep(dt) {
     }
   }
 
-  // aerodynamics: fin damping opposes the rate; tail fins weathervane the nose into the flow
-  const dpy = 0.6 * (1 + 2.6 * qNorm), drl = 0.25 * (1 + 2.6 * qNorm);
-  omega.x *= Math.max(0, 1 - dpy * dt);
-  omega.y *= Math.max(0, 1 - dpy * dt);
-  omega.z *= Math.max(0, 1 - drl * dt);
-  if (qNorm > 0.02 && surf.lengthSq() > 1e-8) {
-    const vb = _g.copy(surf).applyQuaternion(S.q.clone().invert()).normalize();
-    const ax = _ax.set(0, 0, 1).cross(vb);
-    const m = ax.length();
-    if (m > 1e-4) omega.addScaledVector(_ax.multiplyScalar(1 / m), 0.05 * qNorm * m * dt);
+  /* Rates. In vacuum nothing stops a rotation but a thruster, so the only damping there is the
+     RCS stability assist — a control system, on by default, that T switches off for a vehicle
+     that keeps whatever spin it was given. */
+  if (rcsAssist) {
+    omega.x *= Math.max(0, 1 - 0.6 * dt);
+    omega.y *= Math.max(0, 1 - 0.6 * dt);
+    omega.z *= Math.max(0, 1 - 0.25 * dt);
   }
+  /* In air the normal force (already in the trajectory, via accelAt above) also has a moment about
+     the centre of mass: body terms at the planform centroid, fins at the tail. kN·m over t·m² is
+     rad/s². Rotation in a cross-flow is resisted in proportion to q/V times the planform's second
+     moment — the pitch damping of a slender body. */
+  if (aeroState.q > 0.5) {
+    const Ipy = I.py * U_M * U_M;                                  // t·m²
+    const armB = (_shape.zPlan - I.zc) * U_M, armF = (_shape.zFin - I.zc) * U_M;   // m, + is ahead of the CG
+    const moment = (aeroState.nBody * armB + aeroState.nFin * armF) * 1000;          // kN·m
+    _tq.crossVectors(_fw, aeroState.dir).applyQuaternion(_qi.copy(S.q).invert());    // body frame
+    const acc = THREE.MathUtils.clamp(moment / Ipy, -2, 2);
+    omega.x += _tq.x * acc * dt; omega.y += _tq.y * acc * dt;
+    const vAir = Math.max(30, aeroState.mach * 300);                // m/s
+    const damp = aeroState.q * CN_BODY * planformMoment(I.zc) / (vAir * Ipy * 1000);   // 1/s
+    omega.x *= Math.max(0, 1 - damp * dt);
+    omega.y *= Math.max(0, 1 - damp * dt);
+    /* Bending. The normal force is carried by the airframe as a side load; a stack is a thin tank
+       wall and a bare CSM is not. */
+    aeroLoad = (aeroState.nBody + aeroState.nFin) * 1000 / mass / 9.81;   // lateral g
+    const limit = i === 2 || i < 0 ? LOAD_LIMIT_CSM : LOAD_LIMIT_STACK;
+    if (aeroLoad > limit && state === 'flying') return breakup();
+  } else aeroLoad = 0;
 
   omega.x = THREE.MathUtils.clamp(omega.x, -MAX_RATE_PY, MAX_RATE_PY);
   omega.y = THREE.MathUtils.clamp(omega.y, -MAX_RATE_PY, MAX_RATE_PY);
@@ -414,6 +478,11 @@ function impact(onMoon, dist) {
     }
   }
 }
+function breakup() {
+  explode(); state = 'lost';
+  hooks.addLog(`AERODYNAMIC BREAKUP — ${aeroLoad.toFixed(1)} g SIDE LOAD AT MACH ${aeroState.mach.toFixed(1)}`, 'bad');
+  hooks.showEndOverlay('AERODYNAMIC BREAKUP', `The airframe took <b>${aeroLoad.toFixed(1)} g</b> sideways at Mach ${aeroState.mach.toFixed(1)}, ${(aeroState.aoa * 57.2958).toFixed(0)}° off the airflow. Keep the nose on the velocity vector while the air is thick — SAS (P) does it for you.`, 'RETRY');
+}
 function explode() {
   const c = S.pos.clone();
   for (let k = 0; k < 240; k++) {
@@ -465,7 +534,7 @@ export function resetSim() {
   engineOn = false; throttle = targetThrottle = 0;
   sasOn = false; sasRetro = false; simTime = 0; warpIdx = 0; maxQ = 0;
   tliLogged = loiLogged = loggedMaxQ = turnHintLogged = false; distFlown = 0; trail = [];
-  flightStarted = false; state = 'pad'; omega.set(0, 0, 0); I0 = null;
+  flightStarted = false; state = 'pad'; omega.set(0, 0, 0); I0 = null; rcsAssist = true; aeroLoad = 0;
 }
 
 /* teleport() starts the flight directly, bypassing the liftoff guard */

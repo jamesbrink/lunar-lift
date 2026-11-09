@@ -3,7 +3,7 @@ import { RE, RM, WARPS, DTPHYS, PAD_POS, moonPos } from './constants.js';
 import { initWorld, spinBodies, syncTime, updateSky, updateSunShadow, groundHeight, moonGroundHeight } from './world.js';
 import { stages, lesGroup } from './saturn.js';
 import { initVehicle, spawnParticle, addDebris, detachStage, setVisible, updateParticles, updateDebris, updateBurnVisuals, clearDebris, resetStages, plumeLive } from './vehicle.js';
-import { S, keys, initPhysics, getState, getSimTime, setSimTime, getEngineOn, getThrottle, getWarpIndex, setWarpIndex, setTargetThrottle, getSasOn, setSas, cycleWarp, toggleSas, toggleSasRetro, activeStage, fwd, isBurning, accelAt, physStep, toggleIgnite, separateStage, separateLES, addDistFlown, pushTrail, resetSim, markTeleported, airDensity, groundVel, omega, getControlAuthority } from './physics.js';
+import { S, keys, initPhysics, getState, getSimTime, setSimTime, getEngineOn, getThrottle, getWarpIndex, setWarpIndex, setTargetThrottle, getSasOn, setSas, cycleWarp, toggleSas, toggleSasRetro, activeStage, fwd, isBurning, accelAt, physStep, toggleIgnite, separateStage, separateLES, addDistFlown, pushTrail, resetSim, markTeleported, airDensity, groundVel, omega, getControlAuthority, toggleRcsAssist, aeroState, getAeroLoad, stability } from './physics.js';
 import { camera, initCamera, cycleCamera, updateCamera, resetCameraView, setCamMode, setCamDist, resizeCamera } from './camera.js';
 import { initHUD, addLog, updateHUD, drawMap, toggleMapView, endOverlay, setWarn, hideOverlay, clearLog } from './hud.js';
 import { audioInit, audioEngine, audioThud, audioExplosion, audioWin, updateAudio } from './audio.js';
@@ -86,6 +86,7 @@ addEventListener('keydown', e => {
   else if (k === 'x') separateStage();
   else if (k === 'p') toggleSas();
   else if (k === 'v') toggleSasRetro();
+  else if (k === 't') toggleRcsAssist();
   else if (k === ']') cycleWarp(1);
   else if (k === '[') cycleWarp(-1);
   else if (k === 'c') cycleCamera();
@@ -160,7 +161,8 @@ window.game = {
     radialM: S.v.dot(new THREE.Vector3().subVectors(S.pos, moonPos(getSimTime(), new THREE.Vector3())).normalize()),
     speed: S.v.length(), fuel: stages.map(s => s.fuel), separated: stages.map(s => s.separated),
     engineOn: getEngineOn(), throttle: getThrottle(), sasOn: getSasOn(), warp: WARPS[getWarpIndex()],
-    omega: [omega.x, omega.y, omega.z], authority: getControlAuthority().py }),
+    omega: [omega.x, omega.y, omega.z], authority: getControlAuthority().py,
+    aero: { q: aeroState.q, mach: aeroState.mach, aoa: aeroState.aoa, load: getAeroLoad(), margin: stability() } }),
   ignite: toggleIgnite, stage: separateStage, jettisonLES: separateLES, setSas,
   warp: m => { setWarpIndex(WARPS.indexOf(m)); }, camera: n => { setCamMode(n); },
   ff(sec) { let left = sec; while (left > 1e-9) { const h = Math.min(DTPHYS, left); physStep(h); left -= h; } syncTime(getSimTime()); },

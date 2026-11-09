@@ -40,14 +40,14 @@ export const MOON_V = new THREE.Vector3().crossVectors(MOON_PLANE_N, MOON_U).nor
    valid for the step it was solved at.
 
    Measured sensitivity near the window (shipped vehicle, game's own step, all three landed):
-     phase -1e-3 rad -> periselene 304 km, touchdown 21.2 m/s
-     phase 4.9561012 -> periselene 169 km, touchdown 20.1 m/s
-     phase +1e-3 rad -> periselene  37 km, touchdown 16.4 m/s
-   i.e. ~135 km of periselene per 1e-3 rad, and +-1e-3 rad of phase still gets you down, which is
+     phase -1e-3 rad -> periselene 334 km, touchdown 21.4 m/s, 7.5 t spare
+     phase 4.9198031 -> periselene 205 km, touchdown 20.4 m/s, 7.7 t spare
+     phase +1e-3 rad -> periselene  79 km, touchdown 29.8 m/s, 4.4 t spare
+   i.e. ~130 km of periselene per 1e-3 rad, and +-1e-3 rad of phase still gets you down, which is
    about +-6 s of lunar motion at MOON_RATE. js/targeting.js turns that into a HUD readout, so the
    aim is no longer invisible; the corridor it paints green is derived from the three points above.
    Waiting on the pad and warping advances the Moon, so any other start time can still reach one. */
-export const MOON_PHASE0 = 4.9561012;                      // rad — 283.96° along the lunar orbit
+export const MOON_PHASE0 = 4.9198031;                      // rad — 281.88° along the lunar orbit
 let moonPhase = MOON_PHASE0;
 export const getMoonPhase = () => moonPhase;
 export function setMoonPhase(p) { moonPhase = p; }
@@ -70,19 +70,20 @@ export const RHALF = 37 * VS;             // contact offset from the vehicle cen
 export const PAD_POS = PAD_UP.clone().multiplyScalar(RE + 4 * PAD_SCALE + 37 * VS);
 export const PAD_ANGULAR = new THREE.Vector3().crossVectors(SPIN_AXIS, PAD_POS).multiplyScalar(EARTH_SPIN); // pad's inertial velocity
 
-/* atmosphere: exponential density with an 8.5 km scale height */
+/* atmosphere: exponential density with an 8.5 km scale height. CD_AREA is the full stack's drag
+   area nose-on below Mach 0.8; js/aero.js builds the Mach rise, angle of attack and lift on it. */
 export const ATMO_H = 8.5, RHO0 = 1.225, CD_AREA = 28;   // kg/m³, m²
 export const DTPHYS = 0.1, WARPS = [1, 2, 4, 8, 16, 32, 64, 128, 256, 512, 1000];
 
 /* SAS pitch program. A real launch vehicle does not chase "prograde" off the pad: it
    holds the local vertical, then sweeps the nose toward the launch-plane east direction
    (the plane that contains the Moon's orbit), then trims to the inertial velocity.
-   Verified with the stack below: a 150 x 784 km parking orbit at 7.36 km/s, and 7.6 t of CSM
+   Verified with the stack below: a 151 x 760 km parking orbit at 7.37 km/s, and 7.7 t of CSM
    propellant left on the Moon. The pitch-over here reaches 66 degrees rather than horizontal; a
    steeper table (t0 60, ramp 200, max pi/2, --turn=steep in the tool) also completes the mission and
-   lands with 8.0 t spare for 16,177 m/s instead of 16,226, so the exact shape is not what makes the
+   lands with 8.2 t spare for 16,162 m/s instead of 16,217, so the exact shape is not what makes the
    mission fly - the propellant load is. MOON_PHASE0 is solved for whichever table is in here
-   (4.9561012 for this one, 4.9745948 for the steep one), so changing one without re-running
+   (4.9198031 for this one, 4.9472816 for the steep one), so changing one without re-running
    tools/mission-sim.mjs mis-aims the translunar injection by tens of thousands of km. */
 export const TURN = { t0: 55, ramp: 190, max: 1.15 };
 
@@ -94,8 +95,8 @@ export const SKY_DAY = new THREE.Color(0x79b1de), SKY_NULL = new THREE.Color(0x0
 /* stage specs: dry/fuel in tonnes, thrust in kN, isp in seconds.
    Verified by tools/mission-sim.mjs, which flies the whole mission through this file's own physics
    and the controls a player has: ideal staged budget 17,090 m/s against the 15,142 m/s one-way
-   requirement (1.13x), 16,226 m/s actually spent, 7.6 t of CSM propellant left after a 20.1 m/s
-   touchdown on 3.404 days of mission clock. Full breakdown in docs/reference/mission-design.md.
+   requirement (1.13x), 16,217 m/s actually spent, 7.7 t of CSM propellant left after a 20.4 m/s
+   touchdown on 3.460 days of mission clock. Full breakdown in docs/reference/mission-design.md.
    What the sizing is actually doing:
      - pad thrust-to-weight 1.37 g. The previous stack's 1.24 g also reaches orbit, so this is
        margin, not a cliff; drag is never the problem (mission-math.py section 8 puts it at
