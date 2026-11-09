@@ -5,17 +5,17 @@
 at the 0.1 s step `js/main.js` never exceeds, and reaches:
 
 ```
-RESULT WON   fuel left 0.0/0.0/7.6 t        297990s TOUCHDOWN — 20.5 m/s. THE MOON IS OURS.
+RESULT WON   fuel left 0.0/0.0/7.5 t        296869s TOUCHDOWN — 20.2 m/s. THE MOON IS OURS.
 ```
 
-20.5 m/s against the `LAND_SAFE` limit of 32 m/s, 7.6 t of CSM propellant to spare, mission clock
-3.449 days. The verdict is the game's own: `impact()` in `js/physics.js` decides it by comparing
+20.2 m/s against the `LAND_SAFE` limit of 32 m/s, 7.5 t of CSM propellant to spare, mission clock
+3.436 days. The verdict is the game's own: `impact()` in `js/physics.js` decides it by comparing
 `groundVel()` with `LAND_SAFE` in the frame of the surface underneath.
 
 ```sh
 npm i --no-save three@0.160.1     # the tool needs Three; the game itself has no dependencies
 node tools/mission-sim.mjs                      # solves the launch window, then flies: ~6 s
-node tools/mission-sim.mjs game --phase=4.95592 # fly the shipped window exactly, as shipped
+node tools/mission-sim.mjs game --phase=4.95723 # fly the shipped window exactly, as shipped
 node tools/mission-sim.mjs retro                # the stack this repo shipped before: LOST
 ```
 
@@ -56,7 +56,7 @@ Ignition mass 3,433 t; ideal staged budget **17,090 m/s = 1.13× the requirement
 
 | Candidate | ignition t | ideal Δv m/s | ratio | outcome when flown |
 | --- | --- | --- | --- | --- |
-| **shipped** (above) | 3,433 | 17,090 | 1.13× | **WON**, 20.5 m/s, 7.6 t spare |
+| **shipped** (above) | 3,433 | 17,090 | 1.13× | **WON**, 20.2 m/s, 7.5 t spare |
 | previous (`retro`) | 3,780 | 16,303 | 1.08× | LOST — `HARD IMPACT ON THE MOON AT 1233 m/s`, tank dry |
 | oversized (`nova`) | 5,475 | 20,608 | 1.36× | not flown: nothing the margin is spent on, and a 3,000 t first stage is a different game |
 
@@ -74,24 +74,24 @@ because that failure is invisible to budget arithmetic.
 | Event | MET s | state | Δv spent m/s | propellant left t |
 | --- | --- | --- | --- | --- |
 | ignition, LC-39 | 0 | pad TWR 1.37 g | | 1,800 / 1,200 / 185 |
-| stage 1 separation | 135 | 117 s burn | | 0 / 1,200 / 185 |
-| stage 2 separation | 422 | | | 0 / 0 / 185 |
+| stage 1 separation | ~117 s burn | `mission-math.py` §6 burn time | | 0 / 1,200 / 185 |
+| stage 2 separation | 422 | game log: S-2 SATURN II DEPLETED | | 0 / 0 / 185 |
 | **parking orbit** | 1,057 | 150 × 784 km, v 7.3572 km/s | **10,265** | 0 / 0 / 123.4 |
 | TLI ignition | 3,874 | at perigee, v 7.8916 | | |
-| **TLI cutoff** | 4,687 | v 10.3928, apogee 384,162 km | **3,033** | 0 / 0 / 44.5 |
-| lunar SOI | 235,451 | | | |
-| periselene (uncorrected) | 294,188 | 207 km, vRel 2.4342, v∞ 0.9379 | | |
-| **LOI** | 294,330 | retrograde to vRel 1.5989 (circular 1.5884) | **867** | 0 / 0 / 30.7 |
-| parked | 294,330 | a = 1,995 km about the Moon | | |
-| **deorbit burn** | 294,360 | retrograde at 223 km | **58** | 0 / 0 / 29.9 |
-| **PDI** | 297,676 | 70 km, vRel 1.6691 | 1 | 0 / 0 / 29.9 |
-| **touchdown** | 297,990 | 20.5 m/s | **2,008** | 0 / 0 / 7.6 |
-| | | **total** | **16,232** | |
+| **TLI cutoff** | 4,686 | v 10.3932, apogee 385,295 km | **3,033** | 0 / 0 / 44.5 |
+| lunar SOI | 234,479 | game log: PREPARE RETROGRADE BRAKING | | |
+| periselene (uncorrected) | 293,071 | 203 km, vRel 2.4375, v∞ 0.9409 | | |
+| **LOI** | 293,213 | retrograde to vRel 1.6000 (circular 1.5900) | **869** | 0 / 0 / 30.7 |
+| parked | 293,213 | a = 1,990 km about the Moon | | |
+| **deorbit burn** | 293,242 | retrograde at 219 km | **57** | 0 / 0 / 29.9 |
+| **PDI** | 296,555 | 70 km, vRel 1.6683 | 1 | 0 / 0 / 29.9 |
+| **touchdown** | 296,869 | 20.2 m/s | **2,008** | 0 / 0 / 7.5 |
+| | | **total** | **16,233** | |
 
-Margin, stated as the two different things it is: **858 m/s** of headroom between the ideal staged
-budget (17,090) and what the flight actually spent (16,232), and **7.6 t** of propellant still in
-the CSM tank at touchdown, which at the 35.6 t terminal mass is 4,121 × ln(35.6/28.0) =
-**989 m/s** of capability nobody used. The two numbers differ by ~130 m/s because the ideal budget
+Margin, stated as the two different things it is: **857 m/s** of headroom between the ideal staged
+budget (17,090) and what the flight actually spent (16,233), and **7.5 t** of propellant still in
+the CSM tank at touchdown, which at the 35.5 t terminal mass is 4,121 × ln(35.5/28.0) =
+**981 m/s** of capability nobody used. The two numbers differ by ~120 m/s because the ideal budget
 is a model with assumptions the flight does not honour — nothing is spent while the launch clamp
 holds the vehicle on the pad, dry mass is dropped exactly at depletion rather than on the next
 staging command, and the per-step integral charges Δv by propellant flow. Both numbers are honest;
@@ -121,8 +121,8 @@ The tool burns prograde until `v = sqrt(MU_E (2/r − 1/aT))` with `aT = (r + 1.
 The 1.012 is not decoration: an exactly-tangent transfer whose apogee equals `MOON_DIST` came up
 about 2,000 km short of the sphere of influence in testing and never registered an encounter, and
 no correction burn can rescue a miss that large at 384,000 km. Overshooting puts the crossing
-*inside* the SOI, where the Moon's gravity does the rest. Measured result: apogee 384,162 km, SOI
-entry at 235,451 s, periselene 207 km with **zero correction burns** needed.
+*inside* the SOI, where the Moon's gravity does the rest. Measured result: apogee 385,295 km, SOI
+entry at 234,479 s, periselene 203 km with **zero correction burns** needed.
 
 Apollo flew harder than this — `mission-math.py` section 4 shows Apollo 11's post-TLI orbit with an
 apogee of 522,505 km, a ~73 h fast transfer rather than the 120 h minimum-energy one. The game's
@@ -134,22 +134,23 @@ The `approach` phase coasts on nothing until the Moon-relative radial velocity c
 burns. Braking from the edge of the SOI instead spends the tank fighting your own approach energy
 and still misses the orbit: at 66,200 km the circular speed is 272 m/s, so decelerating to bind
 yourself early buys a huge eccentric fall instead of an orbit. At periselene the same Δv is worth
-the most, which is why LOI cost 867 m/s here against the 820 m/s the patched-conic estimate for
+the most, which is why LOI cost 869 m/s here against the 820 m/s the patched-conic estimate for
 111 km predicts and Apollo's measured 889 m/s.
 
 ## Launch window and how tight "aim" really is
 
-`MOON_PHASE0 = 4.955920` rad is not a rounded number and must not be rounded. The tool finds it by
-bisecting the first periselene altitude; the encounter sensitivity measured during the solve:
+`MOON_PHASE0 = 4.957230` rad is not a rounded number and must not be rounded. The tool finds it by
+bisecting the first periselene altitude. Sensitivity measured by flying the shipped configuration at
+three phases around the window:
 
-| phase rad | first periselene |
-| --- | --- |
-| 4.9007882 | 16,614 km — the Moon was not there |
-| 4.955920 | 207 km — window |
-| 4.9584 | ≈ −10,000 (reported as an impact) |
+| phase rad | first periselene | outcome |
+| --- | --- | --- |
+| 4.95623 (−1e-3) | 334 km | WON, 21.3 m/s, 7.3 t spare |
+| **4.95723 (shipped)** | **203 km** | **WON, 20.2 m/s, 7.5 t spare** |
+| 4.95823 (+1e-3) | 74 km | WON, 29.9 m/s, 4.4 t spare — inside `LAND_SAFE` by 2 m/s |
 
-Roughly **460 km of periselene per 1e-3 rad**, so the last few km of aim is 2.6e-6 rad of phase —
-6.9 s of waiting at 1× warp, since the Moon advances at `MOON_RATE = 2.6617e-6` rad/s. This has two
+So about **130 km of periselene per 1e-3 rad**, and roughly ±1e-3 rad of phase still lands: the last
+10 km of aim is 8e-5 rad, which is 3 s of lunar motion at `MOON_RATE = 2.6617e-6` rad/s. Two
 consequences for the game:
 
 - The lever a player actually has is *time* (wait on the pad, or coast in the parking orbit, and
@@ -162,9 +163,10 @@ consequences for the game:
   — and a HUD readout of "predicted periselene: NNNN km" is the single change that would make this
   flyable by a human without a solver. Logged as a HUD task; not implemented.
 
-`MOON_PHASE0` is solved for the current `TURN` table. Change the pitch program without re-running
-the tool and TLI mis-aims by tens of thousands of km (the reach-horizontal variant
-`--turn=steep` needs phase 4.97931, 0.023 rad = 2.4 h of Moon motion away).
+`MOON_PHASE0` is solved for the `TURN` table in the same file. Change the pitch program without
+re-running the tool and TLI mis-aims by tens of thousands of km: `--turn=steep` (the
+reach-horizontal table `t0 60, ramp 200, max π/2`) needs phase **4.97632**, 0.019 rad ≈ 2 h of lunar
+motion away, and it wins with 8.0 t spare against the shipped table's 7.5 t.
 
 ## The descent, which is where the mission was won
 
@@ -215,10 +217,13 @@ because the envelope above needs path, not because it is more realistic.
   human flying it reliably (see the window section).
 - **Drag is exponential**, not USSA-1976 + MSISE-90; `mission-math.py` section 7 has the tables and
   section 8 bounds the error's effect at ≤ 109 m/s.
-- **`PAD_LAT`/`PAD_LON` are still 28.4961/−80.6194.** The corrected LC-39 values
-  28.4469/−80.6041 (geocentric, see [launch-site.md](launch-site.md)) move the pad ~5.5 km, which
-  is enough to shift the solved phase, so they land together with the continent-texture work that
-  makes the pad's position visible, with the window re-solved in the same commit.
+- **The pad sits in near-shore water in the texture, not because the coordinates are wrong.**
+  `PAD_LAT`/`PAD_LON` are now the geocentric LC-39 values (28.4469, −80.6041), and the texture's
+  alignment with the mapping was measured at IoU 0.954 against Natural Earth with zero offset. But
+  the committed 2048 × 1024 sheet resolves 17 km per pixel and its Florida coastline runs to
+  −80.68° where the real shore is near −80.55°, so the pad's pixel is sea at any LC-39 latitude
+  anyone could argue for. A sharper sheet fixes the look; changing the coordinates would move the
+  pad off the launch complex to agree with a pixel. See [launch-site.md](launch-site.md).
 - **No atmospheric structural loads**, so nothing punishes an over-fast ascent beyond drag.
 
 ## Status
@@ -226,10 +231,10 @@ because the envelope above needs path, not because it is more realistic.
 | Requirement | Value | Measured | |
 | --- | --- | --- | --- |
 | Reach a parking orbit | pe ≥ 150 km | 150 × 784 km at 7.3572 km/s | ✅ |
-| Reach the Moon | enter SOI | 235,451 s, periselene 207 km | ✅ |
-| Lunar orbit | bound, circularisable | LOI to vRel 1.5989 at 219 km, a = 1,995 km | ✅ |
-| Deorbit | periselene in the corridor | burn at 223 km, PDI at 70 km | ✅ |
-| Soft landing | < 32 m/s (`LAND_SAFE`) | **20.5 m/s** | ✅ |
-| Propellant margin | > 0 at touchdown | 7.6 t = 779 m/s | ✅ |
-| One-way budget | ≥ 15,142 m/s | 17,090 ideal / 16,232 spent | ✅ |
+| Reach the Moon | enter SOI | 234,479 s, periselene 203 km | ✅ |
+| Lunar orbit | bound, circularisable | LOI to vRel 1.6000 at 216 km, a = 1,990 km | ✅ |
+| Deorbit | periselene in the corridor | burn at 219 km, PDI at 70 km | ✅ |
+| Soft landing | < 32 m/s (`LAND_SAFE`) | **20.2 m/s** | ✅ |
+| Propellant margin | > 0 at touchdown | 7.5 t = 981 m/s unused | ✅ |
+| One-way budget | ≥ 15,142 m/s | 17,090 ideal / 16,233 spent | ✅ |
 | Return to Earth | 18,092 m/s | not modelled | ❌ |
