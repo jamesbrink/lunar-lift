@@ -333,6 +333,7 @@ async function paintMoonJob(path) {
     const o = i * 4;
     out[o] = col[0]; out[o + 1] = col[1]; out[o + 2] = col[2]; out[o + 3] = 255;
   }
+  stampCraterAlbedo(out, blur, w, h);
   const cv = document.createElement('canvas');
   cv.width = w; cv.height = h;
   cv.getContext('2d').putImageData(new ImageData(out, w, h), 0, 0);
@@ -590,20 +591,42 @@ function buildMoonField(blur, sw, sh) {
    where the 512-segment mesh can still resolve a bowl — ~45 km radius, 4 vertices across — because
    the Moon has no near level anymore: what the mesh cannot show, nothing shows. Depths and rims
    scale with size and are capped to leave headroom under the ±2 km honesty limit — saturation at
-   the clamp flattens whole regions into plateaus. Bowls parabolic, rims a gaussian at 1.03 radii,
-   both multiplied by the highland mask so maria stay flat and mare-edge rims soften. */
-function stampCraters(km, hi, w, h) {
-  const kme = MOON_CIRC / w, kmr = Math.PI * RM / h;
+   the clamp flattens whole regions into plateaus.
+
+   The list is generated ONCE and consumed twice: the height pass (stampCraters) displaces the
+   mesh, and paintMoonJob paints the same bowls' albedo — bright rim, shadowed floor, ray systems
+   on the young ones. Displacement alone went away at noon sun, when the whole face sits in one
+   ramp band and a cratered highland looked as blank as a ping-pong ball; the bright ring is what
+   makes the geology legible from every sun angle, and it is exactly how the cartoons do it. */
+let _craters = null;
+export function moonCraters() {
+  if (_craters) return _craters;
+  _craters = [];
   for (let c = 0; c < 560; c++) {
     const hu = hash2(c, 0, 11);
     const hv = hash2(c, 1, 23);
     const hr = hash2(c, 2, 37);
+    const hy = hash2(c, 3, 53);
     const lat = Math.asin(2 * hv - 1);
-    const cx = (hu * w) | 0;
-    const cy = (((90 - lat * 180 / Math.PI) / 180) * h) | 0;
     const r = 45 + 300 * hr * hr * hr;
     const depth = Math.min(0.98, 0.10 + r * 0.0040);
     const rim = Math.min(0.69, 0.15 + depth * 0.55);
+    _craters.push({
+      cx: (hu * FW) | 0,
+      cy: (((90 - lat * 180 / Math.PI) / 180) * FH) | 0,
+      r, depth, rim,
+      young: hy > 0.90,                       // ~10 % ray systems: Tycho-class fresh impactors
+      spokes: 7 + ((hash2(c, 4, 71) * 6) | 0),
+      phase: hy * 6.283,
+    });
+  }
+  return _craters;
+}
+
+function stampCraters(km, hi, w, h) {
+  const kme = MOON_CIRC / w, kmr = Math.PI * RM / h;
+  for (const cr of moonCraters()) {
+    const { cx, cy, r, depth, rim } = cr;
     const clAt = (yy) => Math.max(0.05, Math.cos((90 - (yy + 0.5) * 180 / h) * Math.PI / 180));
     const rx = Math.ceil(r * 1.6 / (kme * clAt(cy))), ry = Math.ceil(r * 1.6 / kmr);
     for (let dy = -ry; dy <= ry; dy++) {
@@ -623,6 +646,53 @@ function stampCraters(km, hi, w, h) {
         if (dd < 0.82) { const t = dd / 0.82; add -= depth * (1 - t * t); }
         if (dd > 0.55) { const g = (dd - 1.03) / 0.17; add += rim * Math.exp(-g * g); }
         km[i] += add * hi[i];
+      }
+    }
+  }
+}
+
+/* The albedo pass over the same craters. Bowls shade darker, rims catch the sun brighter — and the
+   young ones throw ray systems, bright spokes that run four crater radii and cross even the maria,
+   because Tycho's do. Applied to the classified paint after tone assignment, so a 200 km walled
+   plain still gets a drawn circle under noon sun, which displacement + a three-band ramp can never
+   show. Stamps land where the height pass stamps: one list, two consumers, no drift by
+   construction. */
+function stampCraterAlbedo(out, blur, w, h) {
+  const sx = w / FW, sy = h / FH;
+  const kmr = Math.PI * RM / h;
+  const hiAt = (i) => smoothS(0.36, 0.47, blur[i]);
+  for (const cr of moonCraters()) {
+    const cx = cr.cx * sx, cy = cr.cy * sy;
+    const rPx = cr.r / (kmr);                       // rows are the isotropic axis; columns widen by cos
+    const ry = Math.ceil(rPx * (cr.young ? 4.8 : 1.7));
+    for (let dy = -ry; dy <= ry; dy++) {
+      const y = (cy + dy) | 0;
+      if (y < 0 || y >= h) continue;
+      const clat = Math.max(0.05, Math.cos((90 - (y + 0.5) * 180 / h) * Math.PI / 180));
+      const rx = Math.ceil(rPx * (cr.young ? 4.8 : 1.7) / clat);
+      for (let dx = -rx; dx <= rx; dx++) {
+        const x = ((cx + dx) % w + w) % w;
+        const i = (y * w + x) * 4;
+        let ex = dx * kmr / clat;
+        if (ex > MOON_CIRC / 2) ex -= MOON_CIRC; else if (ex < -MOON_CIRC / 2) ex += MOON_CIRC;
+        const ey = dy * kmr;
+        const dd = Math.hypot(ex, ey) / cr.r;
+        let tone = 0;
+        const hiM = hiAt(y * w + x);
+        if (dd < 1.7) {
+          if (!hiM) continue;                        // maria stay flat and blank, both in height and in tone
+          if (dd < 0.82) { const t = dd / 0.82; tone -= (16 + 26 * cr.depth) * (1 - t * t); }
+          const g = (dd - 1.06) / 0.20;
+          tone += (22 + 26 * cr.rim) * Math.exp(-g * g);
+        } else if (cr.young && dd < 4.8) {
+          const th = Math.atan2(ey, ex);
+          let sp = Math.cos(cr.spokes * th + cr.phase);
+          sp = sp > 0 ? Math.pow(sp, 10) : 0;
+          const fall = (1 - (dd - 1.05) / 3.75);
+          tone += 34 * sp * fall * fall * (hiM ? 1 : 0.55);   // rays cross maria, dimmer there
+        }
+        if (!tone) continue;
+        out[i] = out[i] + tone; out[i + 1] = out[i + 1] + tone; out[i + 2] = out[i + 2] + tone;
       }
     }
   }
