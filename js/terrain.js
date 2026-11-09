@@ -3,7 +3,7 @@ import { toon, RAMP_EARTH } from './toon.js';
 import { RE } from './constants.js';
 import {
   sampleGrid, fineEarth, shoreDistance, padWeight, padShoreWeight, padAuthored,
-  reliefField, coastField, canvasData,
+  reliefField, coastField, canvasData, canvasDataSoft,
 } from './toonmap.js';
 
 /* The near level — Earth only; the Moon has none.
@@ -81,15 +81,15 @@ export function makePatch(body) {
     mesh, ready: false, dirty: false,
     cosT: Math.cos(RECENTER / RE),
     gx: 0, gy: 1, gz: 0, has: false,
-    rel: null, coast: null, px: null,
+    rel: null, coast: null, px: null, soft: null,
   };
 }
 
 /* The grids are byproducts of the paint pass; when they land, the next update rebuilds. */
 export function attachEarthPatch(p) {
-  Promise.all([reliefField('earth'), coastField(), canvasData('earth')]).then((a) => {
-    if (!a[0] || !a[2]) return;
-    p.rel = a[0]; p.coast = a[1]; p.px = a[2]; p.ready = true; p.dirty = true;
+  Promise.all([reliefField('earth'), coastField(), canvasData('earth'), canvasDataSoft('earth')]).then((a) => {
+    if (!a[0] || !a[2] || !a[3]) return;
+    p.rel = a[0]; p.coast = a[1]; p.px = a[2]; p.soft = a[3]; p.ready = true; p.dirty = true;
   });
 }
 
@@ -221,7 +221,7 @@ function colour(p, u, v, sd, f, k, col) {
       uu = wrapU(u - dU / m * push / (E_CIRC * cl));
       vv = THREE.MathUtils.clamp(v - dV / m * push / (Math.PI * RE), 0, 1);
     }
-    pxColor(p.px, uu, vv, _c2);                      // the biome colour inland
+    pxColor(p.soft, uu, vv, _c2);                      // the BIOME colour, from the blurred copy
     const wt = padShoreWeight(u, v);
     if (wt > 0.02) {
       const a = padAuthored(u, v);                   // authored Merritt Island tones at the pad

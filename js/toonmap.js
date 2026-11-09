@@ -152,35 +152,71 @@ async function paintEarthJob(diffusePath, maskPath) {
   const coast = new Uint8Array(w * h);
   for (let i = 0; i < coast.length; i++) coast[i] = cleaned[i] ? 0 : grown[i];
 
-  const out = new Uint8ClampedArray(w * h * 4);
+  /* Classify the BIOME from smoothed signals, not from one texel's own pixel. A 2048-wide diffuse is
+     19.5 km per texel and the JPEG is noise at that scale, so a per-texel decision turned every
+     continent into a checkerboard of grass and forest — and because the near ground samples this same
+     map, that checkerboard is exactly the field of dark rectangles the user called horrific. A 7-texel
+     (~140 km) separable box gives the classifier the spatial coherence a biome has. Nothing about the
+     edges softens: the coastline comes from the signed distance field and the launch site from
+     `bakePadCoast`, both untouched below. */
+  const luS = new Float32Array(w * h), aridS = new Float32Array(w * h), satS = new Float32Array(w * h);
+  for (let i = 0, o = 0; i < w * h; i++, o += 4) {
+    const r = d[o], g = d[o + 1], b = d[o + 2];
+    const mx = Math.max(r, g, b), mn = Math.min(r, g, b);
+    luS[i] = (r * 0.3 + g * 0.59 + b * 0.11) / 255;
+    aridS[i] = r - b;
+    satS[i] = mx ? (mx - mn) / mx : 0;
+  }
+  boxSignal(luS, w, h, 3); boxSignal(aridS, w, h, 3); boxSignal(satS, w, h, 3);
+
+  /* Land is classified into a LABEL, and the labels are then voted over. Smoothing the signals is not
+     enough on its own: wherever a value sits on a threshold, adjacent texels flip between two biomes,
+     and at 19.5 km per texel that flip is the field of small dark rectangles the near ground wore. A
+     plurality vote on the label is what gives a biome the spatial extent the eye reads as "the forest
+     over there". Water is deliberately outside the vote — its edge comes from the cleaned mask and the
+     coastline is the one boundary the art direction wants hard. */
+  const PAL = [null, C.ice, C.iceEdge, C.desert, C.rock, C.tundra, C.boreal, C.forest, C.grass];
+  const lab = new Uint8Array(w * h);
   for (let y = 0; y < h; y++) {
     const lat = 90 - (y + 0.5) * (180 / h);
     const aLat = Math.abs(lat);
     for (let x = 0; x < w; x++) {
+      const i = y * w + x;
+      if (!cleaned[i]) continue;
+      const lu = luS[i], sat = satS[i];
+      /* The shipped diffuse is dark and blue-shifted over land — the Amazon is rgb(35,38,57), the
+         same hue band as the sea — so hue carries no biome information here. What does carry it is
+         the sign of red minus blue and the brightness: dry ground scatters red above blue, vegetation
+         sits blue-above-red, and everything else dark is forest that the JPEG has crushed. */
+      const arid = aridS[i], cold = aLat > 55;
+      if (aLat > 70 || (lu > 0.78 && sat < 0.15)) lab[i] = aLat > 74 || lu > 0.86 ? 1 : 2;
+      else if (arid > 6) lab[i] = lu > 0.35 ? 3 : 4;
+      else if (cold) lab[i] = lu > 0.24 ? 5 : 6;
+      else if (-arid > 6 || lu < 0.34) lab[i] = lu < 0.22 ? 7 : 8;
+      else lab[i] = 4;
+    }
+  }
+  voteLabels(lab, cleaned, w, h, 2);
+  voteLabels(lab, cleaned, w, h, 1);
+
+  const out = new Uint8ClampedArray(w * h * 4);
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
       const i = y * w + x, o = i * 4;
-      let col;
-      if (!cleaned[i]) {
-        col = coast[i] ? C.coast : outer[i] ? (shore[i] ? C.shelf : C.ocean) : C.deep;
-      } else {
-        const r = d[o], g = d[o + 1], b = d[o + 2];
-        const lu = (r * 0.3 + g * 0.59 + b * 0.11) / 255;
-        const mx = Math.max(r, g, b), mn = Math.min(r, g, b);
-        const sat = mx ? (mx - mn) / mx : 0;
-        /* The shipped diffuse is dark and blue-shifted over land — the Amazon is rgb(35,38,57), the
-           same hue band as the sea — so hue carries no biome information here. What does carry it is
-           the sign of red minus blue and the brightness: dry ground scatters red above blue, vegetation
-           sits blue-above-red, and everything else dark is forest that the JPEG has crushed. */
-        const arid = r - b, cold = aLat > 55;
-        if (aLat > 70 || (lu > 0.78 && sat < 0.15)) col = aLat > 74 || lu > 0.86 ? C.ice : C.iceEdge;
-        else if (arid > 6) col = lu > 0.35 ? C.desert : C.rock;
-        else if (cold) col = lu > 0.24 ? C.tundra : C.boreal;
-        else if (b - r > 6 || lu < 0.34) col = lu < 0.22 ? C.forest : C.grass;
-        else col = C.rock;
-      }
+      const col = lab[i] ? PAL[lab[i]] : (coast[i] ? C.coast : outer[i] ? (shore[i] ? C.shelf : C.ocean) : C.deep);
       out[o] = col[0]; out[o + 1] = col[1]; out[o + 2] = col[2]; out[o + 3] = 255;
     }
   }
   bakePadCoast(out, w, h);
+  /* The ground's own copy of the paint, blurred — built AFTER the launch-site bake so the blurred map
+     carries the authored tones too. Blurring first put the global forest tone under and around the pad
+     while the mesh itself wore authored grassland, and the blend between them read as a straight tonal
+     line crossing the plain. See canvasDataSoft. */
+  let lr = 0, lg = 0, lb = 0, lc = 0;
+  for (let i = 0; i < w * h; i++) if (cleaned[i]) { const o = i * 4; lr += out[o]; lg += out[o + 1]; lb += out[o + 2]; lc++; }
+  const soft = new Uint8ClampedArray(out.length);
+  blurForGround(out, soft, w, h, cleaned, lc ? [lr / lc, lg / lc, lb / lc] : null);
+  softOf.set('earth', soft);
   const cv = document.createElement('canvas');
   cv.width = w; cv.height = h;
   cv.getContext('2d').putImageData(new ImageData(out, w, h), 0, 0);
@@ -193,6 +229,54 @@ async function paintEarthJob(diffusePath, maskPath) {
    everything else uses, so the correction has no seam. A 20 km texel cannot resolve an 8 km
    island; the bake is the far-LOD hint of it, while the signed distance and js/terrain.js carry
    the true shape at every zoom. Without this the launch complex reads as a plate on open sea. */
+/* One plurality pass over a wrapping/equirect label grid: each land texel takes the biome that most
+   of its neighbours chose, ties going to whatever it already had (so a genuinely mixed band settles
+   instead of oscillating). Ocean texels neither vote nor receive votes, which keeps the coast exactly
+   where the cleaned mask puts it. */
+function voteLabels(lab, land, w, h, rad) {
+  const src = lab.slice();
+  const tally = new Int32Array(16);
+  for (let y = 0; y < h; y++) {
+    const y0 = Math.max(0, y - rad), y1 = Math.min(h - 1, y + rad);
+    for (let x = 0; x < w; x++) {
+      const i = y * w + x;
+      if (!land[i]) continue;
+      tally.fill(0);
+      for (let yy = y0; yy <= y1; yy++) {
+        const row = yy * w;
+        for (let xx = x - rad; xx <= x + rad; xx++) {
+          const j = row + ((xx % w) + w) % w;
+          if (land[j] && src[j]) tally[src[j]]++;
+        }
+      }
+      let best = src[i], bestN = tally[src[i]];          // ties keep what the texel already was
+      for (let l = 1; l < tally.length; l++) if (tally[l] > bestN) { bestN = tally[l]; best = l; }
+      lab[i] = best;
+    }
+  }
+}
+
+/* Separable box mean over a wrapping longitude and a clamped latitude. */
+function boxSignal(a, w, h, rad) {
+  const tmp = new Float32Array(a.length);
+  const n = 2 * rad + 1;
+  for (let y = 0; y < h; y++) {
+    const row = y * w;
+    for (let x = 0; x < w; x++) {
+      let s = 0;
+      for (let k = -rad; k <= rad; k++) s += a[row + ((x + k) % w + w) % w];
+      tmp[row + x] = s / n;
+    }
+  }
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      let s = 0;
+      for (let k = -rad; k <= rad; k++) s += tmp[(Math.min(h - 1, Math.max(0, y + k))) * w + x];
+      a[y * w + x] = s / n;
+    }
+  }
+}
+
 function bakePadCoast(out, w, h) {
   const R = 0.8;                                             // degrees around the site, past the 0.6° blend
   const j0 = Math.max(0, Math.floor((90 - PAD_LAT - R) * h / 180));
@@ -283,6 +367,8 @@ const FW = 1024, FH = 512;                 // global height grid for both bodies
 const fields = new Map();                  // key → Promise<{w,h,km}>      heights in km
 const coasts = new Map();                  // key → Promise<{w,h,km}>      signed shore distance in km
 const canvases = new Map();                // key → Promise<HTMLCanvasElement>
+const softOf = new Map();                  // key → Uint8ClampedArray, blurred at paint time
+const softPx = new Map();                  // key → Promise<ImageData> of the blurred copy
 const painted = new Map();                 // key → canvas, once landed (paintedCanvas)
 const pixelsOf = new Map();                // key → Promise<ImageData>     raw authored pixels
 
@@ -304,6 +390,99 @@ export function coastField() { return coasts.get('earth') || null; }
 /* Raw ImageData of the painted map, extracted once per body: the near patch colours itself from
    exactly these bytes so a biome on the ground is the biome the orbit showed. getImageData is the
    one unavoidable readback; it costs ~10 ms and happens once per body off the paint promise. */
+/* A blurred copy of the paint, for the GROUND to sample instead of the crisp map. The map is
+   classified on a ~20 km grid: perfect when it is wrapped around a 40 000 km sphere, wrong under a
+   vehicle, where a hundred kilometres of grass meeting a hundred kilometres of forest at a hard edge
+   reads as cut-out rectangles rather than landscape. Averaging seven texels keeps every biome where it
+   is and turns each border into the soft transition a real landscape has. Averaging is done over LAND
+   ONLY: an ordinary blur would drag the navy of the sea 140 km inland and tint the coastal plain blue.
+   The orbit keeps the crisp canvas; only js/terrain.js reads this. */
+export function canvasDataSoft(key) {
+  if (!softPx.has(key)) {
+    softPx.set(key, Promise.all([canvasData(key), softOf.has(key) ? softOf.get(key) : null])
+      .then(([src, pre]) => {
+        const out = new ImageData(src.width, src.height);
+        if (pre) out.data.set(pre);
+        else boxBlurRGBA(src.data, out.data, src.width, src.height, 3);
+        return out;
+      }));
+  }
+  return softPx.get(key);
+}
+
+function blurForGround(src, dst, w, h, land, mean) {
+  const tmp = new Float32Array(w * h * 3);
+  const rad = 8;                                       // ≈160 km of longitude
+  for (let y = 0; y < h; y++) {                       // longitude: wrapping, land-weighted
+    const row = y * w;
+    for (let x = 0; x < w; x++) {
+      let r = 0, g = 0, b = 0, c = 0;
+      for (let k = -rad; k <= rad; k++) {
+        const j = row + ((x + k) % w + w) % w;
+        if (!land[j]) continue;
+        const o = j * 4;
+        r += src[o]; g += src[o + 1]; b += src[o + 2]; c++;
+      }
+      const t = (row + x) * 3;
+      if (c) { tmp[t] = r / c; tmp[t + 1] = g / c; tmp[t + 2] = b / c; }
+      else {                                          // no land in this row: keep the paint itself
+        const o = (row + x) * 4;
+        tmp[t] = src[o]; tmp[t + 1] = src[o + 1]; tmp[t + 2] = src[o + 2];
+      }
+    }
+  }
+  for (let y = 0; y < h; y++) {                       // latitude: clamped
+    for (let x = 0; x < w; x++) {
+      let r = 0, g = 0, b = 0, c = 0;
+      for (let k = -rad; k <= rad; k++) {
+        const yy = y + k < 0 ? 0 : y + k > h - 1 ? h - 1 : y + k;
+        const j = (yy * w + x) * 3;
+        if (!land[yy * w + x]) continue;
+        r += tmp[j]; g += tmp[j + 1]; b += tmp[j + 2]; c++;
+      }
+      const o = (y * w + x) * 4;
+      let R = r, G = g, B = b;
+      if (!c) { R = src[o]; G = src[o + 1]; B = src[o + 2]; c = 1; }     // offshore: keep the paint
+      R /= c; G /= c; B /= c;
+      if (mean && land[y * w + x]) {                  // ease the mosaic toward one land tone
+        R += (mean[0] - R) * 0.15; G += (mean[1] - G) * 0.15; B += (mean[2] - B) * 0.15;
+      }
+      dst[o] = R; dst[o + 1] = G; dst[o + 2] = B;
+      dst[o + 3] = 255;
+    }
+  }
+}
+
+/* Plain separable box mean over RGBA; used where there is no coastline to protect (the Moon). */
+function boxBlurRGBA(src, dst, w, h, rad) {
+  const tmp = new Float32Array(w * h * 3);
+  const n = 2 * rad + 1;
+  for (let y = 0; y < h; y++) {
+    const row = y * w;
+    for (let x = 0; x < w; x++) {
+      let r = 0, g = 0, b = 0;
+      for (let k = -rad; k <= rad; k++) {
+        const o = (row + ((x + k) % w + w) % w) * 4;
+        r += src[o]; g += src[o + 1]; b += src[o + 2];
+      }
+      const t = (row + x) * 3;
+      tmp[t] = r / n; tmp[t + 1] = g / n; tmp[t + 2] = b / n;
+    }
+  }
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      let r = 0, g = 0, b = 0;
+      for (let k = -rad; k <= rad; k++) {
+        const yy = y + k < 0 ? 0 : y + k > h - 1 ? h - 1 : y + k;
+        const j = (yy * w + x) * 3;
+        r += tmp[j]; g += tmp[j + 1]; b += tmp[j + 2];
+      }
+      const o = (y * w + x) * 4;
+      dst[o] = r / n; dst[o + 1] = g / n; dst[o + 2] = b / n; dst[o + 3] = 255;
+    }
+  }
+}
+
 export function canvasData(key) {
   if (!pixelsOf.has(key)) {
     pixelsOf.set(key, canvases.get(key).then((cv) =>
@@ -640,7 +819,14 @@ export function padAuthored(u, v) {
   if (zone === 'lagoon' || zone === 'river') return C.shelf;
   if (zone === 'ocean') return C.ocean;
   if (padShoreSd(u, v) > -1.4) return C.desert;                     // beach band, landward side
-  return noise(u, v * 2, period(EARTH_CIRC, 2.2), 455) > 0.6 ? C.forest : C.grass;
+  /* Flat grassland. This line used to threshold a 2.2 km lattice, then to ease a 60 km one; both were
+     wrong in the same way. The ground mesh samples it at 25 m under the vehicle and 3 km at its rim, so
+     a hard decision aliased into a fan of wedges, and a smooth decision on a value-noise lattice is a
+     bilinear surface whose clamped threshold is a straight line — the seam that replaced them. Colour
+     that varies faster than the mesh, or along the lattice rather than the landscape, is the "horrific"
+     verdict. Zones carry the shape here (lagoon, marsh, beach, sea) and the blurred global paint carries
+     everything beyond them; in between the ground is one brush of grass. */
+  return C.grass;
 }
 
 /* Authored dominance 0..1: 1 = trust padShoreSd/zone, 0 = pure global mask. Colour mixes on this. */
