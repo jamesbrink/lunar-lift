@@ -20,6 +20,8 @@ All data was retrieved on **2026-11-08**.
 | [orbital-mechanics.md](orbital-mechanics.md) | The formulas `js/physics.js` implements: vis-viva, patched conics, SOI, staging Δv accounting, gravity loss |
 | [mission-design.md](mission-design.md) | The derived requirement (15.1 km/s one-way), the game's vehicle budgets, guidance loss, validation status |
 | [libraries.md](libraries.md) | Survey of JS astro/orbital libraries and the decision: keep our integrator, adopt `astronomy-engine` for ephemerides |
+| [painted-planets.md](painted-planets.md) | How the bodies are drawn: land mask from the specular sheet, the biome rule that replaced hue, generated weather, measured cover and boot cost |
+| [cartoon-art-direction.md](cartoon-art-direction.md) | The look, as decided after seeing the result: flat cartoon Earth, no normal maps or surface textures, immersion from motion and coherence. Overrides the shading decisions in painted-planets.md |
 
 ## Unit conventions (repo-wide)
 

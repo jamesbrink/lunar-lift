@@ -12,7 +12,7 @@ node server.js 8078      # serves ES modules with no-store + SSE hot reload at /
 ```
 
 Open `http://localhost:8078/index.html`. `window.game` is the debug handle:
-`state() ignite stage setSas(on, retro) warp(n) camera(n) ff(seconds) setThrottle(v) nudge(ω)
+`state() ignite stage jettisonLES setSas(on, retro) warp(n) camera(n) ff(seconds) setThrottle(v) nudge(ω)
 teleport(pos, vel, simTime) reset()`, plus `_cam`, `_pred`, `setCam(d)`.
 
 ## Verify with these, and only these
@@ -96,6 +96,66 @@ state differs from the ship's real trajectory by ~100 km, which would make the r
   body-rate in the game's SAS convention; writing `S.q` directly gives `align −0.93` and a crater.
 - `airDensity(alt)` returns exactly 0 above 420 km, so coast trajectories are drag-free.
 
+## Renderer rules — each of these was found by measurement, not by reading
+
+- **A custom `ShaderMaterial` must declare `#include <common>` as the first line of its vertex
+  shader.** The renderer runs with `logarithmicDepthBuffer: true`, and r160's `logdepthbuf_vertex`
+  chunk calls `isPerspectiveMatrix`, which lives in `<common>` and is *not* in `ShaderMaterial`'s
+  auto-prefix. So every custom shader also needs `#include <logdepthbuf_pars_vertex>` /
+  `<logdepthbuf_vertex>` in the vertex stage and `<logdepthbuf_pars_fragment>` / `<logdepthbuf_fragment>`
+  in the fragment stage, or it fails to compile and the object silently disappears.
+- **`alphaMap` is sampled from the GREEN channel**, not the alpha channel. Binding a texture whose
+  information lives in alpha (the shipped `earth_clouds_1024.png` is one; a hand-generated white
+  cloud sheet is another) reads a flat density and lays an opaque tablecloth over the planet. Anything
+  whose density is alpha must be bound as `map`.
+- **A canvas texture's placeholder must already be the size the paint will be.** `paintedTexture` used
+  to allocate a 2×2 canvas and swap in the painted 2048×1024 one with `needsUpdate = true`. WebGL2 gives
+  a canvas texture *immutable* storage at its first upload (`texStorage2D`, and r160 only allocates when
+  `sourceProperties.__version === undefined`), so every later `texSubImage2D` of the big canvas is a
+  silent GL error: the planet sampled one ocean-blue texel forever while `planetCanvas()` — the CPU
+  canvas behind it — was perfect, the orbital map drawn from it was perfect, and `needsUpdate` "fixed"
+  nothing. Copy into the existing surface (`drawImage`) instead of replacing `texture.image`.
+- **A cel ramp step must not sit where flat ground lands.** `RAMP_EARTH` was `[0.24, 0.62, 1.0]`, whose
+  top boundary is at N·L = 0.667, and with the MET-0 sun 38.7° up a flat field sits at
+  N·L = sin(38.7°) = 0.625 — so every hill of a few degrees flipped between 62 % and 100 % brightness
+  along a straight isoline, and the field around the pad read as a fan of dark wedges. The ramp is now
+  four texels with the top two equal, putting the only visible step at 0.375. Check the sun table in
+  `docs/reference/launch-site.md` against the ramp boundaries before changing either.
+- **A big transparent sheet may not have triangles that span several uv repeats.** Mip derivatives are
+  computed per triangle, so a 10 km cap cell carrying a 64 km tiling picked a different mip level per
+  cell, and the ground filled with straight-edged wedges of the tile's mip average — visually the same
+  catastrophe as the ramp. `js/clouds.js` uses 390 m per texel so the derivative stays near level 0.
+- **Weather needs two scales, and they must share a uv field.** A cloud texture wrapped on the planet is
+  39 km per texel at 1024×512; the sky from horizon to 30° elevation above the pad spans 0.00017 in u,
+  i.e. **0.18 of one texel** — measured, not estimated, and it is why no blend mode, uv fix or row-order
+  fix ever put a cumulus overhead. `js/clouds.js` streams a 440 km cap at 7 km altitude with the tile
+  repeated across it, and the ground shade is the *same tile at the same uv*, offset anti-sunward by deck
+  height over tan(elevation): a different scale would put shadows under clear sky. The shade cap shrinks
+  to 70 km instead of changing scale. Both planet-scale decks keep `castShadow = false` — at 2 and 9 km a
+  low sun drags their silhouettes hundreds of kilometres, and the ±136 km tower-resolution shadow box
+  cuts them into slabs that read as architecture. See `docs/reference/painted-planets.md`.
+- **Camera collision is applied twice per frame** — to `desired` and again to the interpolated
+  `camPos`. A lerp between two points outside a sphere is a chord, and chords are inside, so before
+  this the camera cut 6 019 km through the Earth whenever `reset()`, `teleport()` or `ff()` moved the
+  vehicle to the far side. Measured after the fix: the closest the camera gets to the centre during a
+  full crossing is `RE + 0.02`, exactly the skin.
+- **A non-finite value in a vertex colour attribute renders as a black band, and nothing else you do
+  will remove it.** A NaN in `attributes.color` propagates through the toon lighting into a NaN fragment,
+  so the pixel goes black and ignores material swaps, `castShadow`/`receiveShadow`, `normalScale`,
+  visibility and background changes. This cost an hour of elimination before anyone counted NaNs:
+  `attributes.color` on the near patch had **10,905 non-finite floats (3,635 vertices)** and the band
+  rang the launch complex. Any bake that writes a vertex attribute must reject non-finite output and the
+  harness must count non-finite channels and fail on a non-zero count.
+- **Sanity-check a normal buffer's distribution, not just its length.** The same patch had
+  `normal.y ∈ [0.103, 0.888]` — worst case 84° off vertical — on a coastal plain whose real relief is
+  under 4° of slope, because a finite difference mixed units (the patch's positions are in metres while
+  the scene is in km). A plain's normals should cluster near the local up vector; assert that.
+- **Surfaces are painted from data, not from imagery.** `js/toonmap.js` reads the specular sheet as a
+  land mask and the diffuse sheet as a biome signal; no photographic pixel reaches the screen. The
+  biome rule keys on red−minus−blue, *not* hue — the shipped diffuse is blue-shifted over land, so the
+  Amazon and the Atlantic have the same hue. Details and measurements:
+  `docs/reference/painted-planets.md`.
+
 ## Browser recipe
 
 The dev server must be running (`node server.js 8000`). With the harness browser:
@@ -122,6 +182,42 @@ await tab.evaluate(`(async () => {
 - Cross-check the readout against the tool: `node tools/mission-sim.mjs game --phase=…` records the
   coast-start state (`ev.tliDone`, with millisecond time — rounding it to seconds shifts the Moon by
   ~1 km and the encounter by hundreds), which is exactly what `teleport` wants.
+- `tab.screenshot({silent: true})` returns a **path**; you have to read the file to see the image.
+- `(await tab.errors()).entries` is **cumulative across reloads**. Filter on `Date.now() - e.ts < N`
+  or you will chase an error the page has already left behind.
+- `gl.readPixels` on the game canvas returns all zeros (`preserveDrawingBuffer: false`). It is never
+  evidence of anything; take a screenshot instead.
+- To isolate one object in the scene, get the scene through the prediction line
+  (`(await import('/js/physics.js')).predLine.parent`) and index the spheres by
+  `Math.round(o.geometry.parameters.radius)`: Earth 6371, cumulus deck 6373, cirrus deck 6380,
+  atmosphere shell 6435, Moon 1737. Hiding one at a time and screenshotting is how the grey-wedge
+  artefact turned out to be cloud alpha rather than a shadow.
+- **`mesh.visible = false` is not a toggle for anything that re-centres.** `updatePatch` and
+  `updateCloudLayer` set `visible = true` on every frame they run (including their early-return path),
+  so an A/B that hides a mesh silently un-hides it a frame later. Isolate with
+  `mesh.geometry.setDrawRange(0, 0)`, which no update touches, and reload between cases — module state
+  like `receiveShadow` survives `reset()` and contaminates the next measurement.
+- **The chase camera looks along the vehicle, not at the ground.** Pointing the vehicle at the planet
+  centre gives a *limb* view where the surface is a few pixels of mip-blurred mean colour — that is how
+  a perfectly painted Earth looked "featureless from orbit" for a whole session. For a nadir view set
+  `S.q.setFromUnitVectors(Z, up)` so +Z is local up, and aim at a continent rather than trusting the
+  pose to be over land.
+- Take the teleport velocity from the sim, not from `EARTH_SPIN × r`: capture `S.v` right after
+  `g.reset()` and reuse it, otherwise the vehicle arrives with the wrong ground speed and the frame
+  ends in `RE-ENTRY DISASTER` before you can screenshot.
+- If the tab answers `Tab "lift" is frozen`, recover with `browser.tab('lift').close()` and reopen it;
+  evaluating against it will not wake it.
+- Frame cost: sample 90 `requestAnimationFrame` deltas and report median and p90. A hidden tab
+  throttles rAF, so keep the tab visible.
+- **You can test the camera without the game booting.** `js/camera.js` only needs `S`, so set
+  `S.pos`/`S.v` yourself and call `updateCamera(1/60)` in a loop, then assert on `camera.position`.
+  Drag input is real pointer events on `#gl` (`movementX/Y` go in the `PointerEvent` constructor; stub
+  `HTMLCanvasElement.prototype.setPointerCapture` first or the synthetic `pointerdown` throws). Note
+  that the collider reads the Moon at `getSimTime()`, so compare against `moonPos(getSimTime(), …)` —
+  comparing against a Moon you advance yourself measures the Moon's motion, not the collision.
+- The dev server hot-reloads on every save, so an agent's half-written file reliably breaks the page
+  mid-verification. If `window.game` is missing, that is why: the module graph (`SyntaxError` or a
+  missing export) is the failure, not the thing you were testing.
 
 ## Structure
 

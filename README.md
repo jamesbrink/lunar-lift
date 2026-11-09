@@ -66,25 +66,51 @@ Repo-wide convention (see `docs/reference/README.md`): **km, s, tonnes, kN**.
 
 ## Architecture
 
-- `js/physics.js` (487 lines) — the integrator and the reference-frame helpers. Two-body
+- `js/physics.js` (521 lines) — the integrator and the reference-frame helpers. Two-body
   inverse-square gravity for Earth and Moon, exponential drag, mass burn, staging, attitude
   dynamics, SAS, the trajectory predictor, and `impact()`. Its frame rule matters: `navVel()` is
   Moon-relative inside the lunar SOI and inertial outside (it drives SAS and the navball),
   `groundVel()` is velocity relative to the surface of whichever body is underneath (it drives
   `impact()` and the HUD speed readout), and `bodyUp()` is the attitude to hold when the velocity
   vector has no direction worth steering by. The Moon moves at ~1 023 m/s through the game frame, so
-  anything judged against a surface must not use the raw state vector `S.v`.
-- `js/world.js` (302 lines) — Earth, Moon, sky gradient, starfield, two cloud decks (cumulus and
-  cirrus) that cast moving shadows, the sun whose shadow camera follows the vehicle, and the launch
-  pad welded to the rotating planet.
-- `js/vehicle.js` (234 lines) — the three rocket-stage meshes, staging visuals, exhaust particles,
-  debris, the gimballing flame, and the thrust/velocity arrows drawn beside the vehicle
-  (`initNavVectors` / `updateNavVectors`).
+  anything judged against a surface must not use the raw state vector `S.v`. Also owns `LES_ALT`
+  (90 km) and the launch-escape-tower jettison, which is visual only and sheds no mass.
+- `js/world.js` (591 lines) — Earth, Moon, sky gradient, starfield, the two cloud decks (cumulus at
+  2 km, cirrus at 9 km, which deliberately **do not** cast shadows — see `agents.md`), the sun whose
+  shadow camera follows the vehicle, and the launch pad welded to the rotating planet. Drives
+  `js/clouds.js` with the ground point and the sun in body-local space. Exposes the terrain queries
+  `groundHeight`, `moonGroundHeight` and `fineGroundHeight` (km above the reference sphere), plus
+  `planetCanvas` and `bodySpin` for the orbital map.
+- `js/terrain.js` (269 lines) — the near level: one 161 × 161 mesh warped radially, ~25 m spacing
+  under the vehicle stretching to a ±220 km rim, hidden above 30 km and re-centred in place after
+  ground travel, so the ground the vehicle touches is always the authored ground.
+- `js/toonmap.js` (735 lines) — where the planets are *painted*, once at boot, from data rather than
+  from imagery: the specular sheet is read as a land mask and the diffuse sheet as a biome signal, and
+  the result is a flat cartoon surface map — ocean, shelf, a hard coastline stroke, grass, forest,
+  desert, tundra, boreal, ice — plus the relief fields, the authored Merritt Island shore lines and the
+  cloud sheets. No photographic pixel reaches the screen. Look and its limits:
+  `docs/reference/painted-planets.md` and `docs/reference/cartoon-art-direction.md`.
+- `js/toon.js` (117 lines) — the cel shading itself: `toon()` materials on a quantising ramp
+  (`RAMP_EARTH`'s step is placed so flat ground never straddles it — see `agents.md`), `PALETTE`, and
+  `outline()` for the single dark edge on hardware.
+- `js/vehicle.js` (941 lines) — the three rocket-stage meshes, staging visuals, LES jettison, debris,
+  the gimballing flame, the thrust/velocity arrows drawn beside the vehicle (`initNavVectors` /
+  `updateNavVectors`), and the exhaust: a 1 600-slot pool of physics parcels spawned on the real bell
+  exit discs, integrated against drag, gravity and the ground/pad/hull colliders, composited in one
+  draw call so smoke can darken the sky instead of glowing at it.
+- `js/ribbon.js` (198 lines) — the trajectory prediction as a screen-space ribbon (a 3 px core under an
+  11 px additive halo, two draw calls, `PRED_MAX` 2 700 points) rather than a thin `Line`, so it stays
+  legible against both the planet and black space.
+- `js/hud.js` (378 lines) — telemetry panel, flight computer, stage fuel pips, throttle gauge with
+  engine output in kN, logs, end overlay, and the full-screen orbital map (`M`): both bodies drawn as
+  polar azimuthal discs painted from the same canvas the meshes use, with the terminator, the vehicle
+  track and the launch site on them.
 - `js/navball.js` (286 lines) — the KSP-style attitude ball: an orthographic view of the sky from
   the nose, prograde/retrograde markers, apsis markers, the Moon as a target.
-- `js/hud.js` (215 lines) — telemetry panel, flight computer, minimap (auto / system views, lunar
-  SOI marked), stage fuel pips, throttle gauge with engine output in kN, logs, end overlay.
-- `js/main.js` (143 lines) — renderer bootstrap, keyboard input, the render loop (warp → substeps),
+- `js/camera.js` (216 lines) — chase, orbit and system cameras; drag/zoom input; damping plus collision
+  against the vehicle, the pad, the Earth and the Moon, applied twice per frame because a chord between
+  two points outside a sphere is inside it.
+- `js/main.js` (149 lines) — renderer bootstrap, keyboard input, the render loop (warp → substeps),
   camera cycling, and the `window.game` debug handle.
 - `js/targeting.js` (108 lines) — the predicted lunar aim: propagates the live state forward through
   `gravityAt` at the game's own 0.1 s step and publishes the closest lunar approach, incrementally
@@ -96,11 +122,15 @@ Repo-wide convention (see `docs/reference/README.md`): **km, s, tonnes, kN**.
   dry/fuel/thrust/Isp), `LAND_SAFE` (0.032 km/s), `WARPS`, `DTPHYS`, the SAS pitch program `TURN`,
   and `MOON_PHASE0` — the solved launch window (the Moon's angle along its orbit at MET 0 for which
   a TLI at the first perigee after insertion arrives at the Moon).
-- `js/camera.js` (107 lines) — chase, orbit and system cameras; drag/zoom input.
-- `js/textures.js` (99 lines) — the body surfaces. Earth diffuse/normal/specular, the cloud sheet and
-  the lunar map are real imagery served from `assets/` (1.5 MB total, committed); only the high
-  cirrus deck and the shared glow sprite are generated here, deterministically, so the weather is
-  the same every run. The specular map doubles as an ocean mask.
+- `js/textures.js` (151 lines) — the generated sheets: the two cloud decks and the shared glow
+  sprite, deterministic so the weather is the same every run. The photographic diffuse/normal/specular maps
+  under `assets/` are inputs to the painter in `js/toonmap.js` (mask and biome signal); the normal
+  map is no longer bound to any surface, per `docs/reference/cartoon-art-direction.md`.
+- `js/clouds.js` (248 lines) — weather at human scale: a 440 km cloud cap at 7 km altitude and a
+  140 km shade cap, both re-centred under the vehicle, both sampling one tileable puff field at 390 m
+  per texel so the shadow on the ground is the shape of the cloud above it, offset anti-sunward by deck
+  height over tan(elevation). The planet-scale decks cannot do this — one of their texels is 39 km and
+  the whole sky above the pad spans a fifth of one. Why it has to exist: `agents.md`.
 - `js/audio.js` (53 lines) — engine and impact audio, gated on first keypress as browsers require.
 
 `window.game` is the debugging/test handle wired in `js/main.js`: `state()` returns a full readback
