@@ -574,12 +574,14 @@ export function predict() {
     predPos.set([q.x, q.y, q.z], n * 3); predCol.set([1, .22, .18], n * 3); n++;
     predPos.set([q.x, q.y, q.z], n * 3); predCol.set([1, .22, .18], n * 3); n++;
     /* (user: the countdown is "always inaccurate") — it is not the integration (measured: 6 min
-       predicted vs 5.76 min actual on a 600 m/s dive); it is the warning firing while the vehicle
-       is still CLIMBING. A rocket going up at 53 m/s on the pillar will, on this exact state
-       vector, come back down in some number of minutes — and then the pilot throttles, stages,
-       pitches, and the number was a lie by construction. The impact marker (the red dot where
-       the current arc meets the ground) stays; the countdown shows only once the vehicle is
-       actually coming down (radial velocity below +50 m/s). */
+       predicted vs 5.76 min actual on a 600 m/s dive); it is the warning firing on states where
+       the prediction's assumptions do not describe the vehicle. Measured twice: at MET 10 on the
+       pillar, rising 40 m/s under 46 000 kN, the pill read "EARTH IN 4 min" — true for a rock
+       thrown at 40 m/s, a lie for a rocket the pilot is about to stage and pitch. The pill is
+       therefore for UNPOWERED flight (glide, dive, coast-above-apogee) where the state vector is
+       the whole story; while an engine burns the red marker (where the current arc meets the
+       ground) is the only honest element and it stays. The radial test additionally keeps it off
+       during the coast up to a hop's apex. */
     const climb = (() => {
       const rm = _mq.subVectors(S.pos, moonPos(simTime, _lq2));
       const rM2 = rm.lengthSq();
@@ -588,7 +590,7 @@ export function predict() {
       if (rM2 < rE2) return S.v.dot(rm) / Math.sqrt(rM2);
       return S.v.dot(d) / Math.sqrt(rE2);
     })();
-    if (climb <= 0.05) {
+    if (!burning && climb <= 0.05) {
       const msg = `IMPACT PREDICTED: ${impactType === 'moon' ? 'MOON' : 'EARTH'} IN ${Math.round(impactT / 60)} min`;
       if (msg !== impactWarn) impactWarn = msg;
       hooks.setWarn(msg);

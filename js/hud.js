@@ -178,7 +178,10 @@ export function updateHUD(dt) {
       ? `<span style="color:${vs > 120 ? 'var(--ob-err)' : vs > 32 ? 'var(--ob-warn)' : 'var(--ob-ok)'}">DESCENT ${vs.toFixed(0)} m/s — LIMIT 32 m/s</span>`
       : `ALTITUDE ${altM.toFixed(0)} km`;
   } else desc.style.display = 'none';
-  $('igniteHint').style.display = (state === 'pad') ? 'block' : 'none';
+  /* 'pad' state persists through the first ~10 s of the pillar burn (it flips when the tower
+     clears), so the state alone re-printed "PRESS SPACE TO IGNITE" under a rocket at 100 % —
+     caught in the round-6 blast frame. The hint is for an engine that has not been lit. */
+  $('igniteHint').style.display = (state === 'pad' && !getEngineOn()) ? 'block' : 'none';
 
   // trajectory warning already handled in predict()
   updateNavball();

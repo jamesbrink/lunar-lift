@@ -609,9 +609,15 @@ function buildPad(glowMap) {
   // two thin lightning masts; tips clear the 74-unit vehicle
   for (const mx of [-30, 30]) {
     const mast = new THREE.Mesh(new THREE.CylinderGeometry(0.35, 0.6, 88, 8), steel);
-    mast.position.set(mx, -26, 48); mast.rotation.x = Math.PI / 2; mast.castShadow = true; g.add(mast);
+    mast.position.set(mx, -26, 48); mast.rotation.x = Math.PI / 2;
+    /* No shadow: at the pad's 1.46 m/shadow-texel (±3 km box, 4096²) a 0.7 m mast is a
+       sub-texel caster, and PCF dithers its 88 m shadow into a dotted line across the apron
+       (measured in the parked chase frame — the dashes marched off toward the horizon). The
+       AGENTS rule "a texel-sized caster cannot be filtered" again: drop it rather than widen
+       a lightning mast into a silo. */
+    mast.castShadow = false; g.add(mast);
     const tip = new THREE.Mesh(new THREE.SphereGeometry(0.8, 10, 8), steel);
-    tip.position.set(mx, -26, 92.4); tip.castShadow = true; g.add(tip);
+    tip.position.set(mx, -26, 92.4); tip.castShadow = false; g.add(tip);
   }
   // clustered LOX/LH2 tanks on a pad with a manifold header and a feed line toward the deck
   box(34, 28, 2, concrete, 50, 36, 3, false, true, true);

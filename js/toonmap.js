@@ -1516,24 +1516,25 @@ export function padAuthored(u, v, near = 0) {
        spacing (25 m under the vehicle) so its edge survives sampling. A crawlerway was tried and
        deleted: 560 m wide against a cap whose spacing widens to >1 km, it aliased into dashes —
        the exact "faster than the mesh" failure this file's rules already name. */
-    const r = Math.hypot(_tp.x, _tp.y);
     /* Round 6b (user: "the whole planet should be ONE continuous beautiful planet"): the 1.5 km
        chamfered plate with its 0.11 km dark stroke was a grey slab that dominated every pad view
        — from 1 km back the perspective turned it into a parallelogram bigger than the horizon.
-       The real LC-39 pad area is a circle a few hundred metres across. The core is now 340 m;
-       the 340–620 m ring is 40 % worn concrete over whatever zone lies there (the whole ring is
-       inside the island — nearest shore is 3.6 km out); there is NO dark stroke any more. The
-       chamfered-square geometry is kept because at the plate's radius the cap spacing is ~260 m
-       and a round iso-contour rasterises into octagon teeth (the failure measured in review3). */
-    const sq = Math.max(Math.abs(_tp.x), Math.abs(_tp.y));
+       The real LC-39 pad area is a circle a few hundred metres across, and there is NO dark
+       stroke any more. */
     const rr = Math.hypot(_tp.x, _tp.y);
-    if (sq < 0.34 || (sq < 0.44 && rr < 0.56)) return C.concrete.slice();
-    /* The transition is a GRADIENT, not a second plate: concrete 340 m → zero by 1.25 km. A hard
-       ring of any width is a contour, and every contour at this radius has straight grid-following
-       edges at 150–300 m vertex spacing — the slab. A ramp spread over four or five vertex cells
-       reads as the same thing the real LC-39 reads as: a pad area worn into the grassland. */
-    if (rr < 1.25) {
-      const t = (1 - smoothS(0.30, 1.25, rr)) * 0.9;
+    /* Round 6b, second pass — the first version of this ramp (smoothS over 0.30–1.25 km at 0.9)
+       was measured in a fresh pad-wide frame and it was STILL a slab: smoothS(0.30,1.25,0.6) = 0.24
+       leaves the mix 68 % concrete at 600 m, so the grey field ran nearly a kilometre and the
+       rounded-square silhouette read as a plate from 1.1 km back. Concrete core 360 m, ramp to
+       zero by 920 m, peak 0.85: 500 m sits at ~half tone, 700 m at ~a tenth. The chamfered-square
+       core from review3 is gone — square corners at 440–560 m were what made the silhouette read
+       as geometry; with a real gradient there is no iso-contour left to alias into octagon teeth. */
+    if (rr < 0.36) return C.concrete.slice();
+    /* The transition is a GRADIENT, not a second plate: any hard ring of any width is a contour,
+       and every contour at this radius has straight grid-following edges at 150–300 m vertex
+       spacing. Spread over three or four vertex cells it reads as a pad area worn into grassland. */
+    if (rr < 0.92) {
+      const t = (1 - smoothS(0.32, 0.92, rr)) * 0.85;
       const k = C.concrete, o = C.grass;
       return [k[0] + (o[0] - k[0]) * (1 - t), k[1] + (o[1] - k[1]) * (1 - t), k[2] + (o[2] - k[2]) * (1 - t)];
     }

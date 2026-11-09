@@ -601,7 +601,13 @@ function groundHit(vx, vy, vz, nx, ny, nz, frx, fry, frz, moon) {
     }
     const s = -vn;                                                  // impact speed into the surface
     const k = 1 / tl;
-    const out = (moon ? 0.75 : 0.55) * s;                           // impact → outward flow
+    /* Earth: the outward term multiplies the FULL jet speed, and at 0.55 the deflected sheet left
+       the trench at 0.55 × 2.9 km/s = 1.6 km/s — it crossed the 700 m pad in half a second, so at
+       any shutter time later than the first frame the blast read as NOTHING but a glow (measured
+       live MET 2.5: deck clear, 1 229 parcels already 700 m out and 6 cm thin). A trench sheet is
+       around Mach 1: 0.08 × 2.9 = 230 m/s leaves the pad still a wall of smoke. The Moon keeps
+       0.75 — Apollo's vacuum ejecta really did run far, and frames 13/14 are certified on it. */
+    const out = (moon ? 0.75 : 0.08) * s;                            // impact → outward flow
     /* Tangential bleed. It used to survive the hit whole — `tx * (1 + out·k)` — so deflectate left
        the trench at close to exhaust speed and painted a 200 m field of discrete glowing domes around
        the pad. Air, the trench walls and the berm do not allow that: the flow arrives supersonic and
