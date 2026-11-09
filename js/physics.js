@@ -183,6 +183,23 @@ export function separateStage() {
     angVel: new THREE.Vector3(Math.random() * 0.6, Math.random() * 0.6, Math.random() * 0.6), age: 0, trail: 1 });
   for (let k = 0; k < 26; k++) vehicleOps.spawnParticle(worldPos,
     S.v.clone().addScaledVector(lat, 0.02 + Math.random() * 0.05).add(new THREE.Vector3().randomDirection().multiplyScalar(0.015)), 0.6 + Math.random() * 0.5, [1, .8, .4], 10 + Math.random() * 8, 0);
+  /* The 26 soft puffs alone read as "a single small soft white ellipse, no debris or spark"
+     (review2/14). A real separation event also throws hot hardware: 9 spark parcels — smoke = 0
+     so they draw additive like the explosion's sparks, 2 m at birth, 1.4–2.0 s — spread radially
+     in the separation PLANE (⊥ the stack axis: `lat` and axis×lat are an orthonormal pair there)
+     at 20–50 m/s, the range the CSM's push-off motors + spring blowout actually clears the
+     interstage ring by. */
+  {
+    const axis = fwd();
+    const e2 = new THREE.Vector3().crossVectors(axis, lat);
+    for (let k = 0; k < 9; k++) {
+      const th = Math.random() * Math.PI * 2;
+      const spd = 0.02 + Math.random() * 0.03;
+      vehicleOps.spawnParticle(worldPos,
+        S.v.clone().addScaledVector(lat, Math.cos(th) * spd).addScaledVector(e2, Math.sin(th) * spd),
+        1.4 + Math.random() * 0.6, [1, .95, .85], 2, 0);
+    }
+  }
   audio.thud();
   engineOn = false; targetThrottle = 0; throttle = 0;
 }

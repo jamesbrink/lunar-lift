@@ -240,6 +240,7 @@ const TRP2 = (36 * PAD_SCALE) * (36 * PAD_SCALE);        // trench opening radiu
 const TRENCH = 9 * PAD_SCALE;                            // trench floor depth below r = RE
 const PAD_BERM = 40 * PAD_SCALE;                         // berm crest ≈ PAD_BERM/4 ≈ 14 m, smoothstep-free s·t cap
 const SOI2 = SOI_M * SOI_M;
+const ALT40_R2 = (RE + 40) * (RE + 40);  // r² gate for "below 40 km": the ascent-rope regime
 
 /* Hard cel bands, hot → smoke, chosen the way the cartoon direction asks: flat tones a brush would
    load, hard steps, no lerps. Three flame bands run almost purely additive (a=cover is tiny) so
@@ -511,9 +512,11 @@ function groundHit(vx, vy, vz, nx, ny, nz, frx, fry, frz, moon) {
     /* Tangential bleed. It used to survive the hit whole — `tx * (1 + out·k)` — so deflectate left
        the trench at close to exhaust speed and painted a 200 m field of discrete glowing domes around
        the pad. Air, the trench walls and the berm do not allow that: the flow arrives supersonic and
-       leaves as a ground-hugging sheet at a fraction of the speed. On the Moon nothing bleeds it, which
-       is exactly why Apollo's ejecta ran far. */
-    const keep = moon ? 0.8 : 0.12;
+       leaves as a ground-hugging sheet at a fraction of the speed. The Moon bled almost nothing (0.8)
+       and the spray left frame in one breath: a translucent gradient cone with no surface event at
+       all (review2/12, review2/15). 0.45 keeps a long Apollo-style throw but decelerates the dust
+       enough that it crawls, piles and reads as ground interaction. */
+    const keep = moon ? 0.45 : 0.12;
     /* Lift is bounded: real deflectate rises by entrainment, not by keeping 16% of Mach-9
        momentum — uncapped this launched the pad blast 2 km into the sky. */
     const up = Math.min(s * (moon ? 0.04 : 0.08), moon ? 0.03 : 0.05);
@@ -570,6 +573,7 @@ function spawnPlume(set, pos, quat, vel, throttle, simDt) {
      `tau` seconds ago: back-project the exit point along the velocity, and let age, remaining life
      and heat start as they would have, so the stream is continuous. */
   const span = simDt / n;
+  const rope = !onMoon && pos.length() - RE < 40;   // ascent-rope regime — see stepParcel's growth gate
   for (let c = 0; c < n; c++) {
     const tau = (c + Math.random()) * span;
     const b = bells[(bellCursor++) % nb];
@@ -599,7 +603,13 @@ function spawnPlume(set, pos, quat, vel, throttle, simDt) {
     /* low throttle also shortens the parcel's life — slow flow does not carry soot to orbit.
        On the Moon the multiplier buys the long, bright, lingering spray of Apollo 11's ascent. */
     const life = (1.1 + Math.random() * 1.2) * (0.6 + 0.4 * throttle) * (onMoon ? 2.2 : 1);
-    pLife[i] = life - tau; pInv[i] = 1 / life; pAge[i] = tau;
+    /* Below 40 km the trail is the whole ascent read (review2/04), and the back-projection above is
+       the one place that could still starve it: tau grows with simDt, so a 1 s frame at warp billed
+       the oldest parcels up to 1 s of age at birth and they died before they were ever drawn. The
+       rope regime floors REMAINING life at 0.9 s — age and pInv stay honest, so the fade shape is
+       untouched; only an early death is refused. */
+    pLife[i] = rope ? Math.max(0.9, life - tau) : life - tau;
+    pInv[i] = 1 / life; pAge[i] = tau;
     pHeat[i] = Math.max(0, 1 - tau * 1.25);              // the same cooling rate stepParcel applies
     pTh[i] = 0;
   }
@@ -702,8 +712,14 @@ function stepParcel(i, h) {
           if (!pSmoke[i]) pLife[i] = Math.min(pLife[i], 1.15);
           /* Inside the trench itself the flow is still a coherent jet: hold the heat there so the
              pad keeps a bright fire under the vehicle, while the roll climbing out of it cools to
-             cloud. Without this the whole event read as grey smoke with a few sparks. */
-          if (h2 < TRP2) pHeat[i] = Math.max(pHeat[i], 0.82);
+             cloud. Without this the whole event read as grey smoke with a few sparks.
+             0.66, not 0.82: the hold sat ABOVE the incandescent band threshold (0.75), so every
+             parcel resting in the trench drew band 0 at additive ≈ 1 and the order-free glow
+             stacked into the blown-out white pillar the review measured punching up through the
+             pad (review2/03). Held below 0.75 it still reads as saturated flame orange, the
+             20 ms band gate below turns resting parcels to cloud anyway, and the fire that
+             remains visible is the young jet sheet plus the drawn cone. */
+          if (h2 < TRP2) pHeat[i] = Math.max(pHeat[i], 0.66);
           pSmoke[i] = 1;
           pR[i] = Math.min(R_CAP, pR[i] * 1.6 + 0.6);
         }
@@ -756,8 +772,18 @@ function stepParcel(i, h) {
        in its first second, and a sprite that stays 2 m never dwarfs the crawler. Vacuum smoke
        (lunar dust) grows far less: there is no air to roll in. */
     /* Non-deflected exhaust entrains too: at 0.35 m/s the ascent trail was a string of separate beads
-       rather than a column. Lunar parcels stay thin — a vacuum rolls in no air. */
-    pR[i] = Math.min(R_CAP, pR[i] + (pSmoke[i] ? (moon ? 5 : 10) : (moon ? 0.4 : 1.2)) * h);
+       rather than a column. Lunar parcels stay thin — a vacuum rolls in no air.
+       Earth's figure used to be a flat 1.2 and the trail still degenerated into a thin squiggly
+       thread at ~3 km (review2/04). Cause, measured through the two growth terms: the drag-diss swell
+       in the atmosphere branch is `min(14, diss·0.016)·h` and `diss` is the slip SHED per step, so it
+       collapses once the parcel flow has decelerated toward the vehicle — which is exactly what
+       happens above a few km, where the 900/s emission still spaces parcels only 0.11 m apart at
+       100 m/s. Spacing never separated the trail; the swell collapsing did. So the baseline carries
+       the rope on its own: 1.9 m/s below 40 km, where the column is the whole read. The bead-merge
+       rule from AGENTS.md still holds at the top of the regime — at 720 m/s and 520/s, spacing is
+       1.4 m against a 21 m sprite diameter. */
+    pR[i] = Math.min(R_CAP, pR[i] + (pSmoke[i] ? (moon ? 5 : 10)
+                                             : (moon ? 0.4 : (px * px + py * py + pz * pz < ALT40_R2 ? 1.9 : 1.2))) * h);
   } else {
     /* Generic puffs: sparks keep their size; smoke-flagged ones entrain — but entrainment IS air.
        At 67 km staging there is nothing to roll in, and the ungated growth bloomed 26 puffs into
@@ -822,13 +848,22 @@ function fillBuffers() {
          the sky, it goes back to the dark grey that makes a column read. */
       if (b === 3 && (Math.sqrt(x * x + y * y + z * z) - RE) < 0.05) b = 5;
       const c = BAND_C[b]; cr = c[0]; cg = c[1]; cb = c[2];
+      const fade = Math.min(1, pAge[i] * 8 + 0.05) * Math.min(1, pLife[i] * pInv[i] * 2.5 + 0.05);
+      a = BAND_A[b] * fade; ad = BAND_G[b] * fade;
       /* Deflected flow is air-mixed the moment it leaves the trench, so it carries almost no light:
          at 0.5 it still read as a ring of flaming lanterns rolling across the flat, because glow is
          order-free and a hot parcel anywhere in the cloud lights whatever is behind it. The fire
-         belongs to the trench (heat held there) and to the drawn cone, not to the roll. */
-      if (pSmoke[i]) ad *= 0.18;
-      const fade = Math.min(1, pAge[i] * 8 + 0.05) * Math.min(1, pLife[i] * pInv[i] * 2.5 + 0.05);
-      a = BAND_A[b] * fade; ad = BAND_G[b] * fade;
+         belongs to the trench (heat held there) and to the drawn cone, not to the roll.
+         The multiply used to sit ABOVE the `ad =` line that overwrites it — it had never dimmed
+         anything (the AGENTS species: read the arithmetic that consumes the factor). Every
+         deflected parcel therefore left the trench at up to full band-0 additive for its first
+         ~90 ms of cooling, and the stack was the white pillar of review2/03. It now lands, gated
+         on the same 20 ms the band gate uses: the young sheet climbing out keeps its fire,
+         everything older carries 18 %. Lunar settled dust is LIFTED, not dimmed, while young
+         (age < 0.25 s): freshly deflected parcels briefly light the ground they crawl over, which
+         is the "no ground interaction, no lit dust" half of review2/12 — at ×3 of the dust band's
+         0.05 it is a glow, not a beam. */
+      if (pSmoke[i] && pAge[i] > 0.02) ad *= (pMoon[i] && pAge[i] < 0.25) ? 3 : 0.18;
     }
     if (!(x === x && y === y && z === z && sz === sz && cr === cr && cg === cg && cb === cb && a === a && ad === ad)) {
       plumeDebug.causeNaN++;              // never uploaded; cause counted, frame continues
@@ -1024,12 +1059,20 @@ export function updateBurnVisuals({ pos, quat, vel, throttle, activeIdx, burn, f
     const on = burn && idx === activeIdx;
     st.flame.visible = on; st.glow.visible = on;
     if (on) {
-      const L = (4 + throttle * 11) * (idx === 0 ? 1.35 : idx === 1 ? 1.0 : .55);
+      /* The S-482 cone (idx 2) read as "a tiny blue smear" (review2/13): the shared length factor
+         .55 gave 8.25 u at full throttle against the 21.9 u of body hanging off the bell exit
+         (+6.8 → CM tip +28.7) — 38% — while the shared radius factor made the mouth (Ø 7.2 u)
+         nearly as wide as the cone was long: a squat stub, not exhaust. At .9 it is a 13.5 u
+         teardrop, 62% of that body; the ×1.5 radius then opens the mouth to Ø 10.8 u against the
+         apex at the bell — a ~22° half-angle plume. Stages 0/1 and the per-stage glow are
+         untouched. */
+      const L = (4 + throttle * 11) * (idx === 0 ? 1.35 : idx === 1 ? 1.0 : .9);
       const flick = .9 + Math.random() * .2;
+      const fr = (2 + throttle * 1.6) * (idx === 2 ? 1.5 : 1);
       /* (radius, length, radius): the cone's axis is its local +Y after the -90° pitch below, so the
          two radial axes have to take the radius. It used to read (rx, L, L), which stretched the plume
          along one radial direction and drew the whole flame as a diamond under the rocket. */
-      st.flame.scale.set((2 + throttle * 1.6) * flick, L * flick, (2 + throttle * 1.6) * flick);
+      st.flame.scale.set(fr * flick, L * flick, fr * flick);
       /* The exit-plane bloom is sized by the ENGINE, not by a shared law: at 6+13·throttle the
          CSM's single 91 kN bell wore the same white orb as five F-1s, and a round balloon bigger
          than the flame next to a small cone is exactly the "stub, gap, bigger triangle" the
