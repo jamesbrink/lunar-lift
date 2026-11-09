@@ -81,7 +81,7 @@ Repo-wide convention (see `docs/reference/README.md`): **km, s, tonnes, kN**.
   `js/clouds.js` with the ground point and the sun in body-local space. Exposes the terrain queries
   `groundHeight`, `moonGroundHeight` and `fineGroundHeight` (km above the reference sphere), plus
   `planetCanvas` and `bodySpin` for the orbital map.
-- `js/terrain.js` (269 lines) — the near level: one 161 × 161 mesh warped radially, ~25 m spacing
+- `js/terrain.js` (274 lines) — the near level: one 161 × 161 mesh warped radially, ~25 m spacing
   under the vehicle stretching to a ±220 km rim, hidden above 30 km and re-centred in place after
   ground travel, so the ground the vehicle touches is always the authored ground.
 - `js/toonmap.js` (921 lines) — where the planets are *painted*, once at boot, from data rather than
@@ -90,11 +90,11 @@ Repo-wide convention (see `docs/reference/README.md`): **km, s, tonnes, kN**.
   desert, tundra, boreal, ice — plus the relief fields, the authored Merritt Island shore lines and the
   cloud sheets. No photographic pixel reaches the screen. Look and its limits:
   `docs/reference/painted-planets.md` and `docs/reference/cartoon-art-direction.md`.
-- `js/toon.js` (119 lines) — the cel shading itself: `toon()` materials on a quantising ramp
+- `js/toon.js` (129 lines) — the cel shading itself: `toon()` materials on a quantising ramp
   (`RAMP_EARTH` is four texels with the top two equal, so its steps sit at N·L = −0.5, 0, +0.5 — out by
   the terminator; three samples the ramp at `dotNL · 0.5 + 0.5`, see `agents.md`), `PALETTE`, and
   `outline()` for the single dark edge on hardware.
-- `js/vehicle.js` (952 lines) — the three rocket-stage meshes, staging visuals, LES jettison, debris,
+- `js/vehicle.js` (1017 lines) — the three rocket-stage meshes, staging visuals, LES jettison, debris,
   the gimballing flame, the thrust/velocity arrows drawn beside the vehicle (`initNavVectors` /
   `updateNavVectors`), and the exhaust: a 1 600-slot pool of physics parcels spawned on the real bell
   exit discs, integrated against drag, gravity and the ground/pad/hull colliders, composited in one
@@ -111,7 +111,7 @@ Repo-wide convention (see `docs/reference/README.md`): **km, s, tonnes, kN**.
 - `js/camera.js` (216 lines) — chase, orbit and system cameras; drag/zoom input; damping plus collision
   against the vehicle, the pad, the Earth and the Moon, applied twice per frame because a chord between
   two points outside a sphere is inside it.
-- `js/main.js` (149 lines) — renderer bootstrap, keyboard input, the render loop (warp → substeps),
+- `js/main.js` (160 lines) — renderer bootstrap, keyboard input, the render loop (warp → substeps),
   camera cycling, and the `window.game` debug handle.
 - `js/targeting.js` (108 lines) — the predicted lunar aim: propagates the live state forward through
   `gravityAt` at the game's own 0.1 s step and publishes the closest lunar approach, incrementally
@@ -123,7 +123,7 @@ Repo-wide convention (see `docs/reference/README.md`): **km, s, tonnes, kN**.
   dry/fuel/thrust/Isp), `LAND_SAFE` (0.032 km/s), `WARPS`, `DTPHYS`, the SAS pitch program `TURN`,
   and `MOON_PHASE0` — the solved launch window (the Moon's angle along its orbit at MET 0 for which
   a TLI at the first perigee after insertion arrives at the Moon).
-- `js/textures.js` (151 lines) — the generated sheets: the two cloud decks and the shared glow
+- `js/textures.js` (155 lines) — the generated sheets: the two cloud decks and the shared glow
   sprite, deterministic so the weather is the same every run. The photographic diffuse/normal/specular maps
   under `assets/` are inputs to the painter in `js/toonmap.js` (mask and biome signal); the normal
   map is no longer bound to any surface, per `docs/reference/cartoon-art-direction.md`.
