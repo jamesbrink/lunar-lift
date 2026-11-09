@@ -23,13 +23,16 @@ That mask then goes through:
   filter doubles as a morphological smoother: each pass shaves a corner off a staircase, so the
   blocky source mask rounds into the coastline a map would draw. It costs no strait narrower than
   ~8 texels, which at 20 km per texel is anything a person would notice.
-- **octagonal dilation.** One radius dilated separably gives a square, and a square coastline is the
-  most obviously synthetic thing on the planet. Applying descending radii — `[9, 4, 2]` for the outer
-  shelf, `[5, 2]` for the shallow band, `[1]` for the stroke — approximates the disc as a rounded
-  octagon for the same work.
-- a **coast stroke in the water**. `dilate` returns land *plus* the ring, so the ring alone is
-  `dilate & ~land`. Painting the dilated mask inks every land pixel instead and the continents come
-  out navy. That mistake cost one full screenshot round.
+- **sea bands painted from the smoothed signed distance, not from dilated rings** (round 5). The
+  octagonal dilation stack (`[9,4,2]` outer, `[5,2]` shallow, a stroke ring) that used to supply the
+  shelf/ocean/deep palette staircased at one 20 km texel per tread — and at the 40–150 km-per-pixel
+  oblique slants a 160 km orbit review uses, the canvas *is* what the eye gets: every shader-side
+  derivative-faded band switches itself off there. So the mask stops at the land classification; the
+  sea colour is `smoothstep`-blended iso-lines of `earthCoast()` (deep → ocean at 175 km, shelf at
+  95, coast stroke at 25, ±14 km AA) and the relief feather rides the same field, widened 40 →
+  180 km so the 384-segment globe mesh (≈104 km per vertex) cannot sample a step. The field itself
+  gets a 5×5 binomial tent (~80 km): a chamfer of a staircased mask is only as round as the mask.
+  Measured band shares: land 32.8 %, stroke 3.2 %, shelf 8.6 %, ocean 6.3 %, deep 49.2 %.
 
 ## Biomes: hue does not work here
 
@@ -66,12 +69,15 @@ texels before they reach the table above, and the resulting *label* then gets a 
 sits on a threshold adjacent texels flip between grass and forest, and 19.5 km flips with hard edges are
 what the ground under the vehicle is made of: the same landscape, rendered as a checkerboard. Voting on
 the label rather than the signal is what gives a biome spatial extent, which is the difference between a
-map and noise. Water is outside the vote — its edge comes from the cleaned mask, and the coastline is the
-one boundary that must stay hard.
+map and noise. Water is outside the vote; since round 5 its boundary is the smoothed signed distance
+instead of the raw mask, and the crispness of the coast is carried by the shader ink stroke, which
+survives where a 20 km texel cannot.
 
-Resulting cover, counted on the painted canvas (32 distinct values, the rest being launch-site bake
-blends): deep ocean 52.0 %, ice 10.5 %, shelf 7.0 %, ocean 6.8 %, desert 6.5 %, forest 5.2 %, boreal
-4.1 %, grass 3.3 %, coast stroke 1.5 %, rock 1.3 %, tundra 1.0 %, ice edge 0.9 %.
+Resulting cover. Sea bands counted on the smoothed signed distance (their measured texel shares,
+round 5): land 32.8 %, coast stroke 3.2 %, shelf 8.6 %, ocean 6.3 %, deep 49.2 %. The land splits,
+counted on the classification before the beach blend: ice 10.5 %, desert 6.5 %, forest 5.2 %, boreal
+4.1 %, grass 3.3 %, rock 1.3 %, tundra 1.0 %, ice edge 0.9 % — and the land numbers sum to the 32.8 %
+land band exactly, which is the cross-check that the two measurements see the same planet.
 
 ## The Moon
 

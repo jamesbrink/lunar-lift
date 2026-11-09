@@ -39,12 +39,19 @@ const C = {
   concrete: [168, 166, 156],    // LC-39 apron (near level only)
 };
 
+/* Daylight regolith, not printer paper (the fact sheet's Bond albedo is 0.11). Measured 2026-11-09
+   round 5: under the day ramp the shipped bytes (mean 0.836 sRGB) rendered the near bake at mean
+   0.804 with 33 % of vertices above 0.90 and 41 % inside the top eighth of the histogram — a
+   blown-out white sheet with no headroom left for a crater rim to step ABOVE its own ground, so
+   at 9 km the pockmarks were invisible and rim-minus-floor measured NEGATIVE. These sit the same
+   canvas — the one the far mesh and the near level both read, so they cannot disagree — at ~0.63
+   noon, and every class keeps its step: 0.074 / 0.086 / 0.138 / 0.062 of sRGB between neighbours. */
 const MOON = {
-  maria: [128, 132, 141],
-  collar: [108, 112, 122],       // the drawn stroke inside a mare border (see mareCollar)
-  mid: [168, 171, 178],
-  high: [206, 208, 214],
-  bright: [230, 232, 236],
+  maria: [94, 98, 108],
+  collar: [79, 83, 93],          // the drawn stroke inside a mare border (see mareCollar)
+  mid: [130, 133, 142],
+  high: [153, 155, 163],
+  bright: [172, 174, 182],
 };
 
 const loaded = new Map();
@@ -146,17 +153,8 @@ async function paintEarthJob(diffusePath, maskPath) {
   const land = new Uint8Array(w * h);
   for (let i = 0; i < land.length; i++) land[i] = sea[i] ? 0 : 1;
   const cleaned = cleanMask(land, w, h, 5);
-  const shore = dilate(cleaned, w, h, [5, 2]);      // land + a few km of shallow water
-  const outer = dilate(cleaned, w, h, [9, 4, 2]);
-  /* The stroke goes in the water, just outside the coast — dilate gives land *plus* the ring, so the
-     ring alone is what is wet but near dry. Painting the dilated mask itself inks every land pixel
-     and the continents come out navy. */
-  /* [2], not [1]: a one-texel (~20 km) ink ring bilinear-smooths into a continuous gradient by the
-     time mip chains and distance are done with it — the "soft blurry coast band" at 68 km. Two
-     texels is the only coast ink that survives to mip-averaged viewing distance. */
-  const grown = dilate(cleaned, w, h, [2]);
-  const coast = new Uint8Array(w * h);
-  for (let i = 0; i < coast.length; i++) coast[i] = cleaned[i] ? 0 : grown[i];
+  /* (round 5: the shore/outer/stroke dilate masks are gone — the sea bands below are painted from
+     the smoothed signed distance instead, which is why no boundary here staircases any more.) */
 
   /* Classify the BIOME from smoothed signals, not from one texel's own pixel. A 2048-wide diffuse is
      19.5 km per texel and the JPEG is noise at that scale, so a per-texel decision turned every
@@ -206,11 +204,46 @@ async function paintEarthJob(diffusePath, maskPath) {
   voteLabels(lab, cleaned, w, h, 1);
 
   const out = new Uint8ClampedArray(w * h * 4);
+  /* The sea-side colour comes from the smoothed signed distance, not from the dilate masks.
+     The masks (dilate [9,4,2]) staircased at one 20 km texel per tread and review 4 measured the
+     result at 160 km as "stepped ocean-depth terraces" and a "100-200 km-wide dark zone" around
+     every coast: at those slants the MAP texture is what the eye has, so smoothing the SDF the
+     shader reads fixed nothing the canvas drew. Blending each band edge over ~1 texel of SDF
+     turns every boundary into a graded iso-line; bilinear sampling carries it to a curve. */
+  const sdf = earthCoast(cleaned, w, h).km;
+  const ss = (a, b, x) => { const t = Math.min(1, Math.max(0, (x - a) / (b - a))); return t * t * (3 - 2 * t); };
+  const H = 14;                                   // km blend half-width ≈ 0.7 texel
   for (let y = 0; y < h; y++) {
     for (let x = 0; x < w; x++) {
       const i = y * w + x, o = i * 4;
-      const col = lab[i] ? PAL[lab[i]] : (coast[i] ? C.coast : outer[i] ? (shore[i] ? C.shelf : C.ocean) : C.deep);
-      out[o] = col[0]; out[o + 1] = col[1]; out[o + 2] = col[2]; out[o + 3] = 255;
+      if (lab[i]) {
+        const c = PAL[lab[i]];
+        // a beach band inside the land, blended on the same smooth SDF: without it the binary
+        // biome-mask edge met the graded sea bands directly and kept a 20 km staircase of its own
+        const sdl = sdf[i];
+        const wsand = ss(-40, -6, sdl) * 0.8;
+        out[o] = c[0] + (206 - c[0]) * wsand;
+        out[o + 1] = c[1] + (186 - c[1]) * wsand;
+        out[o + 2] = c[2] + (132 - c[2]) * wsand;
+      } else {
+        const sd = sdf[i];
+        const wo = 1 - ss(175 - H, 175 + H, sd), ws = 1 - ss(95 - H, 95 + H, sd), wc = 1 - ss(25 - H, 25 + H, sd);
+        // open ocean was one value everywhere (review 4: "the low-orbit oceans of 09/15 are
+        // monotone flats"): three slow tones, ~900-1500 km wavelength, far slower than any mesh
+        const u = (x + 0.5) / w, v2 = (y + 0.5) / h;
+        const TAU = 6.2831853;
+        const dw = 0.5 + 0.5 * Math.sin(TAU * 24 * u) * Math.sin(TAU * 14 * v2 + 1.7)
+                 + 0.35 * Math.sin(TAU * 11 * u + 0.6) * Math.sin(TAU * 8 * v2);
+        const tf = 1 + (sd > 175 ? (-0.06 + 0.06 * ((dw > 0.42 ? 1 : 0) + (dw > 0.62 ? 1 : 0))) : 0);
+        for (let ch = 0; ch < 3; ch++) {
+          let v = C.deep[ch];
+          v += (C.ocean[ch] - v) * wo;
+          v += (C.shelf[ch] - v) * ws;
+          v += (C.coast[ch] - v) * wc;
+          out[o + ch] = v * tf;
+        }
+      }
+      out[o + 3] = 255;
     }
   }
   bakePadCoast(out, w, h);
@@ -358,6 +391,24 @@ async function paintMoonJob(path) {
   mareCollar(out, mare, w, h);
   stampCraterAlbedo(out, blur, w, h);
   stampMidAlbedo(out, w, h);
+  /* Gentle large-scale albedo mottling: ~376 km wavelength, second octave 188 km, quantised to
+     steps of 1.5 % (peak ±3 %). A 9 km approach looks through a 440 km window, and inside one the
+     painted ground was before this one flat class tone plus bowls — the reviewer's "sheet". The
+     mottle is quantised, not smooth (flat factors are cel tones, and a smooth field would be
+     re-stepped by the ramp anyway), it lands IDENTICALLY on both sides of a mare border, so the
+     round-4 quantile-preserving cut keeps its step and its corner statistics, and 376 km is
+     over a hundred times the cap's widest vertex spacing (3 km at the rim), so the near bake can
+     never staircase on it. Two octaves over 524 k texels adds ~20 ms to the paint pass. */
+  const mottleP = period(MOON_CIRC, 376);
+  for (let y = 0; y < h; y++) {
+    const v = 1 - (y + 0.5) / h;
+    for (let x = 0; x < w; x++) {
+      const lvl = Math.round((fbm((x + 0.5) / w, v * 2, mottleP, 2, 211) - 0.5) * 6);
+      if (!lvl) continue;
+      const k = 1 + lvl * 0.015, o = (y * w + x) * 4;
+      out[o] *= k; out[o + 1] *= k; out[o + 2] *= k;
+    }
+  }
   const cv = document.createElement('canvas');
   cv.width = w; cv.height = h;
   cv.getContext('2d').putImageData(new ImageData(out, w, h), 0, 0);
@@ -764,9 +815,10 @@ function craterFrame(cr) {
 }
 
 /* "Standing on mare", in the units the caller actually has: the painted canvas luminance of
-   MOON.maria is sRGB 0.517 and of MOON.mid 0.670 (measured off the palette bytes), and MOON.collar
-   0.439, so a cut at 0.58 separates the dark plains from everything brighter. */
-const RAY_MARE_LUM = 0.58;
+   MOON.maria is sRGB 0.384 and of MOON.mid 0.522 (measured off the round-5 palette bytes), and
+   MOON.collar 0.325, so a cut at 0.46 separates the dark plains — and the bowl floors stamped
+   into them — from everything brighter. */
+const RAY_MARE_LUM = 0.46;
 
 let _smallCraters = null;
 function moonSmallCraters() {
@@ -894,7 +946,7 @@ export function moonPatchDetail(u, v, baseLum, sun) {
          the crater, so the two tiers cannot drift apart from how the map draws them. The amplitude
          mapping mirrors the map pass exactly (full over bright ground, 0.55 of it over mare, where a
          bright spoke matters most) and the gate is the PAINTED luminance scale — MOON.maria measures
-         sRGB 0.517 and MOON.mid 0.670 — where the old `baseLum < 0.4` was below every tone this
+         sRGB 0.384 and MOON.mid 0.522 — where the old `baseLum < 0.4` was below every tone this
          canvas contains: measured, the patch threw zero ray fans over 36 000 sample sites. */
       if (cr.young && dd >= cr.rayIn && dd < cr.rayOut) {
         const sp = Math.cos(cr.spokes * Math.atan2(ey, ex) + cr.phase);
@@ -1098,23 +1150,45 @@ function buildEarthField(land, sw, sh) {
     }
   }
   const coast = earthCoast(land, sw, sh);
-  /* Shore feather: land eases to exactly 0 over the last 40 km (≈2 far-mesh cells at 512 segs)
-     toward the sea, using the same 1-Lipschitz SDF the colours read. Without it a half-km
-     continent meets zero-height ocean on a one-cell step and the 512-segment mesh draws that
-     step as a staircase cliff — measured as the w25 dark band, (44,68,68)→(31,49,71) over 75 px.
-     The near1/near2 ramp above only reaches one dilated ring; the SDF makes it a ramp. */
+  /* Shore feather: land eases to exactly 0 over the last 180 km toward the sea, using the same
+     1-Lipschitz SDF the colours read. Without it a half-km continent meets zero-height ocean on a
+     one-cell step and the far mesh draws that step as a staircase cliff — measured as the w25 dark
+     band, (44,68,68)→(31,49,71) over 75 px. Round 4's 40 km feather still staircased (review 4,
+     frames 08/09: "stepped ocean-depth terraces") because the FAR MESH is 384×192 — one vertex per
+     ~104 km — so a ramp under one cell wide is sampled as a step no matter how smooth the field is.
+     180 km ≈ 2 cells: the staircase is gone when the field that feeds the mesh varies slower than
+     the mesh, which is the same rule the colour bakes already obey. */
   for (let i = 0; i < km.length; i++) {
     // uv, not grid coords: v counts north while rows count south — mixing them flattens the antipode
     const u = (i % w + 0.5) / w, v = 1 - (Math.floor(i / w) + 0.5) / h;
     let k = km[i];
     if (k > 0) {
       const sd = sampleGrid(coast, u, v);              // km, negative inland
-      if (sd > -40) {
-        const s = THREE.MathUtils.clamp(-sd / 40, 0, 1);
+      if (sd > -180) {
+        const s = THREE.MathUtils.clamp(-sd / 180, 0, 1);
         k *= s * s * (3 - 2 * s);
       }
     }
     km[i] = THREE.MathUtils.clamp(k * padWeight(u, v), 0, 1.4);
+  }
+  /* One tent pass over the finished grid (footprint ~60 km on the 20 km field): kills the ridged
+     octave's fastest spines, which sat at the same ~100 km wavelength as the far mesh row and drew
+     terraces inland too. Mountains keep their mass (the broad+ridge envelope is 300 km+); the mesh
+     can no longer alias the field into steps. */
+  {
+    const sm = Float32Array.from(km);
+    for (let y = 0; y < h; y++) {
+      for (let x = 0; x < w; x++) {
+        let s = 0, wsum = 0;
+        for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) {
+          const wgt = (dx ? 1 : 2) * (dy ? 1 : 2);
+          const yy = (y + dy + h) % h, xx = (x + dx + w) % w;
+          s += km[yy * w + xx] * wgt; wsum += wgt;
+        }
+        sm[y * w + x] = s / wsum;
+      }
+    }
+    km.set(sm);
   }
   return { field: { w, h, km }, coast };
 }
@@ -1139,6 +1213,28 @@ function earthCoast(land, w, h) {
       const i = y * w + x;
       km[i] = (land[i] ? -toOcean[i] : toLand[i]) * e;
     }
+  }
+  /* 5×5 binomial tent (footprint ~80 km). The raw chamfer field is only as round as the MASK that
+     fed it, and the mask staircases at one 20 km texel — every isoline of the raw field, including
+     the zero line the ink band draws, is a staircase. Review 4 measured the result at 160 km:
+     "coastline as a 100-200 km-wide dark zone with ~40-60 px treads". Blurring the DISTANCE, not
+     the mask, rounds every isoline at once; the zero-crossing moves by less than a texel, and the
+     SDF stays 1-Lipschitz to within the kernel. Strains narrower than ~80 km merge — at 20 km per
+     texel they were never really drawn anyway. */
+  {
+    const sm = new Float32Array(w * h);
+    for (let y = 0; y < h; y++) {
+      for (let x = 0; x < w; x++) {
+        let s = 0, wsum = 0;
+        for (let dy = -2; dy <= 2; dy++) for (let dx = -2; dx <= 2; dx++) {
+          const wgt = [1, 4, 6, 4, 1][dx + 2] * [1, 4, 6, 4, 1][dy + 2] / 256;
+          const yy = Math.min(h - 1, Math.max(0, y + dy)), xx = (x + dx + w) % w;
+          s += km[yy * w + xx] * wgt; wsum += wgt;
+        }
+        sm[y * w + x] = s / wsum;
+      }
+    }
+    km.set(sm);
   }
   return { w, h, km };
 }

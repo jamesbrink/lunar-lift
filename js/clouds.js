@@ -115,6 +115,28 @@ function shadeTile(src) {
       data[i] = 255; data[i + 1] = 255; data[i + 2] = 255; data[i + 3] = (a / (K * K)) | 0;
     }
   }
+  /* Two tent passes over the 64 × 64 grid (footprint ~21 km). The single box filter still let a
+     puff's hard tile boundary through: the shader's two cel steps then drew the shadow edge as a
+     straight-edged grey slab - review 4 counted it "like a raft" at 160 km. On a field this small
+     the tent is nearly free and it curves the isolines at the scale a shadow reads at, which is
+     what the quantised edge then draws: a shadow with a boundary, not a decal. */
+  const tmp = new Uint8Array(R * R), tmp2 = new Uint8Array(R * R);
+  for (let pass = 0; pass < 2; pass++) {
+    const from = pass ? tmp2 : data, to = pass ? tmp : tmp2;
+    for (let y = 0; y < R; y++) {
+      for (let x = 0; x < R; x++) {
+        let s = 0, wsum = 0;
+        for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) {
+          const wgt = (dx ? 1 : 2) * (dy ? 1 : 2);
+          const yy = (y + dy + R) % R, xx = (x + dx + R) % R;
+          s += (pass ? from[yy * R + xx] : from[(yy * R + xx) * 4 + 3]) * wgt;
+          wsum += wgt;
+        }
+        to[y * R + x] = (s / wsum) | 0;
+      }
+    }
+  }
+  for (let i = 0; i < R * R; i++) data[i * 4 + 3] = tmp[i];
   const t = new THREE.DataTexture(data, R, R, THREE.RGBAFormat);
   t.wrapS = t.wrapT = THREE.RepeatWrapping;
   t.magFilter = THREE.LinearFilter;

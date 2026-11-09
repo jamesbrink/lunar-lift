@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { SPECS, VS, RE, RM, MU_E, MU_M, SOI_M, EARTH_SPIN, PAD_SCALE, PAD_UP, moonPos, moonVel } from './constants.js';
-import { glowTex } from './textures.js';
+import { glowTex, flareTex } from './textures.js';
 import { toon, outline, plumeMeshes, PALETTE, RAMP_HARD } from './toon.js';
 /* The plume is a physics consumer, so it reads the sim's own numbers instead of restating them:
    airDensity is literally the function accelAt drags the vehicle with (one exponential, no chance
@@ -10,6 +10,10 @@ import { airDensity, getSimTime } from './physics.js';
 import * as WORLD from './world.js';
 
 let scene = null;
+
+/* Sea-level density straight off the physics module's own exponential (airDensity(0) = RHO0),
+   so the ember quench below normalises by the same number drag reads, never a restated one. */
+const RHO_SEA = airDensity(0);
 
 /* ---------------- rocket ---------------- */
 export const rocketGroup = new THREE.Group(); rocketGroup.scale.setScalar(VS);
@@ -39,8 +43,12 @@ function cyl(rt, rb, len, z, mat, seg = 20, edge = false) {
    shells sat coplanar or interpenetrated. Two rules, enforced on every seam:
    1. an axial joint is ALWAYS covered by a slightly larger-radius sleeve (the black bands do this),
       so the butt faces at the joint are inside solid material and can never show or z-fight;
-   2. wherever two meshes meet axially, one is sunk 0.05..0.15 u into the other at a DIFFERENT
-      radius, so no two surfaces coincide. Remaining exposed gaps are step rings under 0.2 m.
+   2. wherever two meshes meet axially, one is sunk ≥0.4 u (0.6 m) into the other with its junction
+      radius ≥ the neighbour's (round-5: the old 0.05..0.15 u sinks at DIFFERENT radii left 3-17 cm
+      step-slot rings that grazing below-views read as "open bucket … visible seam gaps"), so no
+      two surfaces coincide and no slot rim survives.
+   3. every shell material is single-sided — measured `side === 0` (FrontSide) on all 24 shell
+      cylinders — so interior back faces are never drawn and an inside can never darken a seam.
    Dimensions are real Saturn V at 1 build unit = VS km = 1.4 m (NASA SP-4029,
    docs/reference/spacecraft.md): Ø10.0 m stage (r 3.57), S-IC 42 m + 3.4 m interstage, S-II 24.8 m,
    S-IVB 17.9 m + 0.9 m instrument unit, SLA tunnel/adapter, SM Ø3.9 m, CM, LES. Engines: 5× F-1
@@ -52,9 +60,15 @@ function cyl(rt, rb, len, z, mat, seg = 20, edge = false) {
 
 // stage 0 — S-IC + its interstage: white body, black engine skirt, five F-1 bells. -42 .. -9.5
 {
+  /* Skirt/body junction, round-5: the old 4.7 u cone ENDED at -34.9 with r 3.52 while the body
+     (3.57) started at -35.0 — from below that left a 0.055 u radial step under a 0.1 u axial slot,
+     and grazing angles read the shadowed gap as "seam gaps … open bucket". The cone now runs to
+     -34.6 with its mouth (3.60) LARGER than the body: the wall surfaces cross once, transversally,
+     at r(z)=3.57 → z=-35.5, the 0.4 u overlap band (≈0.6 m) is solid sleeve over solid body, and
+     there is no rim for the eye to fall through. */
   const g = stages[0].meshes;
-  g.add(cyl(3.52, 3.30, 4.7, -37.25, matDark, 24, true));     // conical engine skirt, -39.6 .. -34.9
-  g.add(cyl(3.57, 3.57, 25.1, -22.45, matBody, 24, true));    // booster body, -35.0 .. -9.95 (top buried in the interstage sleeve; overlap radii differ 3.57 vs 3.52 so the skirt/body junction shares no surface)
+  g.add(cyl(3.60, 3.30, 5.0, -37.1, matDark, 24, true));      // conical engine skirt, -39.6 .. -34.6
+  g.add(cyl(3.57, 3.57, 25.1, -22.45, matBody, 24, true));    // booster body, -35.0 .. -9.95 (top buried in the interstage sleeve; the skirt mouth 3.60 > 3.57 so the skirt/body junction shares no surface)
   g.add(cyl(3.63, 3.63, 2, -32, matAccent));                  // roll band
   g.add(cyl(3.62, 3.62, 2.5, -10.75, matDark, 24, true));     // interstage sleeve -12.0 .. -9.5: shrouds the S-II bells until staging, and covers the body/sleeve butt face because it exists
   const finShape = new THREE.Shape();                         // small swept tail fin: x = radial, y = axial z. Real Saturn V fins are stubby — the old 2.5× body-span sheets read as a model rocket
@@ -84,7 +98,12 @@ function cyl(rt, rb, len, z, mat, seg = 20, edge = false) {
 // stage 1 — S-II + forward shroud (the interstage rode with the S-II): five J-2 bells. -11.8 .. +8.6
 {
   const g = stages[1].meshes;
-  g.add(cyl(3.45, 3.40, .95, -10.375, matDark, 24, true));    // engine skirt -10.85 .. -9.9, buried in the body base; hidden inside the stage-0 sleeve while stacked
+  /* S-II engine skirt, round-5: it was Ø 3.45 at the body while the body is 3.57 — from below the
+     exposed white base-cap annulus (0.12 u, 17 cm) around the dark skirt was the "broken bent
+     model" rim once stage 0 fell away. The skirt now overlaps the body by 0.45 u (0.63 m) with its
+     top radius 3.58 ≥ the body's 3.57 — and stays 0.04 u under the stage-0 sleeve's 3.62, so it
+     never shares a surface with the sleeve it rides inside. */
+  g.add(cyl(3.58, 3.50, 1.5, -10.3, matDark, 24, true));      // engine skirt -11.05 .. -9.55, top sunk into the body solid; hidden inside the stage-0 sleeve while stacked
   g.add(cyl(3.57, 3.57, 17.0, -1.5, matBody, 24, true));      // white body -10.0 .. +7.0
   g.add(cyl(3.63, 3.63, 2, 5.2, matAccent));                  // S-II roll-pattern band
   g.add(cyl(2.55, 3.52, 1.9, 7.65, matDark, 24));             // forward shroud +6.7 .. +8.6: tapers 10 m → S-IVB and hides the S-IVB bell until this stage falls away
@@ -105,11 +124,18 @@ function cyl(rt, rb, len, z, mat, seg = 20, edge = false) {
    single-engine stage physically has it and where the flame must sit. */
 {
   const g = stages[2].meshes;
-  g.add(cyl(2.36, 2.36, 11.1, 14.0, matBody, 20, true));      // S-IVB white body Ø6.6 m, +8.45 .. +19.55 (bottom end buried in the stage-1 shroud solid, r 2.36 < 2.55 there)
+  /* S-IVB bottom, round-5: sunk 0.45 u (0.63 m) into the stage-1 shroud solid (was 0.15) — the
+     junction now reads as one continuous taper from below, at a radius (2.36) under the shroud's
+     2.63..2.78 there, so no surface is shared. */
+  g.add(cyl(2.36, 2.36, 11.5, 13.9, matBody, 20, true));      // S-IVB white body Ø6.6 m, +8.15 .. +19.65 (bottom buried in the stage-1 shroud solid)
   g.add(cyl(0.32, 0.85, 1.7, 7.65, matNozzle, 14));           // single engine bell: throat buried in the S-IVB solid, exit +6.8 — inside the shroud while stacked, exposed once stage 1 falls
   g.add(cyl(2.42, 2.42, 1, 18.0, matAccent));                 // S-IVB roll band
-  g.add(cyl(2.42, 2.42, 1.85, 20.375, matDark, 20));          // black instrument unit + SLA aft ring, +19.45 .. +21.3 (overlaps the S-IVB top by 0.1 at a larger radius)
-  g.add(cyl(1.55, 2.40, 1.75, 22.125, matDark, 20));          // spacecraft/LM adapter tunnel, frustum from the IU deck to the SM diameter, +21.25 .. +23.0
+  /* IU, round-5: extended to 0.53 u (0.74 m) overlap on the S-IVB top (was 0.1), radius 2.42 ≥ 2.36.
+     Tunnel, round-5: its old 2.40 base under the 2.42 IU was the worst near-coplanar step on the
+     stack — a 3 cm slot ring. The frustum foot is now 2.46 ≥ the IU's 2.42 and reaches to +21.05,
+     shrouding the IU top rim; the walls cross transversally and nothing from below sees a gap. */
+  g.add(cyl(2.42, 2.42, 2.18, 20.21, matDark, 20));           // black instrument unit + SLA aft ring, +19.12 .. +21.3
+  g.add(cyl(1.55, 2.46, 1.95, 22.025, matDark, 20));          // spacecraft/LM adapter tunnel, frustum from the IU deck to the SM diameter, +21.05 .. +23.0
   g.add(cyl(1.39, 1.39, 3.45, 24.625, matBody, 20, true));    // service module Ø3.9 m, +22.9 .. +26.35 (bottom buried 0.1 into the adapter top, r 1.39 < 1.55)
   const cm = new THREE.Mesh(new THREE.ConeGeometry(1.33, 2.4, 24), matBody);  // command module, +26.3 .. +28.7; base r < SM r and sunk 0.05 into its top so the shells never coincide
   cm.rotation.x = Math.PI / 2; cm.position.z = 27.5; cm.castShadow = true; outline(cm); g.add(cm);
@@ -143,6 +169,26 @@ stages[2].meshes.add(lesGroup);
     arm.add(fin); lesGroup.add(arm);
   }
 }
+
+/* Pad-blast light escape (review5/02: "no exhaust flame or light bloom escapes it despite 100 %
+   throttle"). The plume is ONE transparent draw call whose smoke half composites source-over —
+   and three.js sorts transparent objects by renderOrder first, so a flame sprite at the SAME
+   renderOrder as the plume is ordered against the whole smoke volume by z luck: engine-side, the
+   anchor sits at the ship, the tie breaks by insertion order, and the blast paints OVER the exit
+   plane every frame. Two Sprites at renderOrder 12 (the plume is 0) are therefore a real fix,
+   not a brightness knob: crisp flareTex disc as the flame core (Ø 8.8-16.1 m build-scaled) plus
+   ONE soft glowTex bloom (Ø 51.8-88.2 m) whose additive halo stacks over the dome — light that
+   escapes the silhouette. They ramp in above 35 % throttle and live only under 2.5 km of the
+   surface underneath (pad and low lunar burns; at orbital altitude the drawn cone owns the shot). */
+const flareCore = new THREE.Sprite(new THREE.SpriteMaterial({ map: flareTex(), color: 0xfff1c8,
+  transparent: true, opacity: 0, blending: THREE.AdditiveBlending, depthWrite: false }));
+const flareBloom = new THREE.Sprite(new THREE.SpriteMaterial({ map: glowTex(), color: 0xffb060,
+  transparent: true, opacity: 0, blending: THREE.AdditiveBlending, depthWrite: false }));
+flareCore.renderOrder = flareBloom.renderOrder = 12;
+flareCore.visible = flareBloom.visible = false;
+flareCore.castShadow = flareBloom.castShadow = false;
+rocketGroup.add(flareBloom); rocketGroup.add(flareCore);
+const _flAlt = new THREE.Vector3();
 
 stages.forEach(st => {
   /* Two-tone plume: a saturated outer cone with a pale core parented inside it, so scaling the
@@ -235,8 +281,9 @@ const R_YOUNG = 9;                        // m: radius hold for deflected Earth 
 /* pSmoke codes past 1 are drawn generically but behave specially (fillBuffers / stepParcel):
    2 = staging-seam silhouette puff — low-alpha dark grey, air-gated growth like smoke;
    3 = lunar scorch patch — dark, ground-pinned, slow creep, never additive;
-   4 = lunar ground-hugging spray — pale dust crawling radially, never additive. */
-const SM_SEAM = 2, SM_SCORCH = 3, SM_SPRAY = 4;
+   4 = lunar ground-hugging spray — pale dust crawling radially, never additive;
+   5 = staging-flash core — additive white, <0.3 s, drawn BEFORE the smoke takes over (see addDebris). */
+const SM_SEAM = 2, SM_SCORCH = 3, SM_SPRAY = 4, SM_FLASH = 5;
 const PAD_RP2 = (455 * PAD_SCALE) * (455 * PAD_SCALE);   // pad complex footprint, km²
 /* Pad ground as the exhaust actually meets it: the flame trench is a bowl (its floor is BELOW the
    map sphere — the F-1 exit plane itself sits below it), and around the trench a low berm stands
@@ -262,13 +309,15 @@ const BAND_C = [
   bandRGB(0xff8a2a),      // saturated flame
   bandRGB(PALETTE.accent),// cooling ember
   bandRGB(0x8a8276),      // Earth smoke: warm grey-brown, darker than the daytime sky
-  bandRGB(0xdce1e6),      // lunar dust: near-white grey — see the note below, it has to beat regolith
+  bandRGB(0xf5eedd),      // lunar dust: pale grey-tan — see the note below, it has to beat regolith
   bandRGB(0xdad5c9),      // cloud foot: the ground-hugging blast roll, seen against grass, not sky
 ];
-/* BAND_C[4] used to be 0x9aa0a6, "brighter than regolith". Measured against the rendered surface it
-   was not: the painted Moon lands at about the same 8-bit value as that band, so a whole ejecta sheet
-   disappeared into the ground it came off and the lunar burn showed only the flame. There is no shadow
-   and no atmosphere out there to separate them with, so the tone has to do the work on its own. */
+/* BAND_C[4] used to be 0x9aa0a6, then 0xdce1e6, "brighter than regolith". Measured against the painted
+   surface (js/toonmap.js MOON palette bytes: maria 0.517, mid 0.670, high 0.815, bright 0.910 sRGB
+   luminance) the 0.880-luminance cool grey was NOT brighter — and the round-5 review read the sheet as
+   "uniform semi-transparent circles" over a ground it never separated from. Dust lit by unfiltered sun
+   through no atmosphere is pale GREY-TAN, not white-blue: 0xf5eedd (245/238/221) sits at luminance
+   0.934, above the brightest painted ray texel, and carries hue the neutral regolith has none of. */
 const BAND_A = [0.0, 0.16, 0.36, 0.62, 0.45, 0.8];    // composited coverage
 const BAND_G = [1.0, 0.6, 0.4, 0.10, 0.05, 0.03];     // additive glow
 
@@ -400,16 +449,23 @@ const plumeMat = new THREE.ShaderMaterial({
     void main() {
       #include <logdepthbuf_fragment>
       float raw = texture2D(uMap, gl_PointCoord).a;
-      /* Cel quantisation of the sprite itself. glowTex ramps alpha to zero over its outer 60 %
-         of radius, and a pile of those ramps composited into the photographic softness the review
-         measured as "one giant blurred tan disc swallowing the rocket" (review3/03): every parcel
-         edge was a gradient, so no overlap ever read as a layered puff. Two hard steps quantise
-         the sampled density into three flat bands — nothing below 0.30 (the whole soft skirt,
-         where parcels used to bleed into each other invisibly), a mid lobe, and a core — so each
-         parcel is a crisp disc with a disc inside it, and neighbouring parcels stack as banded
-         cel puffs instead of mushing. Same single texture fetch as before; two step() built-ins
-         added, no more samples. */
-      float g = step(0.30, raw) * (0.55 + 0.35 * step(0.62, raw));
+      /* Cel quantisation of the sprite itself: FIVE flat bands now, crossed with ordered dither.
+         The round-4 two-step version (g ∈ {0, .55, .90}) fixed the "giant blurred tan disc" but
+         the review round-5 measured the next failure on the pad blast: "a soft beige disc whose
+         alpha ramps terrac into visible stacked contour arcs" — three identical levels on a few
+         dozen overlapping sprites stack into exact terraces, because wherever two sprites' band
+         edges run near-tangentially the shared level reads as one drawn contour. Bayer 4×4
+         (16 phases, 0.18 wide in raw units against the narrowest 0.20 gap between thresholds, so
+         dither can never reorder the stack) turns every band edge into a 1-2 px checker whose
+         local average interpolates — overlaps mix phase instead of level, no terrace. Same single
+         texture fetch; a handful of arithmetic steps, no more samples, no noise texture. */
+      vec2 m4 = mod(floor(gl_FragCoord.xy), 4.0);
+      float b2a = fract(floor(m4.x * 0.5) * 0.5 + floor(m4.y * 0.5) * floor(m4.y * 0.5) * 0.75);
+      float bay = b2a * 0.25 + fract(m4.x * 0.5 + m4.y * m4.y * 0.75);   // 16 phases, [0,1)
+      float d = raw + (bay - 0.5) * 0.18;
+      float g = step(0.18, d) * (0.40 + 0.15 * step(0.40, d)
+                                       + 0.17 * step(0.58, d)
+                                       + 0.18 * step(0.80, d));   // {0, .40, .55, .72, .90}
       float a = g * vA;                                   // composited coverage
       if (a + g * vAdd < 0.004) discard;
       gl_FragColor = vec4(vTint * g * (vAdd + vA), a);    // premultiplied
@@ -657,19 +713,21 @@ function spawnPlume(set, pos, quat, vel, throttle, simDt) {
    record on the surface. Two events, both throttled on SIM seconds, not hit counts — during a
    hover burn every substep carries dozens of ground contacts and an unthrottled spawn would
    eat the 1 600-slot pool:
-   · Scorch: 3-4 dark, long-life (6-10 s) parcels pinned at the contact point with near-zero
-     relative velocity (SM_SCORCH: coverage only, additive OFF — the certified young-lunar ×3
-     lift is a mode-1 path and must never brighten these; their ad is 0 at the source). They
-     creep outward at 1.3 m/s and read as a dark patch under the plume.
-   · Spray fan: 5 ground-hugging parcels (SM_SPRAY) inheriting the deflected TANGENTIAL flow at
-     0.55-1.3× and a fresh normal component of at most 2.4 m/s — lunar g is 1.62 m/s², so the
-     ballistic apex is v²/2g ≤ 1.8 m: the sheet stays within ~2 m of the surface for its first
-     second and crawls radially out instead of floating.
+   · Scorch: 3-4 long-life (6-10 s) parcels pinned at the contact point with near-zero relative
+     velocity (SM_SCORCH: coverage only, additive OFF — the certified young-lunar ×3 lift is a
+     mode-1 path and must never brighten these; their ad is 0 at the source). They creep outward
+     at 1.3 m/s and read as a stain under the plume — round 5: a MID grey-tan stain, because the
+     near-black of earlier cuts read to the reviewer as "dark smoke spheres … combustion smoke,
+     wrong on an airless body". An airless scorch is displaced dust, not soot.
+   · Spray fan: N ground-launched parcels (SM_SPRAY) on explicit ballistic arcs — elevation
+     10°…68° off the surface, ±30° azimuth about the exhaust axis as the ground reflected it
+     (that IS the deflected flow t: groundHit turns the jet tangentially), launch speed scaled
+     to the engine's footprint, birth scatter inside the footprint itself. See the block inside.
    Both ride spawnParticle (mode 2: fixed colour, no heat machinery, generic colliders). The
    clock is frozen across a frame's substeps, so the throttle is per rendered frame regardless
    of h or warp; a reset()/teleport clock rewind re-arms the timers (t < last ⇒ rewound). */
-const SCORCH_COLOUR = [0.13, 0.125, 0.135];   // burnt regolith: clearly darker than the painted Moon
-const SPRAY_COLOUR = [0.86, 0.88, 0.90];      // dust tone, in family with BAND_C[4]
+const SCORCH_COLOUR = [0.32, 0.28, 0.22];     // disturbed regolith: mid grey-tan stain (sRGB ≈ 153/144/128)
+const SPRAY_COLOUR = [0.82, 0.75, 0.63];      // dust tone (sRGB ≈ 236/226/209), in family with BAND_C[4]
 let lastScorchT = -99, lastFanT = -99;
 function ejectaEvents(gx, gy, gz, nx, ny, nz, rx, ry, rz) {
   const t = getSimTime();
@@ -688,31 +746,52 @@ function ejectaEvents(gx, gy, gz, nx, ny, nz, rx, ry, rz) {
   let hx = ty * nz - tz * ny, hy = tz * nx - tx * nz, hz = tx * ny - ty * nx;
   const hl = Math.sqrt(hx * hx + hy * hy + hz * hz) || 1;
   hx /= hl; hy /= hl; hz /= hl;
+  /* Engine height above the ground underneath, metres: the one number that sets BOTH how much
+     dust is cut and how far it can be thrown (surface momentum flux ∝ 1/footprint-area). The
+     round-5 review: at ~9 m the parcels sprinted to the horizon as an even scatter of uniform
+     bokeh discs ("not anchored to the engine, no ballistic arcs"), and at 200 m the sheet was
+     nearly absent. Same defect both times: speed rode the deflected jet's own tl (2.4-4.5 km/s
+     before the cap — the measured figure below) so every parcel drew the far field, and the
+     count was a constant 5/0.16 s whatever the altitude. Both now scale with the engine. */
+  const altM = shipLive ? Math.max(4, (shipPos.distanceTo(_mo) - RM) * 1000) : 1200;
   if (fan && tl > 1e-9) {
     lastFanT = t;
-    for (let c = 0; c < 5; c++) {
-      const lat = (Math.random() - 0.5) * 0.8;                 // fan spread about the flow axis
-      let dx = tx + hx * lat, dy = ty + hy * lat, dz = tz + hz * lat;
-      const dl = Math.sqrt(dx * dx + dy * dy + dz * dz) || 1;
-      /* dir is exactly TANGENTIAL (t ⊥ n and h = t×n ⊥ n by construction), so the only
-         off-surface speed is vn below. Cap it at 1.5 m/s: the lunar ballistic apex is
-         v²/2g = 1.5²/3.24 ≈ 0.7 m, so the fan sheet stays under 2 m of the surface for
-         its whole first second. The ground collider re-snaps it whenever the terrain
-         rises, and the settle rule in stepParcel's moon branch stops it from being
-         flung by the deflection response on those re-contacts. */
-      const spd = Math.min(1.5, tl * (0.55 + Math.random() * 0.75));
-      /* Cap at 1.5 km/s — under lunar orbit speed (1.68 km/s): at v the convex ground falls away
-         at v²/2R, so above ~1.6 km/s the parcel outruns its own contact and floats (measured:
-         uncapped fans left tl at 2.4-4.5 km/s after a grazing full-jet hit and gained up to
-         8 m of altitude inside their first second). At 1.5 km/s the curvature deficit is
-         0.65 m/s² against 1.62 m/s² of gravity — the sheet keeps contact, crawls a kilometre
-         per second, and with vn ≤ 1.5 m/s never leaves more than ~0.7 m above the ground. */
-      const vn = Math.random() * 0.0015;                    // ≤ 1.5 m/s off the surface
-      _sp.set(gx, gy, gz);
-      _svv.set(_mv.x + dx / dl * spd + nx * vn,
-               _mv.y + dy / dl * spd + ny * vn,
-               _mv.z + dz / dl * spd + nz * vn);
-      spawnParticle(_sp, _svv, 1.6 + Math.random() * 1.4, SPRAY_COLOUR, 2 + Math.random() * 2, SM_SPRAY);
+    const nF = Math.max(3, Math.min(11, Math.round(11 * 160 / (altM + 110))));   // 10 @ 9 m, 8 @ 200 m, 3 ≥ ~3.7 km
+    const vmax = 0.045 + 0.009 * Math.sqrt(altM);   // km/s: 72 @ 9 m, 187 @ 200 m, 330 @ 1 km
+    const rf = (altM * Math.tan(0.30) + 6) * 0.001; // jet footprint radius (bell half-angle + jitter), km
+    for (let c = 0; c < nF; c++) {
+      /* Launch state sampled from a cone about the exhaust axis as the ground reflected it —
+         that reflection IS t, the deflected flow (groundHit turns the jet tangentially and
+         keeps 0.45 of it here) — ±30° in azimuth, elevation β 10°…68° (denser low, β ∝ u²).
+         Every parcel therefore leaves on a ballistic arc (apex v²sin²β/2g): the old launch had
+         vn ≤ 1.5 m/s — an apex under 0.7 m, no arc to see, just a disc crawling sideways. */
+      const phi = (Math.random() - 0.5) * (Math.PI / 3);
+      const cp = Math.cos(phi), spn = Math.sin(phi);
+      const tpx = tx * cp + hx * spn, tpy = ty * cp + hy * spn, tpz = tz * cp + hz * spn;
+      const u = Math.random();
+      /* The 1.5 km/s sub-orbital cap is CERTIFIED and stays: above ~1.6 km/s the convex ground
+         falls away at v²/2R and the parcel outruns its own contact (measured: uncapped fans hit
+         tl 2.4-4.5 km/s and gained 8 m in the first second). The new speed law never asks for
+         more than vmax ≤ 0.59 km/s inside any plausible burn height (128 km/sqrt… beyond the
+         game's own ceiling), and min() keeps the cap explicit for whoever scales vmax next. */
+      const vv = Math.min(1.5, vmax * (0.14 + 0.86 * u * u * u));   // steep cubic: median 0.25·vmax
+      const beta = (10 + 58 * Math.random() * Math.random()) * Math.PI / 180;
+      const cb = Math.cos(beta), sb = Math.sin(beta);
+      /* birth scatter inside the footprint, denser toward the axis (r ∝ √u over the disc):
+         near-engine density comes from where parcels are BORN now, not from a uniform point
+         smeared outward by a uniform speed. */
+      const jr = rf * Math.sqrt(Math.random()) * 0.6, ja = Math.random() * Math.PI * 2;
+      const cj = Math.cos(ja), sj = Math.sin(ja);
+      _sp.set(gx + (tpx * cj + hx * sj) * jr + nx * 0.001,
+              gy + (tpy * cj + hy * sj) * jr + ny * 0.001,
+              gz + (tpz * cj + hz * sj) * jr + nz * 0.001);
+      _svv.set(_mv.x + (tpx * cb + nx * sb) * vv,
+               _mv.y + (tpy * cb + ny * sb) * vv,
+               _mv.z + (tpz * cb + nz * sb) * vv);
+      /* 0.5-2.2× size spread about the 3 m base (median 1.1×): uniform discs were half of why the
+         sheet read as lens bokeh — bokeh is uniform by definition. */
+      const sm = 0.5 + 1.7 * Math.pow(Math.random(), 1.5);
+      spawnParticle(_sp, _svv, 1.6 + Math.random() * 1.4, SPRAY_COLOUR, 3 * sm, SM_SPRAY);
     }
   }
   if (scor) {
@@ -724,7 +803,9 @@ function ejectaEvents(gx, gy, gz, nx, ny, nz, rx, ry, rz) {
               gy + (ty * j1 + hy * j2) * 0.01,
               gz + (tz * j1 + hz * j2) * 0.01);
       _svv.set(_mv.x + tx * j1 * 0.0006, _mv.y + ty * j1 * 0.0006, _mv.z + tz * j1 * 0.0006);
-      spawnParticle(_sp, _svv, 6 + Math.random() * 4, SCORCH_COLOUR, 3.5 + Math.random() * 2.5, SM_SCORCH);
+      // 0.55-1.65× about the 4 m base — the stain field is not uniform either
+      spawnParticle(_sp, _svv, 6 + Math.random() * 4, SCORCH_COLOUR,
+        4 * (0.55 + 1.1 * Math.random()), SM_SCORCH);
     }
   }
 }
@@ -919,6 +1000,25 @@ function stepParcel(i, h) {
        behind the drawn cone, and by then the early-growth boost has carried the parcel to ~4 m,
        whose smoke silhouette is ~16 m — overlapping the 3.2 m neighbour spacing several times. */
     pHeat[i] -= h * (moon ? 3.4 : 2.4) * (pSmoke[i] ? 2.2 : 1);
+    /* Round-5 "ghost rocket": at MET+13 the tower region read as a second, intact vehicle wrapped
+       in engine fire — 278 live parcels (measured, node harness, real ascent t=13 s) were still
+       above the smoke threshold, because base cooling 2.4/s needs 0.33 s to get a parcel under
+       heat 0.22 and at 900/s that is a third-of-a-second tail of ember discs at every altitude
+       the trail ever touched. Two physical facts fix it: (1) embers quench by entraining COLD
+       AIR — the rate must ride air density, which is what stepParcel's drag already reads — and
+       (2) an ember that has survived to its second half has stopped mixing with the jet and is
+       smoke on its way down. So: an age-ramped extra cooling weighted by ρ/ρ₀ (pad air: total
+       ≈ 8.6/s → ember window ~0.1 s, measured hot count at real-ascent t=13: 278 → 77; 30 km up
+       ρ/ρ₀=0.015 — the certified ascent rope above the atmosphere is untouched), a hard hue floor
+       at 0.45 s, and a late-life decay that has the Earth-side population gone inside ~1.4 s of
+       birth — the pad reads clear long before the 8 s the review asked for. */
+    if (!moon) {
+      const altE = Math.sqrt(px * px + py * py + pz * pz) - RE;
+      const rhoN = altE < 420 ? airDensity(altE) / RHO_SEA : 0;
+      pHeat[i] -= h * (rhoN * (5.5 + 3 * Math.max(0, pAge[i] - 0.12)) + 4 * Math.max(0, pAge[i] - 0.15));
+      if (pAge[i] > 0.45 && pHeat[i] > 0.22) pHeat[i] = 0.22;
+      if (pAge[i] > 0.85) pLife[i] -= h * (pAge[i] - 0.85) * 2;
+    }
     /* Entrainment: ground-marked smoke swells fast — a Saturn's blast cloud doubles and redoubles
        in its first second, and a sprite that stays 2 m never dwarfs the crawler. Vacuum smoke
        (lunar dust) grows far less: there is no air to roll in. */
@@ -965,6 +1065,9 @@ function stepParcel(i, h) {
          staging at the pad (the 'x' key) must not hand a young 14 m/s billow to a 0.5 s puff. */
       grow = moon ? 1.5 : 14 * THREE.MathUtils.clamp(
         airDensity(Math.sqrt(px * px + py * py + pz * pz) - RE) / 0.25, 0.02, 0.3);
+    } else if (pSmoke[i] === SM_FLASH) {
+      /* The staging flash stays SMALL: a light burst that billows is a smoke puff again. */
+      grow = 0;
     } else if (pSmoke[i] === SM_SCORCH || pSmoke[i] === SM_SPRAY) {
       /* Lunar ejecta extras (see ejectaEvents): the Moon has no air, so the air gate is trivially
          satisfied — a slow creep constant is the honest ceiling for a ground patch that must stay
@@ -1010,22 +1113,35 @@ function fillBuffers() {
       cr = pColB[i3]; cg = pColB[i3 + 1]; cb = pColB[i3 + 2];
       const fade = Math.min(1, pLife[i] * 2) * Math.min(1, pAge[i] * 10 + 0.1);
       if (pSmoke[i] === SM_SEAM) {
-        /* Staging-seam silhouette: tighter than a billowing cloud and LOW alpha — it has to read
-           against the flash and the lit Earth without becoming another glowing puff. ad is 0 at
-           the source: no additive anywhere near the separation event. */
-        sz = pR[i] * 0.008;
-        a = 0.22 * fade; ad = 0;
+        /* Staging-seam silhouette, round-5 tuned DOWN ("the flash is a lumpy soot-egg"):
+           these puffs used to carry 0.22 coverage and were the egg's lumpiness. 0.13 now, and a
+           0.10 s fade DELAY — the flash sprite (SM_FLASH) peaks at 22 ms and is gone by ~0.28 s,
+           so the light burst reads FIRST and the seam smoke only then blooms behind it. ad is 0
+           at the source: no additive anywhere near the separation event. */
+        sz = pR[i] * 0.007;
+        a = 0.13 * fade * THREE.MathUtils.clamp((pAge[i] - 0.10) * 10, 0, 1); ad = 0;
       } else if (pSmoke[i] === SM_SCORCH) {
-        /* Scorch patch: a flat stain (0.004 = 4 m of disc per m of parcel radius, against the
-           cloud disc's 11.5), coverage-only, additive OFF — the review's ejecta complaint was
-           brightness floating with no ground; this is its floor. */
+        /* Scorch stain (0.004 = 4 m of disc per m of parcel radius, against the cloud disc's
+           11.5), coverage-only, additive OFF. Round-5: 0.4 coverage of near-black WAS the "dark
+           smoke spheres under the craft … combustion smoke" the reviewer flagged on an airless
+           body — the SCORCH_COLOUR is now mid grey-tan and the coverage is down to 0.3, so the
+           patch reads as disturbed dust, not a fire stain. */
         sz = pR[i] * 0.004;
-        a = 0.4 * fade; ad = 0;
-      } else if (pSmoke[i] === SM_SPRAY) {
-        /* Ground-hugging spray: pale dust sheet, coverage-only (the ×3 young-lunar lift belongs
-           to deflected mode-1 dust on its own flight, not to the settled fan). */
-        sz = pR[i] * 0.009;
         a = 0.3 * fade; ad = 0;
+      } else if (pSmoke[i] === SM_SPRAY) {
+        /* Ground-launched dust sheet, coverage-only (the ×3 young-lunar lift belongs to deflected
+           mode-1 dust on its own flight, not to the fan). Coverage rides the parcel radius (the
+           0.5-2.2× size spread, see ejectaEvents): a field of equal-alpha discs is what read as
+           lens bokeh — real dust is optically thicker where there is more of it. */
+        sz = pR[i] * 0.009;
+        a = (0.18 + 0.10 * Math.min(1, pR[i] / 6)) * fade; ad = 0;
+      } else if (pSmoke[i] === SM_FLASH) {
+        /* Staging light burst: near-pure additive white, 15-27 m discs. In 22 ms, linear out,
+           dead at 0.20-0.28 s — high luminance (ad hits 1.0, the vertex caps additive sprites at
+           80 px so close up it is a crisp burst, not a lantern) and short enough that no smoke
+           ever overlaps its peak. */
+        sz = pR[i] * 0.007;
+        a = 0.05; ad = Math.min(1, pAge[i] * 45) * Math.min(1, pLife[i] * 6);
       } else if (pSmoke[i]) {
         sz = pR[i] * 0.0115;               // wide disc: the burst must overlap into one cloud
         a = 0.30 * fade; ad = 0.04 * fade;  // coverage, almost no light — it is smoke, not sparks
@@ -1096,6 +1212,59 @@ function fillBuffers() {
   }
 }
 
+/* Lunar-spray census for the node harness: per-live-SM_SPRAY-parcel radius and surface distance
+   from `ref` (the engine's ground point, km). The round-5 acceptance is a DENSITY PROFILE —
+   "near-engine dense, far horizon sparse" is exactly this array binned — plus the size spread. */
+export function sprayCensus(ref, code = SM_SPRAY) {
+  const out = [];
+  for (let k = 0; k < nAlive; k++) {
+    const i = alive[k];
+    if (pMode[i] !== 2 || pSmoke[i] !== code) continue;
+    const i3 = i * 3;
+    const a = pPos[i3] - ref.x, b = pPos[i3 + 1] - ref.y, c = pPos[i3 + 2] - ref.z;
+    out.push({ r: pR[i], d: Math.sqrt(a * a + b * b + c * c),
+      age: pAge[i], life: pAge[i] + pLife[i] });
+  }
+  return out;
+}
+
+/* Live-parcel census for the node harness (review round 5 asked for ember-population numbers):
+   classifies `alive` by the SAME band rule fillBuffers draws with, so the counts describe pixels,
+   not bookkeeping fields. `ref` (km) + `nearKm` add a second census restricted to that radius —
+   the pad-frame question "what is still glowing over the tower" is a distance question. Read-only;
+   nothing in the game calls it. */
+export function parcelAudit(ref = null, nearKm = 0.5) {
+  const out = { live: nAlive, m1hot75: 0, m1hot50: 0, m1hot22: 0, m1smoke: 0, m2spark: 0, m2smoke: 0,
+    seam: 0, scorch: 0, spray: 0, flash: 0, moonM1: 0, nearHot22: 0, nearLive: 0 };
+  const n2 = nearKm * nearKm;
+  for (let k = 0; k < nAlive; k++) {
+    const i = alive[k], i3 = i * 3;
+    const q = pHeat[i];
+    if (pMode[i] === 1) {
+      if (pMoon[i]) out.moonM1++;
+      const sm = pSmoke[i] && pAge[i] > 0.02 && q < 0.75;
+      if (sm) out.m1smoke++; else {
+        if (q > 0.75) out.m1hot75++;
+        if (q > 0.5) out.m1hot50++;
+        if (q > 0.22) out.m1hot22++;
+      }
+    } else if (pSmoke[i] === SM_SEAM) out.seam++;
+    else if (pSmoke[i] === SM_SCORCH) out.scorch++;
+    else if (pSmoke[i] === SM_SPRAY) out.spray++;
+    else if (pSmoke[i] === SM_FLASH) out.flash++;
+    else if (pSmoke[i]) out.m2smoke++;
+    else out.m2spark++;
+    if (ref) {
+      const dx = pPos[i3] - ref.x, dy = pPos[i3 + 1] - ref.y, dz = pPos[i3 + 2] - ref.z;
+      if (dx * dx + dy * dy + dz * dz < n2) {
+        out.nearLive++;
+        if (pMode[i] === 1 && !(pSmoke[i] && pAge[i] > 0.02 && q < 0.75) && q > 0.22) out.nearHot22++;
+      }
+    }
+  }
+  return out;
+}
+
 /* Called once per rendered frame with the simulated dt for that frame (main.js: min(1, real×warp)).
    Substepping: h ≈ 1/60 s keeps the step-by-motion under the plume's own depth so the ensemble
    reads as continuous flow. When the warp asks for more than MAX_SUB substeps the system accepts
@@ -1156,12 +1325,23 @@ export function addDebris(entry) {
      ρ≈0 caps them at a few tenths of m/s over a 0.5 s life), and the ±3 m birth scatter plus
      5-13 m/s spread keeps them at the seam instead of orbiting it. */
   if (entry.trail) {
+    /* Light burst FIRST ("the flash is a lumpy soot-egg … and no light burst"): 4 tiny additive-white parcels
+       (SM_FLASH), 2.2-3.8 m → 15-27 m discs, lives 0.20-0.28 s. They peak at 22 ms — before the
+       seam puffs' 0.10 s fade-in lets any smoke exist — and are gone by 0.28 s. Then the smoke:
+       6-10 puffs, now at 0.13 coverage and 1.8-3.8 m births (was 0.22 / 2.5-4.5) so they ring
+       the seam instead of becoming the "lumpy soot-egg with two detached balls" the review saw. */
+    for (let k = 0; k < 4; k++) {
+      _trailRnd.randomDirection();
+      _sp.copy(entry.mesh.position).addScaledVector(_trailRnd, 0.0012 + Math.random() * 0.0012);
+      _svv.copy(entry.vel).addScaledVector(_trailRnd, 0.001);
+      spawnParticle(_sp, _svv, 0.20 + Math.random() * 0.08, [1, 1, 1], 2.2 + Math.random() * 1.6, SM_FLASH);
+    }
     const n = 6 + ((Math.random() * 5) | 0);           // 6..10
     for (let k = 0; k < n; k++) {
       _trailRnd.randomDirection();
       _sp.copy(entry.mesh.position).addScaledVector(_trailRnd, 0.003);
       _svv.copy(entry.vel).addScaledVector(_trailRnd, 0.005 + Math.random() * 0.008);
-      spawnParticle(_sp, _svv, 0.4 + Math.random() * 0.4, SEAM_COLOUR, 2.5 + Math.random() * 2, SM_SEAM);
+      spawnParticle(_sp, _svv, 0.4 + Math.random() * 0.4, SEAM_COLOUR, 1.8 + Math.random() * 2, SM_SEAM);
     }
   }
 }
@@ -1346,5 +1526,18 @@ export function updateBurnVisuals({ pos, quat, vel, throttle, activeIdx, burn, f
   } else {
     emitAcc = 0;
     lastSpawnT = getSimTime();             // relight after a coast must not bank a second of backlog
+  }
+  /* Blast flare (see the flareCore note): the surface underneath is whichever body is nearer,
+     so a lunar hover at 300 m lights the flare exactly like the pad does. */
+  const aS = Math.min(pos.length() - RE, pos.distanceTo(moonPos(getSimTime(), _flAlt)) - RM);
+  const flOn = !!(burn && bellSet) && throttle > 0.35 && aS < 2.5;
+  flareCore.visible = flareBloom.visible = flOn;
+  if (flOn) {
+    const tq = (throttle - 0.35) / 0.65;
+    flareCore.position.z = flareBloom.position.z = bellSet.tailZ - 1;
+    flareCore.scale.setScalar(3.5 + 8 * throttle);
+    flareBloom.scale.setScalar(23 + 40 * throttle);
+    flareCore.material.opacity = 0.9 * tq;
+    flareBloom.material.opacity = 0.3 * tq;
   }
 }

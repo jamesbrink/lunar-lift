@@ -155,6 +155,20 @@ state differs from the ship's real trajectory by ~100 km, which would make the r
   thirds of the deflected flow left the trench at near exhaust speed and every attempt to tune the blast
   cloud's spread "did nothing". When a parameter appears to have no effect, read the arithmetic that
   consumes it before changing its value.
+- **A late-bound `onBeforeCompile` uniform never reaches an already-cached program.** Three r160 keys
+  the program cache on `onBeforeCompile.toString()`; assigning a texture a second after boot and setting
+  `material.needsUpdate` re-fetches the SAME cached program (the function's source didn't change), so
+  the injection silently never compiles. Measured with a magenta probe: the whole coast-shelf band
+  forced to `0xff00ff` produced not one magenta pixel at 160 km, while `onBeforeCompile.toString()` in
+  the page showed the new source. Fix: `material.customProgramCacheKey = () => (bound ? 'on' : 'off')`
+  next to the late assignment (js/world.js does this for the coast ink).
+- **`logdepthbuf_fragment` is a statement — it belongs inside `void main()`.** With
+  `logarithmicDepthBuffer: true` the chunk expands to a live `gl_FragDepthEXT = …;` line, and sitting
+  it between the pars include and `main` (as the sky dome did for its whole life) is a fragment-syntax
+  error at compile: the boot console read `Shader Error 0 … 'gl_FragDepth' : syntax error` while every
+  screenshot kept rendering a world missing exactly one object. After moving it inside main and giving
+  the limb shell its missing chunks, a clean boot reports ZERO shader errors (measured over reload).
+  Count the console after any custom-shader change; a failed program fails silently in the image.
 - **A frame's particles did not all leave at the same instant.** Charging `emitAcc` and spawning the whole
   budget at the current vehicle position put a fresh clump every 16 ms while the vehicle moved 1.9 m on,
   and the ascent trail came out as a ringed fir tree spaced by the frame rate. `spawnPlume` now

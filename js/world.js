@@ -110,46 +110,35 @@ export function initWorld(target) {
     }));
   earth.geometry.setAttribute('aUv', earth.geometry.attributes.uv);   // shared, not copied
   earth.receiveShadow = true;
-  /* ---- crisp coastline band ----
-     Measured on w25-staging-clean at 68 km: across x 390..540 the land/sea boundary smears through
-     (44,68,68)→(31,49,71)→(47,74,95)→(69,101,126) before the open-sea (75,112,138) — a ~150 px
-     photographic gradient built from a painted C.coast ring that is ONE 20 km texel wide and a
-     shelf/ocean stack, all of it blurred further by bilinear sampling. The geometry staircase under
-     it is toonmap's (recommendations with line refs in /tmp/coast-patch-notes.md); the COLOUR of
-     the boundary is a world.js lever: sample the same signed-distance field the mask was carved
-     from (`coastField()` → {w,h,km}, 1-Lipschitz chamfer, same 2048×1024 grid as the map) and
-     re-colours the fragments around its zero line — dark ink stroke ±8 km, pale shelf band 0..24 km
-     on the water side, flat ocean tone to 150 km, map untouched beyond. Every step is AA'd by its
-     own derivative width, and each band fades out once a pixel spans more km than the band can
-     survive (system view sees the
-     plain map again), so nothing here can shimmer or wedge: a single-wrap sphere sampling a smooth
-     field is exactly the case AGENTS.md's mip-wedge rule EXEMPTS — that rule needs uv repeats.
-     R16F because the field must bilinear-filter: R8 would quantise km at ~8 per code and draw the
-     8 km stroke as an 8 km staircase; nearest would block it at texel size; WebGL2 filters
-     half-float natively. Night side unaffected: this recolours diffuse before the toon lighting. */
+  /* ---- crisp coastline ink ----
+     Round 5: the shelf/ocean/deep banding this shader used to draw is gone — it moved into the
+     canvas paint in js/toonmap.js, because at the oblique review slants (cpx ≈ 40-150 km per
+     pixel) every derivative-faded band switches itself off and the MAP texture is all the eye
+     gets; and the canvas's dilate-mask boundaries staircased at 20 km there. What remains here
+     is the one job only a shader can do: an ink stroke ±16 km around the smoothed SDF zero
+     line, AA'd by its own derivative width, fading out below one-pixel width so the system view
+     sees the plain map and nothing shimmers. A single-wrap sphere sampling a smooth field is
+     exactly the case AGENTS.md's mip-wedge rule EXEMPTS — that rule needs uv repeats.
+     R16F because the field must bilinear-filter: R8 would quantise km at ~8 per code and draw
+     the 16 km stroke as a 16 km staircase; WebGL2 filters half-float natively. Night side
+     unaffected: this recolours diffuse before the toon lighting. */
   const coastU = { value: null };
   earth.material.onBeforeCompile = (sh) => {
     if (!coastU.value) return;
     sh.uniforms.coastMap = coastU;
-    sh.uniforms.coastShelf = { value: new THREE.Color(0x66b0dc) };   // C.shelf  [102,176,220]
     sh.uniforms.coastInk = { value: new THREE.Color(0x0e2842) };     // C.coast  [14,40,66]
-    sh.uniforms.coastSea = { value: new THREE.Color(0x3078c0) };     // C.ocean  [48,120,192]
-    sh.fragmentShader = 'uniform sampler2D coastMap; uniform vec3 coastShelf; uniform vec3 coastInk; uniform vec3 coastSea;\n' +
+    sh.fragmentShader = 'uniform sampler2D coastMap; uniform vec3 coastInk;\n' +
       sh.fragmentShader.replace('#include <map_fragment>',
         '#include <map_fragment>\n' +
         '  float csd = texture2D( coastMap, vMapUv ).r;\n' +              // km from coast, <0 land
         '  float cpx = max(fwidth( csd ), 0.5);\n' +                      // km per pixel at this fragment
-        '  float vShelf = 1.0 - smoothstep( 18.0, 44.0, cpx );\n' +
-        '  float shelf = step( 0.0, csd ) * ( 1.0 - smoothstep( 24.0 - cpx, 24.0 + cpx, csd ) );\n' +
-        '  diffuseColor.rgb = mix( diffuseColor.rgb, coastShelf, shelf * vShelf );\n' +
-        // flat ocean tone 24..150 km: the map's own pale ring runs ~140 km wide (dilate [5,2])
-        // and its blend to C.ocean is part of the soft smear; past 150 km the map already reads
-        // C.ocean, so handing back at that boundary is seam-free (measured: identical rgb).
-        '  float vSea = 1.0 - smoothstep( 60.0, 160.0, cpx );\n' +
-        '  float sea = step( 24.0 + cpx, csd ) * ( 1.0 - smoothstep( 150.0 - 2.0 * cpx, 150.0 + 2.0 * cpx, csd ) );\n' +
-        '  diffuseColor.rgb = mix( diffuseColor.rgb, coastSea, sea * vSea );\n' +
-        '  float vInk = 1.0 - smoothstep( 7.0, 16.0, cpx );\n' +
-        '  float ink = 1.0 - smoothstep( 8.0 - cpx, 8.0 + cpx, abs( csd ) );\n' +
+        // Round 5: the shelf/ocean/deep bands moved into the canvas paint (smooth-SDF iso-lines),
+        // because at review slants (cpx 40-150 km) every shader band fades itself out to avoid
+        // aliasing and the MAP texture is all the eye gets. Only the ink stroke remains here: it
+        // stays crisp where the canvas can only be 20 km coarse, and it fades below
+        // one-pixel width like before.
+        '  float vInk = 1.0 - smoothstep( 14.0, 34.0, cpx );\n' +
+        '  float ink = 1.0 - smoothstep( 16.0 - cpx, 16.0 + cpx, abs( csd ) );\n' +
         '  diffuseColor.rgb = mix( diffuseColor.rgb, coastInk, ink * vInk );');
   };
   /* Planet-scale bodies are exempt from the fog: FogExp2 is measured from the camera, so at
@@ -187,6 +176,14 @@ export function initWorld(target) {
     tex.needsUpdate = true;
     coastU.value = tex;
     earth.material.needsUpdate = true;     // recompile with the injection live
+    /* needsUpdate ALONE never re-injects: three's program cache key includes
+       onBeforeCompile.toString(), which the late uniform assignment does not change — the boot
+       frame compiled and cached the NO-BAND program (coastU.value was still null, the fn early-
+       returns), and every needsUpdate since re-fetched that same cached program. Magenta-probe
+       proof: with the flat-sea uniform forced to 0xff00ff, not one magenta pixel rendered at
+       160 km over the 100 km-wide Adriatic. The cache key must lie about the difference, so it
+       declares which injection is live. */
+    earth.material.customProgramCacheKey = () => (coastU.value ? 'coast-on' : 'coast-off');
   });
   /* The near level: ONE mesh, 161×161 vertices, dense (≈70 m) under the vehicle and stretched to a
      220 km rim — the horizon from altitude h is √(2·RE·h), and the rim stays beyond it until the
@@ -295,15 +292,20 @@ export function initWorld(target) {
     },
     vertexShader: `
       varying vec3 vP; varying vec3 vN;
+      #include <common>
+      #include <logdepthbuf_pars_vertex>
       void main() {
         vP = (modelMatrix * vec4(position, 1.0)).xyz;
         vN = normalize((modelMatrix * vec4(normal, 0.0)).xyz);
         gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+        #include <logdepthbuf_vertex>
       }`,
     fragmentShader: `
       uniform vec3 glow; uniform float shellR; uniform vec3 sunDir;
       varying vec3 vP; varying vec3 vN;
+      #include <logdepthbuf_pars_fragment>
       void main() {
+        #include <logdepthbuf_fragment>
         vec3 n = normalize(vN);
         vec3 eye = normalize(cameraPosition - vP);
         float grazing = 1.0 - abs(dot(n, eye));                 // 0 overhead, 1 at the limb
@@ -359,8 +361,12 @@ export function initWorld(target) {
       uniform vec3 sunDir; uniform float atmoMix;
       varying vec3 vP;
       #include <logdepthbuf_pars_fragment>
-      #include <logdepthbuf_fragment>
       void main() {
+        /* logdepthbuf_fragment is a STATEMENT — it belongs inside main. It sat outside for
+           rounds of rounds: the sky dome silently failed to compile ("Shader Error 0 ...
+           'gl_FragDepth' syntax error" in the page console, unnoticed because a missing dome
+           looks like space), which is why daytime views had no sky wash. */
+        #include <logdepthbuf_fragment>
         vec3 dir = normalize(vP - cameraPosition);
         float up = dot(dir, normalize(cameraPosition));      // elevation above the local horizon
         float t = pow(clamp(up, 0.0, 1.0), 0.45);            // pale band hugs the horizon

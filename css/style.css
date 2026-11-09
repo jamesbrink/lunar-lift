@@ -1,6 +1,19 @@
   :root{
     --fg:#e8ecf4; --muted:#9aa4b5; --panel:rgba(10,14,22,.72); --panel-border:rgba(140,160,190,.22);
     --accent:#6fd3ff; --ok:#5ddc9a; --warn:#ffb45c; --err:#ff6a5c; --mono:ui-monospace,"SF Mono",Menlo,Consolas,monospace;
+    /* Centre-screen text (#warn/#desc/#igniteHint/#throttle/#clock) has no panel behind it —
+       it sits directly on the render, including near-white regolith (the review frames sampled
+       #d8d8d8). WCAG ratio (L1+0.05)/(L2+0.05) with sRGB-linearised L against that ground was
+       1.18:1 for --accent, 1.20 --fg, 1.21 --ok, 1.23 --warn, 1.76 --muted, 1.97 --err —
+       the "0 % nearly invisible / FLAMEOUT pale grey-on-white" of the report. The --ob-* set
+       keeps every hue but holds its luminance below 0.0552, the ceiling for 7:1 vs #d8d8d8
+       (measured: fg 11.51, ok 7.09, accent 7.03, err 7.02, muted 7.01, warn 7.01).
+       Night-side readability of the dark fills is carried by --ob-halo: the 1px dark layer
+       reinforces the glyph edge over bright regolith, the white layers draw the contour over
+       space (core-vs-halo #f4f8ff-on-#0a1017 17.9:1). Panels keep the old bright palette. */
+    --ob-fg:#16202e; --ob-muted:#384355; --ob-accent:#074764;
+    --ob-ok:#074c2c; --ob-warn:#603a00; --ob-err:#84160a;
+    --ob-halo:0 0 1px rgba(5,9,15,.95),0 0 3px rgba(244,248,255,.85),0 0 10px rgba(244,248,255,.45);
   }
   *{margin:0;padding:0;box-sizing:border-box}
   html,body{width:100%;height:100%;overflow:hidden;background:#05070d;color:var(--fg);
@@ -31,17 +44,24 @@
   /* !important because warn/desc/igniteHint are shown by inline style in updateHUD/setWarn */
   body.map .flightonly{display:none !important}
   #clock{left:50%;top:10px;transform:translateX(-50%);font-family:var(--mono);font-size:12px;
-    color:var(--muted);letter-spacing:.08em;white-space:nowrap}
-  #clock b{color:var(--fg)} #warpInd{color:var(--accent)}
+    color:var(--ob-muted);letter-spacing:.08em;white-space:nowrap;text-shadow:var(--ob-halo)}
+  #clock b{color:var(--ob-fg)} #warpInd{color:var(--ob-accent)}
   #log{left:50%;top:64px;transform:translateX(-50%);display:flex;flex-direction:column;align-items:center;gap:4px;width:520px}
+  /* Toast lifecycle lives in hud.js (cap 2 live, ~4.5 s life); CSS only carries the two short
+     ramps. The old single 9 s `logfade` ramped opacity 70%→100% over 2.7 s — measured 10 of 40
+     250 ms samples with an element strictly mid-alpha, the reviewer's "mid-fade ghost banner".
+     In-ramp .25 s; .out fade .16 s ends in the same task as the DOM removal (animationend),
+     so no element can sit at half alpha any longer than one fade. */
   .logline{font-size:13px;padding:4px 12px;border-radius:7px;background:var(--panel);
-    border:1px solid var(--panel-border);animation:logfade 9s forwards;white-space:nowrap}
+    border:1px solid var(--panel-border);white-space:nowrap;animation:logfadein .25s both}
+  .logline.out{animation:logfadeout .16s both}
   .logline.good{border-color:rgba(93,220,154,.5);color:var(--ok)}
   .logline.warn{border-color:rgba(255,180,92,.5);color:var(--warn)}
   .logline.bad{border-color:rgba(255,106,92,.55);color:var(--err)}
-  @keyframes logfade{0%{opacity:0;transform:translateY(6px)}8%{opacity:1;transform:none}70%{opacity:1}100%{opacity:0}}
-  #warn{left:50%;top:44%;transform:translateX(-50%);font-family:var(--mono);font-size:15px;color:var(--err);
-    text-shadow:0 0 14px rgba(255,80,60,.6);display:none;letter-spacing:.06em}
+  @keyframes logfadein{0%{opacity:0;transform:translateY(6px)}100%{opacity:1;transform:none}}
+  @keyframes logfadeout{0%{opacity:1}100%{opacity:0}}
+  #warn{left:50%;top:44%;transform:translateX(-50%);font-family:var(--mono);font-size:15px;color:var(--ob-err);
+    text-shadow:var(--ob-halo);display:none;letter-spacing:.06em}
   /* DESCENT gets its own vertical slot, clear of #thrBig at every window height. The throttle
      column is a fixed bottom-anchored box: offset 78 + engState 16 (11px×1.45) + gauge 20
      (10px box + 6/4 margins) + thrBig 43.5 (30px×1.45) ≈ 158 px above the bottom edge. The
@@ -50,7 +70,8 @@
      strip's own 22px height of clearance. 192 = stack top + one full line of margin, and
      because every offset is bottom-anchored the gap is the same at any window height. Raising
      the strip instead of moving the numeral: one number, zero DOM churn. */
-  #desc{left:50%;bottom:192px;transform:translateX(-50%);font-family:var(--mono);font-size:15px;display:none;text-align:center}
+  #desc{left:50%;bottom:192px;transform:translateX(-50%);font-family:var(--mono);font-size:15px;display:none;text-align:center;
+    color:var(--ob-fg);text-shadow:var(--ob-halo)}
   .stageRow{display:grid;grid-template-columns:auto 1fr auto;gap:8px;align-items:center;margin:4px 0}
   .stageRow .pip{width:10px;height:10px;border-radius:3px;border:1px solid var(--panel-border);background:#222b3a}
   .stageRow.active .pip{background:var(--accent);box-shadow:0 0 8px rgba(111,211,255,.7)}
@@ -98,12 +119,12 @@
   #bigBtn:hover{filter:brightness(1.1)}
   #throttle{left:50%;bottom:78px;transform:translateX(-50%);text-align:center;pointer-events:none}
   #thrBig{font-family:var(--mono);font-size:30px;font-weight:700;letter-spacing:.04em;
-    text-shadow:0 0 18px rgba(111,211,255,.35)}
-  #thrBig span{font-size:15px;color:var(--muted);font-weight:500}
+    color:var(--ob-fg);text-shadow:var(--ob-halo)}
+  #thrBig span{font-size:15px;color:var(--ob-muted);font-weight:500}
   #thrGauge{width:170px;height:10px;margin:6px auto 4px;border-radius:5px;background:rgba(10,14,22,.72);
     border:1px solid var(--panel-border);overflow:hidden}
   #thrGauge i{display:block;height:100%;width:0%;background:linear-gradient(90deg,#8fdcff,#4cb8e8);transition:width .12s}
-  #engState{font-family:var(--mono);font-size:11px;letter-spacing:.14em;color:var(--muted)}
-  #engState.live{color:var(--accent)}
+  #engState{font-family:var(--mono);font-size:11px;letter-spacing:.14em;color:var(--ob-muted);text-shadow:var(--ob-halo)}
+  #engState.live{color:var(--ob-accent)}
   #igniteHint{left:50%;bottom:168px;transform:translateX(-50%);font-family:var(--mono);font-size:14px;
-    color:var(--accent);text-shadow:0 0 12px rgba(111,211,255,.5);display:none;letter-spacing:.06em}
+    color:var(--ob-accent);text-shadow:var(--ob-halo);display:none;letter-spacing:.06em}

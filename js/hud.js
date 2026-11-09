@@ -10,13 +10,51 @@ const $ = id => document.getElementById(id);
 
 let mm = null, mg = null;
 
+/* Toast state machine. The old path was one 9 s `logfade` per element: 70→100 % of the keyframes
+   is opacity 1→0, so every toast sat visible-but-mid-alpha for 2.7 s (measured: 10 of 40
+   250 ms-sampled frames contained a strictly-mid-alpha child), the stack cap was 3, and nothing
+   bounded a toast across a phase boundary — 'MISSION RESET — PAD-READY' was still on screen at
+   68 km ascent under a 3-banner pileup. New lifecycle, all state on the element (dataset/class),
+   DOM is the single store:
+     live          ≤ TOAST_MAX at all times; the oldest live line is removed SAME FRAME on
+                   overflow (no fade-out on eviction — removal is instantaneous).
+     expire        after TOAST_LIFE the line gets class 'out'; CSS fades it in TOAST_FADE ms
+                   and the animationend handler removes it in the same task the fade hits 0,
+                   so a half-alpha element lives ≤ .16 s (was ≤ 2.7 s).
+     transition    ignite/staging/SOI flips (detected in updateHUD) purge every line older than
+                   TOAST_GRACE with same-frame removal. The grace window keeps the line the
+                   transition itself logs — physics.js logs on the event tick and updateHUD
+                   samples at 10 Hz, so the transition message is always younger than ~100 ms. */
+const TOAST_LIFE = 4500;   // ms at full opacity
+const TOAST_FADE = 160;    // ms fade-out; matches the .logline.out keyframe duration
+const TOAST_MAX = 2;       // live banner cap
+const TOAST_GRACE = 350;   // ms; messages younger than this survive a transition purge
+
 export function addLog(msg, cls = '') {
-  const el = document.createElement('div'); el.className = 'logline ' + cls; el.textContent = msg;
-  const box = $('log'); box.prepend(el);
-  // dense phases (staging, LES, ignition) fire four-plus events at once; three pills is what the
-  // eye can actually read while flying, and the animation still expires every line on its own
-  while (box.children.length > 3) box.lastChild.remove();
-  el.addEventListener('animationend', () => el.remove());
+  const el = document.createElement('div');
+  el.className = 'logline ' + cls;
+  el.textContent = msg;
+  el.dataset.born = String(performance.now());
+  el.addEventListener('animationend', e => { if (e.animationName === 'logfadeout') el.remove(); });
+  const box = $('log');
+  box.prepend(el);
+  const live = [...box.children].filter(c => !c.classList.contains('out'));
+  while (live.length > TOAST_MAX) live.pop().remove();
+}
+
+function purgeToasts() {
+  const box = $('log'), now = performance.now();
+  for (const c of [...box.children]) if (now - +c.dataset.born > TOAST_GRACE) c.remove();
+}
+
+function sweepToasts() {   // called every frame from updateHUD, ahead of its 10 Hz gate
+  const box = $('log'), now = performance.now();
+  for (const c of box.children) {
+    const age = now - +c.dataset.born;
+    if (c.classList.contains('out')) {
+      if (age > TOAST_LIFE + TOAST_FADE + 400) c.remove();   // animationend backstop (hidden tab)
+    } else if (age > TOAST_LIFE) c.classList.add('out');
+  }
 }
 
 export function buildStagePips() {
@@ -52,14 +90,23 @@ export function endOverlay(title, body, btn) {
 }
 
 let hudTick = 0;
+let prevFlight = '', prevSoi = null, prevSep = -1;   // toast-purge transition sentinels
 
 export function updateHUD(dt) {
+  sweepToasts();
   hudTick += dt; if (hudTick < 0.1) return; hudTick = 0;
   const state = getState(), engineOn = getEngineOn(), throttle = getThrottle();
   const moon = moonPos(getSimTime(), new THREE.Vector3());
   const rE = S.pos.length(), rM = S.pos.distanceTo(moon);
   const altM = rM - RM, altE = rE - RE;
   const nearMoon = rM < SOI_M;
+  /* Major phase transitions — ignite (pad → flying), any stage separation, any SOI crossing —
+     drop every toast the previous phase left behind (see the state machine above). Detected
+     from the same 10 Hz sample that updates the readouts; the first tick only records state. */
+  const sepMask = stages.reduce((m, st, k) => m | (st.separated << k), 0);
+  if ((prevFlight && state !== prevFlight) || (prevSoi !== null && nearMoon !== prevSoi)
+    || (prevSep >= 0 && sepMask !== prevSep)) purgeToasts();
+  prevFlight = state; prevSoi = nearMoon; prevSep = sepMask;
   const alt = nearMoon ? altM : altE;
   // KSP-style: the speed you read is the speed over the surface underneath — the co-rotating
   // ground near Earth, the travelling Moon near the Moon (see groundVel in physics.js)
@@ -128,7 +175,7 @@ export function updateHUD(dt) {
     desc.style.display = 'block';
     const vs = -radial * 1000;
     desc.innerHTML = vs > 0
-      ? `<span style="color:${vs > 120 ? 'var(--err)' : vs > 32 ? 'var(--warn)' : 'var(--ok)'}">DESCENT ${vs.toFixed(0)} m/s — LIMIT 32 m/s</span>`
+      ? `<span style="color:${vs > 120 ? 'var(--ob-err)' : vs > 32 ? 'var(--ob-warn)' : 'var(--ob-ok)'}">DESCENT ${vs.toFixed(0)} m/s — LIMIT 32 m/s</span>`
       : `ALTITUDE ${altM.toFixed(0)} km`;
   } else desc.style.display = 'none';
   $('igniteHint').style.display = (state === 'pad') ? 'block' : 'none';
@@ -185,12 +232,19 @@ const _discs = new Map();
 const _srcs = new Map();
 function sourcePixels(key, src) {
   let e = _srcs.get(key);
-  if (!e) {
+  /* The cache entry belongs to a specific canvas object, not to the body name. The painted
+     surface is authored asynchronously (toonmap's `painted` map is set on a promise landing),
+     so the name→pixels mapping is only as fresh as the object the first drawMap happened to
+     catch; any swapped-in canvas behind the same key would otherwise feed the map its stale —
+     possibly pre-paint black — copy for the whole session (the review session measured
+     paintedCanvas litFrac 1.000 while #mapCanvas never left 0.000). Re-copy whenever the
+     object identity changes; identical object, no cost. */
+  if (!e || e.src !== src) {
     const scratch = document.createElement('canvas');
     scratch.width = src.width; scratch.height = src.height;
     const sc = scratch.getContext('2d');
     sc.drawImage(src, 0, 0);
-    e = { d: sc.getImageData(0, 0, src.width, src.height).data, w: src.width, h: src.height };
+    e = { src, d: sc.getImageData(0, 0, src.width, src.height).data, w: src.width, h: src.height };
     _srcs.set(key, e);
   }
   return e;
@@ -226,10 +280,12 @@ function paintBody(key, sx, sy, R, spin, sunAng) {
   const src = typeof WORLD.planetCanvas === 'function' ? WORLD.planetCanvas(key) : null;
   if (src && src.width > 1 && src.height > 1 && R >= 3) {
     let e = _discs.get(key);
-    if (!e) { e = { c: null, lon: NaN }; _discs.set(key, e); }
+    if (!e) { e = { c: null, lon: NaN, src: null }; _discs.set(key, e); }
     const d = Math.max(16, Math.min(512, Math.ceil(R * 2 / 16) * 16));
     const lonQ = Math.round(spin * 200) / 200;                     // ~0.5° of spin
-    if (!e.c || e.c.width !== d || e.lon !== lonQ) { e.c = buildPolarDisc(key, src, d, spin); e.lon = lonQ; }
+    /* e.src !== src: a swapped painted canvas must rebuild the disc even when the spin bucket
+       is unchanged — the same stale-cache class sourcePixels just lost its key to. */
+    if (!e.c || e.c.width !== d || e.lon !== lonQ || e.src !== src) { e.c = buildPolarDisc(key, src, d, spin); e.lon = lonQ; e.src = src; }
     mg.drawImage(e.c, sx - R, sy - R, R * 2, R * 2);
   } else {
     mg.fillStyle = key === 'earth' ? '#2f6ca8' : '#c9cbd2';

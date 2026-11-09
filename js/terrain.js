@@ -210,12 +210,15 @@ function rebuildMoon(p) {
       const d = moonPatchDetail(u, v, lum, sun);
       const h = g + d.h + 0.004;                 // a hair above the far mesh; polygonOffset wins ties
       pos[k] = vx * (RM + h); pos[k + 1] = vy * (RM + h); pos[k + 2] = vz * (RM + h);
-      /* Deviation gain (measured 2026-11-09): tone spans 0.61–1.29 but the bright painted base
-         (~0.62–0.75) and the min(1,·) clamp left the near bake at render std ~0.05 against the
-         painted map's punch — the 2 km view read as smooth mottle, not bowls. 1 + 1.6·(tone−1)
-         keeps the mean (tone mean measures 0.996, so no overall brightening) and doubles crater
-         contrast on the patch; the 0.35 floor stops holes going black. */
-      const tone = Math.max(0.35, Math.min(1.6, 1 + 1.6 * (d.tone - 1)));
+      /* Deviation gain (measured 2026-11-09, round 5): the old 1 + 1.6·(tone−1) ran against a base
+         that itself sat at sRGB 0.80 under the day ramp — 33 % of vertices clipped above 0.90, so
+         the SUNWARD rim had nowhere to go and rim-minus-floor measured NEGATIVE on 2 of 3 checked
+         craters. With the regolith palette moved to a daylight 0.64 (toonmap MOON) the headroom
+         exists, and 1 + 2.2·(tone−1) spends it in the cel language: sunward rim white, floor a
+         quarter of its plain, anti-sun crest thrown into shadow. The 0.34 floor keeps the deepest
+         anti-sun hole at ~0.20 sRGB rather than black. Every term is still the same C0 crater
+         profile — slower-varying than the mesh, so the bake cannot staircase. */
+      const tone = Math.max(0.34, Math.min(1.7, 1 + 2.2 * (d.tone - 1)));
       col[k] = Number.isFinite(_c1.r) ? s2l(Math.min(1, _c1.r * tone)) : 0.3;
       col[k + 1] = Number.isFinite(_c1.g) ? s2l(Math.min(1, _c1.g * tone)) : 0.3;
       col[k + 2] = Number.isFinite(_c1.b) ? s2l(Math.min(1, _c1.b * tone)) : 0.3;

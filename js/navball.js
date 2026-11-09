@@ -45,10 +45,17 @@ function marker(c, cx, cy, dir, R, colour, r = 5, label = null) {
   if (!p) return null;
   c.save();
   c.globalAlpha = p.front ? 1 : 0.3;
+  /* Dark underlay ring first: on the black half of the dial it is invisible, but over the
+     flat fills (Earth's #3a7ab8 sky, regolith grey) a bare #5ddc9a prograde ring is 2.61:1
+     on the sky fill — the review's "unreadable markers on flat blue". With the halo the
+     green reads 10.6:1 against its own dark edge (measured, WCAG). */
+  c.strokeStyle = 'rgba(6,10,18,.9)'; c.lineWidth = 3.4;
+  c.beginPath(); c.arc(cx + p.x, cy + p.y, r + 1, 0, 6.283); c.stroke();
   c.strokeStyle = colour; c.fillStyle = colour; c.lineWidth = 1.4;
   c.beginPath(); c.arc(cx + p.x, cy + p.y, r, 0, 6.283); c.stroke();
   c.beginPath(); c.arc(cx + p.x, cy + p.y, 1.6, 0, 6.283); c.fill();
-  if (label) { c.font = '8px ui-monospace,monospace'; c.fillText(label, cx + p.x + r + 2, cy + p.y + 3); }
+  if (label) { c.font = '8px ui-monospace,monospace'; c.lineWidth = 2.4; c.strokeStyle = 'rgba(6,10,18,.85)';
+    c.strokeText(label, cx + p.x + r + 2, cy + p.y + 3); c.fillText(label, cx + p.x + r + 2, cy + p.y + 3); }
   c.restore();
   return p;
 }
@@ -65,8 +72,13 @@ function compass(c, cx, cy, R, dir, label) {
   /* Ticks ride 0.78R, not the old 0.86R: at 0.86R the lowest tick box reached y ≈ 139 and sat
      directly in the ball's bottom label band (the round-3 'N' + status-string mush). The band
      0.78R·71 px keeps every tick glyph inside y ∈ [15.6, 134.4], clear of the fixed top legend
-     (box ends y 12) and the bottom status slot (starts y 137) in every attitude. */
-  c.fillText(label, cx + Math.cos(a) * R * 0.78 - 4, cy + Math.sin(a) * R * 0.78 + 4);
+     (box ends y 12) and the bottom status slot (starts y 137) in every attitude.
+     The 2.6px dark stroke underneath is what lets the same glyph read on the flat #3a7ab8
+     sky fill: #c9cbd2@.85 alone composites to 2.42:1 there, the stroke edge is 3.85:1 and
+     the glyph over its own stroke 8.1:1 (measured, WCAG). */
+  const gx = cx + Math.cos(a) * R * 0.78 - 4, gy = cy + Math.sin(a) * R * 0.78 + 4;
+  c.lineWidth = 2.6; c.strokeStyle = 'rgba(6,10,18,.85)'; c.strokeText(label, gx, gy);
+  c.fillText(label, gx, gy);
   c.restore();
 }
 
@@ -91,6 +103,19 @@ function localFrame(r) {
   north.normalize();
   const east = north.clone().cross(up).normalize();
   return { up, north, east };
+}
+
+/* |nose·up| ≥ 0.999 (pitch beyond ~87.4°): the horizon great circle has moved onto the rim —
+   the dial is flat sky or flat ground and without an edge carries no readable datum
+   ("fills flat blue with unreadable crosshair" in 15/09). The rim itself takes the horizon,
+   drawn halo-under-core like the crosshair: measured WCAG against the flat #3a7ab8 sky fill
+   the dark underlay is 4.06:1 and the rgba(224,236,248,.9) core 3.37:1; against the
+   near-black lunar vacuum the core reads 13.5:1 (the dark underlay vanishes there). */
+function rimDatum(c, cx, cy, R) {
+  c.strokeStyle = 'rgba(6,10,18,.9)'; c.lineWidth = 3;
+  c.beginPath(); c.arc(cx, cy, R - 1, 0, 6.283); c.stroke();
+  c.strokeStyle = 'rgba(224,236,248,.9)'; c.lineWidth = 1.4;
+  c.beginPath(); c.arc(cx, cy, R - 1, 0, 6.283); c.stroke();
 }
 
 export function drawNavball() {
@@ -120,6 +145,7 @@ export function drawNavball() {
   const u = toBody(up);
   if (u.z < -0.999) {
     c.fillStyle = groundCol; c.fillRect(0, 0, NB, NB);          // looking straight down
+    rimDatum(c, cx, cy, R);
   } else if (u.z < 0.999) {
     const arc = horizonArc(u);
     if (arc.length) {
@@ -140,22 +166,45 @@ export function drawNavball() {
       arc.forEach((d, i) => i ? c.lineTo(cx + d.x * R, cy - d.y * R) : c.moveTo(cx + d.x * R, cy - d.y * R));
       c.stroke();
 
-      // pitch ladder, parallel to the horizon
+      /* Pitch ladder, anchored to the HORIZON: the tick for pitch line p sits at angle
+         (p − nosePitch) from the nose along the up great circle, nosePitch = asin(u.z).
+         The old ladder was nose-centred (symmetric ±10…60 about the dial centre), so with
+         the nose high the "pitch" ticks floated through empty sky — the reviewer's
+         "hatch of 10+ parallel scratch lines across the dial" at high pitch over an
+         all-sky ball. Horizon anchoring moves them onto the ground/sky band where they
+         belong, and near the horizon-less limit they crowd against the rim, where the
+         cull rule below takes over: a line is SKIPPED when its vertical offset from the
+         nearest surviving line is < 4 px. Recorded with a segment-counting context
+         (harness /tmp/navball-count.mjs, 150 px dial): the old constant ±11 px ladder
+         drew 12 strokes at 0°, ±45° AND ±85…87° — the hatch; the new one draws 12 at 0°
+         (unchanged standard view), 9 of 10 candidates at ±45°, 5 of 6 at ±85/±87° as the
+         ticks compress into the rim, and 0 with |pitch| ≥ 87.4°. */
       const ux = Math.hypot(u.x, u.y);
       if (ux > 0.05) {
         const hx = u.x / ux, hy = -u.y / ux;                  // screen dir of "up"
         const tx = -hy, ty = hx;                              // along the horizon
+        const nose = Math.asin(Math.min(1, Math.max(-1, u.z)));
+        const cands = [];
+        for (let p = -60; p <= 60; p += 10) {
+          if (!p) continue;
+          const d = p * Math.PI / 180 - nose;                 // angle from the nose
+          if (Math.abs(d) >= Math.PI / 2) continue;           // behind the horizon of the view
+          cands.push({ d, off: Math.sin(d) * R * 0.9 });
+        }
+        cands.sort((a, b) => a.off - b.off);
         c.strokeStyle = 'rgba(224,236,248,.35)'; c.lineWidth = 1;
-        for (let deg = 10; deg <= 60; deg += 10) {
-          const off = Math.sin(deg * Math.PI / 180) * R * 0.9;
-          const half = Math.cos(deg * Math.PI / 180) * R * 0.22;
-          for (const s of [1, -1]) {
-            const px = cx + hx * off * s, py = cy + hy * off * s;
-            c.beginPath(); c.moveTo(px - tx * half, py - ty * half); c.lineTo(px + tx * half, py + ty * half); c.stroke();
-          }
+        let lastOff = -Infinity;
+        for (const { d, off } of cands) {
+          if (off - lastOff < 4) continue;                    // screen spacing floor: skip
+          lastOff = off;
+          const half = Math.cos(d) * R * 0.22;
+          const px = cx + hx * off, py = cy + hy * off;
+          c.beginPath(); c.moveTo(px - tx * half, py - ty * half); c.lineTo(px + tx * half, py + ty * half); c.stroke();
         }
       }
     }
+  } else {
+    rimDatum(c, cx, cy, R);
   }
 
   c.strokeStyle = 'rgba(150,165,190,.22)'; c.lineWidth = 1; c.setLineDash([3, 4]);
@@ -194,9 +243,19 @@ export function drawNavball() {
   if (nearMoon) marker(c, cx, cy, S.pos.clone().negate(), R, '#7fb2e8', 5, 'EARTH');
   c.restore();
 
-  // the nose: the direction the engines are pushing — at the centre by construction of proj()
-  c.strokeStyle = isBurning() ? '#ff7a3c' : 'rgba(150,165,190,.45)';
-  c.lineWidth = isBurning() ? 2.4 : 1.4;
+  /* The nose: the direction the engines are pushing — at the centre by construction of proj().
+     Halo pass first (dark 3.6/4.4 px underlay), bright core on top: the old
+     rgba(150,165,190,.45) core composited over the flat #3a7ab8 sky fill to rgb(99,141,187) —
+     1.30:1 against that fill, the review's "unreadable crosshair". The bright core is 4.24:1
+     over the sky fill directly, 17.2:1 against its own dark halo, 18.8:1 over lunar vacuum. */
+  c.strokeStyle = 'rgba(6,10,18,.9)';
+  c.lineWidth = isBurning() ? 4.4 : 3.6;
+  c.beginPath();
+  c.moveTo(cx - 9, cy); c.lineTo(cx + 9, cy);
+  c.moveTo(cx, cy - 9); c.lineTo(cx, cy + 9);
+  c.stroke();
+  c.strokeStyle = isBurning() ? '#ff7a3c' : '#f4f8ff';
+  c.lineWidth = isBurning() ? 2 : 1.4;
   c.beginPath();
   c.moveTo(cx - 9, cy); c.lineTo(cx + 9, cy);
   c.moveTo(cx, cy - 9); c.lineTo(cx, cy + 9);
@@ -204,8 +263,12 @@ export function drawNavball() {
   if (isBurning()) { c.fillStyle = 'rgba(255,122,60,.95)'; c.beginPath(); c.arc(cx, cy, 2.6, 0, 6.283); c.fill(); }
 
   /* Top legend — 'prograde' names the green ring. Its box (x 57..100, y 0..12 incl. the 'g'
-     descender) is clear of the 0.78R tick band, whose topmost glyph box starts at y ≈ 15.6. */
-  c.fillStyle = 'rgba(150,165,190,.45)'; c.font = '9px ui-monospace,monospace';
+     descender) is clear of the 0.78R tick band, whose topmost glyph box starts at y ≈ 15.6.
+     It now sits on the same opaque strip the bottom status slot uses — over the flat sky fill
+     the old rgba(150,165,190,.45) glyph composited to 1.30:1; #c9cbd2 on the strip is 10.6:1
+     and the strip is invisible on the black half of the dial. Slot unchanged. */
+  c.fillStyle = 'rgba(8,11,18,.85)'; c.fillRect(cx - 21, 0, 49, 12);
+  c.fillStyle = '#c9cbd2'; c.font = '9px ui-monospace,monospace';
   c.fillText('prograde', cx - 18, 10);
 
   /* Status slot — the strip y ∈ [137, 149] is the one and only place a string lives at the
