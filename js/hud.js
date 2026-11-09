@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { RE, RM, MU_E, MU_M, SOI_M, MOON_DIST, PAD_UP, PAD_POS, WARPS, SPECS, moonPos } from './constants.js';
 import { stages } from './vehicle.js';
-import { S, getState, getSimTime, getEngineOn, getThrottle, getWarpIndex, getSasOn, getSasRetro, getDistFlown, getMaxQ, getTrail, activeStage, totalMass, orbitalElements, getControlAuthority, airDensity, groundVel, bodyUp } from './physics.js';
+import { S, getState, getSimTime, getEngineOn, getThrottle, getWarpIndex, getSasOn, getSasRetro, getDistFlown, getMaxQ, getTrail, activeStage, totalMass, orbitalElements, getControlAuthority, airDensity, groundVel, bodyUp, navVel } from './physics.js';
 import { initNavball, updateNavball } from './navball.js';
 
 const $ = id => document.getElementById(id);
@@ -83,8 +83,11 @@ export function updateHUD(dt) {
   $('met').textContent = fmtMET(getSimTime());
   $('warpInd').textContent = `×${WARPS[getWarpIndex()]}`;
 
+  /* Elements must be computed in one frame: near the Moon the position is lunar-relative, so the
+     velocity has to be too. Passing inertial S.v with a Moon-centred position made the Ap/Pe
+     readout wrong by the Moon's own 1,023 m/s — an "ESCAPE" reading while in a bound 200 km orbit. */
   const el = orbitalElements(nearMoon ? new THREE.Vector3().subVectors(S.pos, moon) : new THREE.Vector3().copy(S.pos),
-    S.v, nearMoon ? MU_M : MU_E, nearMoon ? RM : RE);
+    navVel(new THREE.Vector3()), nearMoon ? MU_M : MU_E, nearMoon ? RM : RE);
   $('oBody').textContent = nearMoon ? 'MOON' : 'EARTH';
   const km = n => !isFinite(n) ? 'ESCAPE' : n < 0 ? 'IMPACT' : n >= 1000000 ? (n / 1000).toFixed(1) + ' Mm' : Math.round(n).toLocaleString() + ' km';
   $('oPe').textContent = km(el.pe); $('oAp').textContent = km(el.ap);

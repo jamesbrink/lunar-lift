@@ -91,10 +91,11 @@ export function drawNavball() {
   c.clearRect(0, 0, NB, NB);
 
   const moon = moonPos(getSimTime(), new THREE.Vector3());
-  const rE = S.pos.length(), rM = S.pos.distanceTo(moon);
+  const rM = S.pos.distanceTo(moon);
   const nearMoon = rM < SOI_M;
   const centre = nearMoon ? moon : new THREE.Vector3();
-  const { up, north, east } = localFrame(S.pos.clone().sub(centre));
+  const rel = S.pos.clone().sub(centre);
+  const { up, north, east } = localFrame(rel);
   /* One velocity vector, the one SAS steers by: inertial about the Earth, Moon-relative inside
      the Moon's SOI. Both the markers and the ap/pe readouts below depend on it being the
      velocity measured in the frame of the body being orbited. */
@@ -165,20 +166,20 @@ export function drawNavball() {
     }
   }
 
-  const rel = S.pos.clone().sub(centre);
   const mu = nearMoon ? MU_M : MU_E;
   const el = orbitalElements(rel, vel, mu, nearMoon ? RM : RE);
-  const e = new THREE.Vector3().crossVectors(vel, rel.clone().cross(vel)).multiplyScalar(1 / mu).addScaledVector(rel.clone().normalize(), -1);
+  /* eccentricity vector — points at PERIapsis, so the +e marker is perigee/periselene
+     and the -e one is apogee/apolune */
+  const ecc = new THREE.Vector3().crossVectors(vel, rel.clone().cross(vel)).multiplyScalar(1 / mu).addScaledVector(rel.clone().normalize(), -1);
   if (isFinite(el.a) && el.a > 0 && el.e < 1 && el.e > 1e-4) {
-    e.normalize();
-    marker(c, cx, cy, centre.clone().addScaledVector(e, el.a * (1 - el.e)).sub(S.pos), R, '#ff6a5c', 4);
-    marker(c, cx, cy, centre.clone().addScaledVector(e, -el.a * (1 + el.e)).sub(S.pos), R, '#8fdcff', 4);
+    ecc.normalize();
+    marker(c, cx, cy, centre.clone().addScaledVector(ecc, el.a * (1 - el.e)).sub(S.pos), R, '#ff6a5c', 4);
+    marker(c, cx, cy, centre.clone().addScaledVector(ecc, -el.a * (1 + el.e)).sub(S.pos), R, '#8fdcff', 4);
   }
   if (rM < 1.2e6) marker(c, cx, cy, moon.clone().sub(S.pos), R, '#c9cbd2', 4);
   c.restore();
 
-  // the nose: the direction the engines are pushing
-  const f = toBody(Z);
+  // the nose: the direction the engines are pushing — at the centre by construction of proj()
   c.strokeStyle = isBurning() ? '#ff7a3c' : 'rgba(150,165,190,.45)';
   c.lineWidth = isBurning() ? 2.4 : 1.4;
   c.beginPath();
@@ -191,18 +192,18 @@ export function drawNavball() {
   c.fillText('prograde', cx - 18, 10);
   c.fillText('nose = centre', cx - 26, NB - 4);
 
-  return { el, up, north, east, nearMoon, vel, rM, apogeeDir: e };
+  return { el, up, north, east, nearMoon, vel, centre, ecc };
 }
 
 /* ---------------- orbit plot, drawn in the orbital plane ---------------- */
-function drawOrbit(nearMoon, centre, vel, el, e) {
+function drawOrbit(nearMoon, centre, vel, el, ecc) {
   const c = orbCtx;
   c.clearRect(0, 0, ORB_W, ORB_H);
   const bodyR = nearMoon ? RM : RE;
   const rel = S.pos.clone().sub(centre);
   const h = rel.clone().cross(vel);
   const n = h.clone().normalize();
-  const A = e.lengthSq() > 1e-9 ? e.clone().normalize() : rel.clone().normalize();
+  const A = ecc.lengthSq() > 1e-9 ? ecc.clone().normalize() : rel.clone().normalize();
   const B = n.cross(A).normalize();
   const plane = p => ({ x: p.dot(A), y: p.dot(B) });
 
@@ -234,7 +235,9 @@ function drawOrbit(nearMoon, centre, vel, el, e) {
   if (started) c.stroke();
 
   if (isFinite(el.ap) && el.ap > 0 && el.e < 1) {
-    const apo = px({ x: el.a * (1 + el.e), y: 0 }), per = px({ x: el.a * (1 - el.e), y: 0 });
+    /* A is the eccentricity vector and points at periapsis: per is at +a(1-e) on the
+       +x axis, apo at -a(1+e). The apo dot used to sit at +a(1+e), the mirror point. */
+    const apo = px({ x: -el.a * (1 + el.e), y: 0 }), per = px({ x: el.a * (1 - el.e), y: 0 });
     c.fillStyle = '#8fdcff'; c.beginPath(); c.arc(apo[0], apo[1], 2.4, 0, 6.283); c.fill();
     c.fillStyle = '#ff6a5c'; c.beginPath(); c.arc(per[0], per[1], 2.4, 0, 6.283); c.fill();
     c.fillStyle = 'rgba(143,220,255,.85)'; c.font = '9px ui-monospace,monospace';
@@ -248,7 +251,10 @@ function drawOrbit(nearMoon, centre, vel, el, e) {
   const pos = plane(rel);
   const vx = ox + pos.x * scale, vy = oy - pos.y * scale;
   c.fillStyle = '#e8ecf4'; c.beginPath(); c.arc(vx, vy, 3, 0, 6.283); c.fill();
-  const d = plane(S.v.clone());
+  /* frame rule (navVel in physics.js): the plot is centred on the body being orbited, so the
+     arrow must be the velocity in that frame. S.v is wrong inside SOI_M — the Moon itself
+     travels at 1.02 km/s there. Outside, navVel returns S.v, so Earth-side is unchanged. */
+  const d = plane(vel);
   const m = Math.hypot(d.x, d.y);
   if (m > 1e-9) {
     const ux = d.x / m, uy = -d.y / m;
@@ -269,7 +275,7 @@ function drawOrbit(nearMoon, centre, vel, el, e) {
 export function updateNavball() {
   const info = drawNavball();
   if (!info) return;
-  drawOrbit(info.nearMoon, info.nearMoon ? moonPos(getSimTime(), new THREE.Vector3()) : new THREE.Vector3(), info.vel, info.el, info.apogeeDir);
+  drawOrbit(info.nearMoon, info.centre, info.vel, info.el, info.ecc);
   const nose = fwd();
   const pitch = Math.asin(Math.max(-1, Math.min(1, nose.dot(info.up)))) * 57.2958;
   const heading = Math.atan2(nose.dot(info.east), nose.dot(info.north)) * 57.2958;
