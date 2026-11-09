@@ -26,12 +26,18 @@ import * as THREE from 'three';
    and a wrong comment outlives every wrong fix. The two lower bands stay well off black: a coloured
    shadow side is most of what makes cel shading read as cel shading. */
 export const RAMP_EARTH = ramp([0.34, 0.72, 1.0, 1.0]);
-export const RAMP_MOON = ramp([0.20, 0.58, 1.0]);
+/* Six texels so a band edge lands exactly on dotNL = 0 (steps at 2k/6 − 1): the terminator gets a
+   0.62 dusk strip on the lit side and a 0.34 pre-dusk on the dark side, so the Moon's day/night
+   line sweeps visibly across the painted bowls instead of hiding inside one mid tone the way the
+   old three-texel ramp did. */
+export const RAMP_MOON = ramp([0.16, 0.26, 0.34, 0.62, 1.0, 1.0]);
 export const RAMP_HARD = ramp([0.30, 0.72, 1.0]);     // vehicle: keep the lit side bright
-/* Cloud gets two bands and a high floor. With three bands a deck spanning the sphere spends most of
-   its area in the middle band, which is a flat mid grey — the exact thing that made the weather look
-   like a dirty shell rather than white puffs. */
-export const RAMP_CLOUD = ramp([0.55, 1.0]);
+/* Cloud gets a near-continuous six-texel ramp. Two texels stepped once across the whole sphere
+   (dotNL = 0), which chorded a hard light/dark edge over the ocean at every non-noon sun and was
+   half of what read as "straight-edged architecture" on the sea from orbit. Five shallow steps are
+   imperceptible against a translucent sheet but keep the ramp honest: clouds brighten to the lit
+   side, dim to the night side, and never draw a line. */
+export const RAMP_CLOUD = ramp([0.42, 0.56, 0.72, 0.86, 1.0, 1.0]);
 export const OUTLINE = 0x0d1117;
 export const OUTLINE_W = 0.0038;                       // fraction of half-screen width, so ~px-constant
 
@@ -62,6 +68,10 @@ export function toon(opts = {}) {
 
 const OUT_VERT = /* glsl */`
   uniform float w;
+  /* <common> is not optional here: logdepthbuf_vertex calls isPerspectiveMatrix, which three
+     defines only in common — and a raw ShaderMaterial gets no built-in prefix that pulls it in.
+     Without this line the whole program fails to compile and EVERY outline vanishes silently. */
+  #include <common>
   #include <logdepthbuf_pars_vertex>
   void main() {
     vec4 mv = modelViewMatrix * vec4(position, 1.0);
