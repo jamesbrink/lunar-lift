@@ -192,6 +192,23 @@ state differs from the ship's real trajectory by ~100 km, which would make the r
   biome rule keys on red−minus−blue, *not* hue — the shipped diffuse is blue-shifted over land, so the
   Amazon and the Atlantic have the same hue. Details and measurements:
   `docs/reference/painted-planets.md`.
+- **One part in eight of pale sky mixed in LINEAR space is a grey poster.** `lerp(black, 0xb2cfe2, 0.125)`
+  is sRGB 30 %-grey: the old linear sky-mix clock left the 163 km sky measured flat (69,82,90) with the
+  stars faded out — "the sky is grey and muddy" was this one line, not the dome, not the shell. The dome
+  and background therefore fall on the QUARTIC of `exp(−alt/80)` (zenith optical depth dies far faster
+  than horizon glow, which the shell draws from grazing rays on its own), the fog keeps the un-squared
+  clock, and star visibility thresholds on **sRGB lightness**, not the linear buffer. Measured: 68 km
+  went (77,91,100) → (33,36,40) with the quartic.
+- **Entrainment is air; a growth constant without a density in it is confetti.** The staging burst grew
+  its smoke parcels at a flat 14 m/s and bloomed 26 puffs into kilometre-soft bokeh discs against black
+  space at 67 km — the reviewer's worst frame. Smoke-parcel growth now multiplies `airDensity(alt)`,
+  and the debris trail is gated at ρ > 0.004: the high event is a flash and tumbling metal, the pad
+  event keeps its billow, and nothing in vacuum grows at all.
+- **Compose tone by MAX, not by product, when many features claim the same vertex.** `moonPatchDetail`
+  darkened each vertex by the floor factor of every crater whose rim or spokes reached it — across ~70
+  craters the product compounded to black (mean linear 0.004; the surface looked scorched). Taking the
+  strongest darkening, lightening and ray per vertex (`1 − 0.42·darkMax + litMax + rayMax`) restored
+  mean 0.235. Multiplicative overlays only survive when a vertex meets two or three of them.
 
 ## Browser recipe
 
@@ -258,11 +275,14 @@ await tab.evaluate(`(async () => {
 
 ## Structure
 
-One concern per file; no god files. Current sizes: `physics.js` 487, `world.js` 302, `navball.js`
-286, `vehicle.js` 234, `hud.js` 215, `main.js` 143, `constants.js` 119, `targeting.js` 108,
-`textures.js` 99, `camera.js` 107, `audio.js` 53. If a change would push `physics.js` much past
-500, split it the way `targeting.js` was split off — a module that owns one question, exporting one
-small state object plus the function that updates it.
+One concern per file; no god files. Current sizes: `toonmap.js` 1088, `vehicle.js` 1070,
+`world.js` 685, `physics.js` 529, `hud.js` 380, `terrain.js` 368, `navball.js` 345,
+`clouds.js` 284, `camera.js` 216, `ribbon.js` 198, `textures.js` 197, `main.js` 160,
+`toon.js` 139, `constants.js` 119, `targeting.js` 108, `audio.js` 53. `vehicle.js` has grown past
+a comfortable size and now clearly holds two concerns — the vehicle meshes and the exhaust/blast
+particle field; if the next change to either pushes it higher, split the particle system out the
+way `targeting.js` was: a module that owns one question. If a change would push
+`physics.js` much past 500, apply the same rule there.
 
 `js/constants.js` holds every physical constant and the vehicle `SPECS`, each with the measurement
 that justifies it in a comment. `docs/reference/` holds the source-cited external data and the
