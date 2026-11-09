@@ -41,11 +41,12 @@ function noiseKit() {
 
 const smoothstep = (a, b, x) => { const t = THREE.MathUtils.clamp((x - a) / (b - a), 0, 1); return t * t * (3 - 2 * t); };
 
-/* cumulusTex: the weather deck, 2 km up. Density is a five-octave fbm shaped by the real zonal
-   pattern — the intertropical convergence zone, the dry subtropical belts around ±25° where almost
-   nothing forms, and the storm tracks near ±52° — then pushed through a tight smoothstep so each
-   cloud has a defined edge instead of a photographic fade. RGB is white and only alpha carries the
-   weather, which is what lets the material read its own alpha. */
+/* cumulusTex: the weather deck, 2 km up. Density is a six-octave fbm shaped by the real zonal
+   pattern — the intertropical convergence zone, the dry subtropical belts around ±25° where
+   convection survives only as scattered fair-weather drift clusters, and the storm tracks near
+   ±52° — then pushed through a tight smoothstep so each cloud has a defined edge instead of a
+   photographic fade. RGB is white and only alpha carries the weather, which is what lets the
+   material read its own alpha. */
 let _cumulus = null;
 export function cumulusTex() {
   if (_cumulus) return _cumulus;
@@ -63,10 +64,22 @@ export function cumulusTex() {
     const lat = ((iy + 0.5) / H - 0.5) * 180;
     const a = Math.abs(lat);
     const itcz = 1.95 * Math.exp(-Math.pow((a - 4) / 9, 2));
-    const midlat = 0.50 * Math.exp(-Math.pow((a - 52) / 14, 2));
+    /* 0.62, was 0.50: at 0.50 the storm-track belt sat a whole deviation below the ramp and the
+       mid-latitude ocean read bare from orbit (review2: "ocean-side views are featureless flat
+       blue"). 0.62 puts the belt mean at the bottom edge of the ramp so the fbm's ±0.07 keeps
+       carving holes — broken cloud, never a plate. */
+    const midlat = 0.62 * Math.exp(-Math.pow((a - 52) / 14, 2));
     const dry = -0.55 * Math.exp(-Math.pow((a - 25) / 9, 2));
     const polar = 0.30 * Math.exp(-Math.pow((a - 78) / 12, 2));
     const belt = 0.34 + itcz + midlat + dry + polar;
+    /* Fair-weather puffs live in DRIFT CLUSTERS, not everywhere: a low-lattice field (~1800 km
+       cells at the equator) lifts the ramp argument by up to +0.30, gated to 20°–64°. The gate
+       matters: the ITCZ (belt mean 1.49) already sits at the ramp's low end and must keep its own
+       measured density, and the polar deck has its own belt term — an ungated +0.30 saturates
+       both (the solid-grey-plate failure below). Inside the window the dry belts (belt −0.20,
+       x mean 0.478 vs ramp 0.655) get scattered 500–1200 km puff clusters where the cluster
+       field peaks, and stay bare deep blue between them — the contrast is what scores. */
+    const driftGate = smoothstep(12, 20, a) - smoothstep(64, 82, a);
     for (let ix = 0; ix < W; ix++) {
       const u = ix / W, v = iy / H;
       /* Domain warp: pushing the sample point through two low-lattice noises turns round iso-blob
@@ -79,18 +92,23 @@ export function cumulusTex() {
         sum += amp * noise(u + wu, (v + wv) * 0.55, 16 << k, 40 + k);
         tot += amp; amp *= 0.5;
       }
+      /* The drift-cluster field (see driftGate above), squared so only its upper tail lifts the
+         argument — peaks are scattered systems, flanks stay bare. Sampled through the same warp
+         offsets as the fbm so cluster edges and puff edges are never on separate grids. */
+      const cl = noise(u + wu, (v + wv) * 0.55, 22, 151);
+      const x = sum / tot + belt * 0.11 + driftGate * 0.30 * smoothstep(0.55, 0.80, cl) * smoothstep(0.55, 0.80, cl);
       /* The belt term must nudge, not decide: ITCZ (belt 1.49) · 0.24 lifted the WHOLE band's mean
          0.36 over the threshold and the tropical deck printed as one solid grey plate (measured:
          9 620 clear / 10 279 full / 1 720 middle — no edges left to see). At gain 0.11 the ITCZ
          mean (0.664) sits at the low end of this ramp, so the fbm's ±0.07 still carves holes into
          roughly half the band; the dry belts fall below and go sparse instead of bare. The ramp
          stays 0.055 wide — crisp-but-antialiased at 20 km/texel. */
-      const dens = smoothstep(0.655, 0.71, sum / tot + belt * 0.11);
+      const dens = smoothstep(0.655, 0.71, x);
       /* Thickness tints as well as occludes: RGB carries a smooth density (raw fbm position in the
          ramp band) while alpha stays the crisp mask. Without it the deck's interior is one flat
          white plate through the ramp — measured, in every orbit frame this session — and what the
          eye reads as a cloud is really the gradient from thin grey edge to piled white core. */
-      const th = 168 + 87 * smoothstep(0.60, 0.78, sum / tot + belt * 0.11);
+      const th = 168 + 87 * smoothstep(0.60, 0.78, x);
       const i = (iy * W + ix) * 4;
       data[i] = th; data[i + 1] = th; data[i + 2] = 205 + 50 * (th - 168) / 87; data[i + 3] = (dens * 255) | 0;
     }
@@ -149,23 +167,39 @@ export function cirrusTex() {
   return _cirrus;
 }
 
-/* flareTex is the sun's own plate: a hard cel disc to 0.72 r and a tight pow corona after it.
-   glowTex was used for the sun and its centre-ramped profile is what made the flare a lantern;
-   the disc gets an edge, which is the difference between "the sun" and "a light leak". */
+/* flareTex is the sun's own plate: a crisp cel disc with a modest 4-spike corona — ONE treatment
+   at every distance. The old profile was a uniform disc to 0.72 r with a wide radially symmetric
+   ring corona behind it (measured alpha 0.45 at r=0.8, identical along-axis and diagonal), and the
+   DataTexture's default Nearest/no-mips filtering minified that smooth ramp into quantised streaks
+   — which is how one sun rendered as three things for review2: a soft glow ball at 05, a starburst
+   at 07, a single aliased dot at 08. Now: disc edge at r 0.42, which through the sprite scale
+   (0.42·2.4·SUN_ANG = 1.008·SUN_ANG) is the real 0.53° sun, then four |cos 2θ|^28 spikes to r 0.96
+   and NOTHING between them — the sky stays black off-axis at every zoom, so distance can only
+   change size, never style. Linear + mipmaps so minification averages instead of sparkling.
+   glowTex keeps its centre-ramped profile and its lamp/plume duty untouched. */
 let _flare = null;
 export function flareTex() {
   if (_flare) return _flare;
   const N = 128, data = new Uint8Array(N * N * 4);
   for (let y = 0; y < N; y++) {
     for (let x = 0; x < N; x++) {
-      const r = Math.min(1, Math.hypot(x - (N - 1) / 2, y - (N - 1) / 2) / ((N - 1) / 2));
-      const a = r <= 0.72 ? 1 : smoothstep(1.0, 0.72, r) * 0.55;
+      const dx = (x - (N - 1) / 2) / ((N - 1) / 2), dy = (y - (N - 1) / 2) / ((N - 1) / 2);
+      const r = Math.hypot(dx, dy);
+      const disc = smoothstep(0.45, 0.42, r);   // ~2 texels of edge AA: crisp, never stair-stepped
+      const spikes = Math.pow(Math.abs(Math.cos(2 * Math.atan2(dy, dx))), 28)
+                   * 0.55 * smoothstep(0.96, 0.44, r);
+      const a = Math.max(disc, spikes);
       const i = (y * N + x) * 4;
       data[i] = 255; data[i + 1] = 250; data[i + 2] = 235; data[i + 3] = (a * 255) | 0;
     }
   }
   _flare = new THREE.DataTexture(data, N, N, THREE.RGBAFormat);
   _flare.colorSpace = THREE.SRGBColorSpace;
+  /* DataTexture defaults to Nearest/Nearest/no-mips: blocky when magnified, and a mip-less smooth
+     ramp minified to a dozen pixels is exactly the aliasing the "starburst" frame was. */
+  _flare.magFilter = THREE.LinearFilter;
+  _flare.minFilter = THREE.LinearMipmapLinearFilter;
+  _flare.generateMipmaps = true;                // 128 is power-of-two
   _flare.needsUpdate = true;
   return _flare;
 }

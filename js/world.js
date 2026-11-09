@@ -132,8 +132,9 @@ export function initWorld(target) {
 
      They blend; they do NOT alpha-test. That distinction is the reason clouds never appeared:
      the field is mipmapped (a nearest-sampled minified alpha is the grazing wedge the earlier
-     attempt drew), and averaging a 50 %-coverage field into coarse mips lifts EVERY texel to
-     around the global mean (~0.37) — above any threshold that could be chosen. `discard` is
+     attempt drew), and averaging a cloudy field into coarse mips lifts EVERY texel to around the
+     global mean (measured 0.26 after the drift-cluster pass, 0.19 before) — above any threshold
+     that could be chosen. `discard` is
      therefore mathematically dead at distance: the deck rendered as one uniform sheet from
      every altitude, at 0.45 before the mips existed and at 0.14 after. Blending on the other
      hand gets the whole mip chain for free: puffs where the eye can resolve them, soft veil
@@ -147,7 +148,11 @@ export function initWorld(target) {
      Scale is the hard limit though: 39 km/texel means the whole pad sky is under one texel, so the
      decks are the PLANET-SCALE layer (orbit) only — near-scale puffs live on the streamed ground
      plate, and no deck change will ever put weather over the pad. ---- */
-  cumulus = new THREE.Mesh(new THREE.SphereGeometry(RE + CUMULUS_ALT, 256, 128),
+  /* 512×256, was 256×128: a 256-segment sphere's silhouette chord error is r(1−cos(π/256)) ≈
+     0.48 km, and from 68 km altitude that is the wavy limb edge review2 flagged. 512 puts it at
+     0.12 km — sub-pixel at every altitude the decks are visible. The cirrus deck and the limb
+     shell below get the same value (Earth is already 384×192 = 0.21 km chord, Moon 512×256). */
+  cumulus = new THREE.Mesh(new THREE.SphereGeometry(RE + CUMULUS_ALT, 512, 256),
     toon({
       map: cloudMap, transparent: true, side: THREE.DoubleSide,
       opacity: 0.95, depthWrite: false, gradientMap: RAMP_CLOUD
@@ -159,10 +164,11 @@ export function initWorld(target) {
      actually hold a puff's shape; it costs the shadow box nothing. */
   cumulus.castShadow = false;
   cumulus.material.fog = false;   // same reason as the ground: a deck 2 km up is a planet-scale body
-  /* The mip chain averages alpha toward the global mean (~0.37 at deep mips), which is exactly what
-     turned the deck into a uniform veil above a few hundred km. Re-steepening the sampled alpha in
-     the fragment restores the cell edges — the same bias trick every planet renderer in a game engine
-     uses — while the `ca * 0.30` floor keeps a soft haze where the threshold eats itself, so from the
+  /* The mip chain averages alpha toward the global mean (~0.26 at deep mips, measured), which is
+     exactly what turned the deck into a uniform veil above a few hundred km. Re-steepening the
+     sampled alpha in the fragment restores the cell edges — the same bias trick every planet
+     renderer in a game engine uses — while the `ca * 0.14` floor keeps a soft haze where the
+     threshold eats itself, so from the
      Moon the Earth still wears weather rather than going bare. This is NOT the dead `discard`
      threshold of the old note: it operates on the mip-averaged value, not on a texel. */
   cumulus.material.onBeforeCompile = (sh) => {
@@ -173,7 +179,7 @@ export function initWorld(target) {
   };
   scene.add(cumulus);
 
-  cirrus = new THREE.Mesh(new THREE.SphereGeometry(RE + CIRRUS_ALT, 256, 128),
+  cirrus = new THREE.Mesh(new THREE.SphereGeometry(RE + CIRRUS_ALT, 512, 256),
     toon({
       color: 0xf4f8fc, map: cirrusMap, transparent: true, side: THREE.DoubleSide,
       opacity: 0.5, depthWrite: false, gradientMap: RAMP_CLOUD
@@ -184,7 +190,7 @@ export function initWorld(target) {
 
   /* ---- atmosphere: back-side limb shell. Intensity comes from the optical depth still in front of
      each fragment — long tangential sight lines glow, the thin overhead shell from the ground does not. ---- */
-  atmo = new THREE.Mesh(new THREE.SphereGeometry(RE * ATMO_SHELL, 256, 128), new THREE.ShaderMaterial({
+  atmo = new THREE.Mesh(new THREE.SphereGeometry(RE * ATMO_SHELL, 512, 256), new THREE.ShaderMaterial({
     uniforms: {
       glow: { value: new THREE.Color(0x63b7ff) },
       shellR: { value: RE * ATMO_SHELL },
@@ -409,23 +415,26 @@ function buildPad(glowMap) {
   };
 
   // crawler platform with track skirts; deck top z = 3
+  // The skirts join the deck in carrying the dark outline: review2 — "none of the pad models
+  // carry the dark outlines the art direction promises"; the big readable shapes get edge=true.
   box(64, 46, 3, concrete, 0, 0, 1.5, false, true, true);
-  box(64, 9, 3.6, concrete, 0, -23, 1.2, false, true);
-  box(64, 9, 3.6, concrete, 0, 23, 1.2, false, true);
+  box(64, 9, 3.6, concrete, 0, -23, 1.2, false, true, true);
+  box(64, 9, 3.6, concrete, 0, 23, 1.2, false, true, true);
   // reinforced launch deck: four slabs ring the flame-trench opening; tops z = 4 (physics anchor)
   box(44, 12, 1, concrete, 0, -14, 3.5, false, true);
   box(44, 12, 1, concrete, 0, 14, 3.5, false, true);
   box(12, 16, 1, concrete, -16, 0, 3.5, false, true);
   box(12, 16, 1, concrete, 16, 0, 3.5, false, true);
-  // flame trench below the opening + four canted exhaust deflectors
+  // flame trench below the opening + four canted exhaust deflectors (outlined: against the dark
+  // trench the un-outlined slabs read as one black hole; the edge is what separates four plates)
   box(21, 17, 4.4, blast, 0, 0, 0.8, false, true);
-  const d1 = box(18, 7, 1.2, blast, 0, -3.5, 2.4, true, true); d1.rotation.x = 0.75;
-  const d2 = box(18, 7, 1.2, blast, 0, 3.5, 2.4, true, true); d2.rotation.x = -0.75;
-  const d3 = box(15, 7, 1.2, blast, -7, 0, 2.4, true, true); d3.rotation.y = 0.75;
-  const d4 = box(15, 7, 1.2, blast, 7, 0, 2.4, true, true); d4.rotation.y = -0.75;
+  const d1 = box(18, 7, 1.2, blast, 0, -3.5, 2.4, true, true, true); d1.rotation.x = 0.75;
+  const d2 = box(18, 7, 1.2, blast, 0, 3.5, 2.4, true, true, true); d2.rotation.x = -0.75;
+  const d3 = box(15, 7, 1.2, blast, -7, 0, 2.4, true, true, true); d3.rotation.y = 0.75;
+  const d4 = box(15, 7, 1.2, blast, 7, 0, 2.4, true, true, true); d4.rotation.y = -0.75;
   // strongback tower (legs to z 56) with a swing arm reaching for the rocket at mid-vehicle height
-  box(1.8, 1.8, 52, steel, -16, -10, 30, true);
-  box(1.8, 1.8, 52, steel, -16, -2, 30, true);
+  box(1.8, 1.8, 52, steel, -16, -10, 30, true, false, true);
+  box(1.8, 1.8, 52, steel, -16, -2, 30, true, false, true);
   for (const bz of [14, 27, 40]) box(1.8, 8, 1.2, steel, -16, -6, bz, true);
   /* X-bracing in every strongback bay. Two legs and four rungs read as a wardrobe at pad distance;
      the real strongback is a truss, and diagonal members are what the eye recognises as one. */
@@ -434,18 +443,23 @@ function buildPad(glowMap) {
     const b1 = box(0.7, 0.7, bl, steel, -16, -6, bc, true); b1.rotation.x = ba;
     const b2 = box(0.7, 0.7, bl, steel, -16, -6, bc, true); b2.rotation.x = -ba;
   }
-  const swing = box(12, 1.6, 1.6, steel, -9, -2, 34, true); swing.rotation.z = 0.05;
+  const swing = box(12, 1.6, 1.6, steel, -9, -2, 34, true, false, true); swing.rotation.z = 0.05;
   // service tower: legs to z 60, a clad core between them, and a crew access arm at capsule height
-  box(1.8, 1.8, 56, steel, 16, -10, 32, true);
-  box(1.8, 1.8, 56, steel, 16, -2, 32, true);
+  box(1.8, 1.8, 56, steel, 16, -10, 32, true, false, true);
+  box(1.8, 1.8, 56, steel, 16, -2, 32, true, false, true);
   box(4.6, 6.6, 50, steel, 16, -6, 29, true, false, true);   // cladding: the tower is a building, not two poles
   box(2.2, 3.2, 6, blast, 16, -6, 57, true);                  // dark cab/crown cap under the arm pivot
   for (const bz of [18, 44]) box(1.8, 8, 1.2, steel, 16, -6, bz, true);
+  /* Diagonal bracing: at y=-9.3 the brace CENTRE sat outboard of the leg line — the member spans
+     Δy=8 about its centre, so it ran −13.3..−5.3 while the legs are at −10 and −2, both ends
+     floating off the tower (review2: "a diagonal strut that appears to float off the structure").
+     y=-6 centres it between the legs exactly like the strongback's: occluded by the clad core
+     where the cladding exists, real truss against the sky in the bays above it. */
   for (const [z0, z1] of [[7, 18], [18, 44], [44, 55]]) {
     const bl = Math.hypot(8, z1 - z0), bc = (z0 + z1) / 2, ba = Math.atan2(8, z1 - z0);
-    const b1 = box(0.6, 0.6, bl, steel, 16, -9.3, bc, true); b1.rotation.x = ba;
+    const b1 = box(0.6, 0.6, bl, steel, 16, -6, bc, true); b1.rotation.x = ba;
   }
-  const crewArm = box(11, 1.5, 1.5, steel, 10, -2, 56, true); crewArm.rotation.z = -0.04;
+  const crewArm = box(11, 1.5, 1.5, steel, 10, -2, 56, true, false, true); crewArm.rotation.z = -0.04;
   // two thin lightning masts; tips clear the 74-unit vehicle
   for (const mx of [-30, 30]) {
     const mast = new THREE.Mesh(new THREE.CylinderGeometry(0.35, 0.6, 88, 8), steel);
@@ -454,7 +468,7 @@ function buildPad(glowMap) {
     tip.position.set(mx, -26, 92.4); tip.castShadow = true; g.add(tip);
   }
   // clustered LOX/LH2 tanks on a pad with a manifold header and a feed line toward the deck
-  box(34, 28, 2, concrete, 50, 36, 3, false, true);
+  box(34, 28, 2, concrete, 50, 36, 3, false, true, true);
   /* White with a floor of emissive: on the shared toon ramp these spheres sat on the camera side
      of their own terminator through the whole launch window (the sun is east, the chase camera
      looks from the south), so the cluster read as four black donuts ringed by their own outline.
@@ -469,9 +483,10 @@ function buildPad(glowMap) {
   const manifold = new THREE.Mesh(new THREE.CylinderGeometry(0.9, 0.9, 26, 10), steel);
   manifold.position.set(50, 36, 7); manifold.rotation.x = Math.PI / 2; manifold.castShadow = true; g.add(manifold);
   box(22, 1.2, 1.2, steel, 25, 36, 6.4, true);
-  // floodlight rig: mast + cross-truss carrying four lamps on real fixtures
-  box(1.4, 1.4, 22, steel, 0, -34, 15, true);
-  box(30, 1.4, 1.4, steel, 0, -34, 26, true);
+  /* floodlight rig: mast + cross-truss carrying four lamps on real fixtures. 1.4-unit sections
+     were hairline sticks at pad distance (review2); 2.4/2.0 reads as a rig the lamps hang from. */
+  box(2.4, 2.4, 22, steel, 0, -34, 15, true);
+  box(30, 2.0, 2.0, steel, 0, -34, 26, true);
   for (let i = 0; i < 4; i++) {
     /* The lamp used to be the sprite alone: a 7-unit bokeh disc hanging in the air with nothing
        behind it, which read as floating domes — at night and against the sky especially. Now the
