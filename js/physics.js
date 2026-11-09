@@ -182,7 +182,7 @@ export function separateStage() {
   vehicleOps.addDebris({ mesh, vel: S.v.clone().addScaledVector(lat, 0.03).addScaledVector(PAD_UP, -0.005),
     angVel: new THREE.Vector3(Math.random() * 0.6, Math.random() * 0.6, Math.random() * 0.6), age: 0, trail: 1 });
   for (let k = 0; k < 26; k++) vehicleOps.spawnParticle(worldPos,
-    S.v.clone().addScaledVector(lat, 0.02 + Math.random() * 0.05).add(new THREE.Vector3().randomDirection().multiplyScalar(0.015)), 0.6 + Math.random() * 0.6, [1, .8, .4], 9 + Math.random() * 8, 1);
+    S.v.clone().addScaledVector(lat, 0.02 + Math.random() * 0.05).add(new THREE.Vector3().randomDirection().multiplyScalar(0.015)), 0.6 + Math.random() * 0.5, [1, .8, .4], 10 + Math.random() * 8, 0);
   audio.thud();
   engineOn = false; targetThrottle = 0; throttle = 0;
 }
