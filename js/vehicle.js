@@ -255,9 +255,10 @@ const BAND_C = [
   bandRGB(PALETTE.accent),// cooling ember
   bandRGB(0x8a8276),      // Earth smoke: warm grey-brown, darker than the daytime sky
   bandRGB(0x9aa0a6),      // lunar dust: pale concrete grey, brighter than regolith and than space
+  bandRGB(0xdad5c9),      // cloud foot: the ground-hugging blast roll, seen against grass, not sky
 ];
-const BAND_A = [0.0, 0.16, 0.36, 0.5, 0.32];    // composited coverage
-const BAND_G = [1.0, 0.85, 0.45, 0.10, 0.05];   // additive glow
+const BAND_A = [0.0, 0.16, 0.36, 0.62, 0.34, 0.8];    // composited coverage
+const BAND_G = [1.0, 0.6, 0.4, 0.10, 0.05, 0.03];     // additive glow
 
 /* One slot = one parcel; `alive` is the live index list, freeSlots[] the recycle stack. */
 const pPos = new Float32Array(NP * 3);    // world km — physics only, slot-indexed
@@ -359,7 +360,12 @@ const plumeMat = new THREE.ShaderMaterial({
       vA = alpha;
       vAdd = add;
       vec4 mv = modelViewMatrix * vec4(position, 1.0);
-      gl_PointSize = clamp(size * (uScale / max(-mv.z, 1e-6)), 1.0, 512.0);
+      /* Two caps. Smoke is allowed 220 px: it is the cloud body and it has to merge. Glow-dominant
+         parcels get 80 px — a metre from the lens a fully additive puff otherwise blooms into a fat
+         lantern a tenth of the screen, and the trench read as a dozen separate lamps instead of one
+         sheet. Both caps only bite closer than ~30 m, where the plume is meant to be one body. */
+      float cap = mix(220.0, 80.0, min(vAdd, 1.0));
+      gl_PointSize = clamp(size * (uScale / max(-mv.z, 1e-6)), 1.0, cap);
       gl_Position = projectionMatrix * mv;
       #include <logdepthbuf_vertex>
     }`,
@@ -507,9 +513,14 @@ function groundHit(vx, vy, vz, nx, ny, nz, frx, fry, frz, moon) {
     /* Lift is bounded: real deflectate rises by entrainment, not by keeping 16% of Mach-9
        momentum — uncapped this launched the pad blast 2 km into the sky. */
     const up = Math.min(s * (moon ? 0.04 : 0.08), moon ? 0.03 : 0.05);
-    rx = tx * (keep + out * k) + nx * up;                           // bled tangential + re-aimed impact + lift
-    ry = ty * (1 + out * k) + ny * up;
-    rz = tz * (1 + out * k) + nz * up;
+    /* All three components take the same factor. The bleed used to be written on `rx` alone, so a
+       parcel deflected off the trench floor kept its full tangential speed in y and z and the pad
+       got a field of discrete puffs flung outward at close to exhaust velocity — the `keep` value
+       below had almost no effect, which is why tuning it appeared to do nothing. */
+    const flow = keep + out * k;
+    rx = tx * flow + nx * up;                                       // bled tangential + re-aimed impact + lift
+    ry = ty * flow + ny * up;
+    rz = tz * flow + nz * up;
     _hit = 1;
   }
   _bx = rx + frx; _by = ry + fry; _bz = rz + frz;
@@ -543,7 +554,15 @@ function spawnPlume(set, pos, quat, vel, throttle, simDt) {
   if (n > 240) n = 240;                     // 240 = the busiest set × the warp clamp's frame budget
   const jit = veEff * (onMoon ? 0.02 : 0.05);
   const bells = set.bells, nb = bells.length;
+  /* One frame charges n parcels, and they all left the nozzle at different instants of the interval
+     the frame represents. Emitting them together put a fresh clump at the vehicle every 16 ms while
+     the vehicle itself moved on, so the ascent trail came out as a ringed fir tree — one visible
+     shell per frame, evenly spaced by the frame rate. Parcel c therefore belongs to the moment
+     `tau` seconds ago: back-project the exit point along the velocity, and let age, remaining life
+     and heat start as they would have, so the stream is continuous. */
+  const span = simDt / n;
   for (let c = 0; c < n; c++) {
+    const tau = (c + Math.random()) * span;
     const b = bells[(bellCursor++) % nb];
     const fr = Math.sqrt(Math.random());               // uniform over the exit disc
     const ph = Math.random() * Math.PI * 2, cx = Math.cos(ph), sx = Math.sin(ph);
@@ -556,7 +575,8 @@ function spawnPlume(set, pos, quat, vel, throttle, simDt) {
     const il = 1 / Math.sqrt(wx * wx + wy * wy + wz * wz);
     const v = veEff * (0.92 + Math.random() * 0.16);
     _svv.set(wx * il, wy * il, wz * il).multiplyScalar(v).applyQuaternion(quat);
-    _sp.set((b.x + rx * f) * VS, (b.y + ry * f) * VS, (b.z + rz * f) * VS).applyQuaternion(quat).add(pos);
+    _sp.set((b.x + rx * f) * VS, (b.y + ry * f) * VS, (b.z + rz * f) * VS).applyQuaternion(quat).add(pos)
+      .addScaledVector(vel, -tau);
     const i = allocSlot(), i3 = i * 3;
     pMode[i] = 1; pSmoke[i] = 0; pMoon[i] = onMoon ? 1 : 0;
     pPos[i3] = _sp.x; pPos[i3 + 1] = _sp.y; pPos[i3 + 2] = _sp.z;
@@ -567,7 +587,8 @@ function spawnPlume(set, pos, quat, vel, throttle, simDt) {
     /* low throttle also shortens the parcel's life — slow flow does not carry soot to orbit.
        On the Moon the multiplier buys the long, bright, lingering spray of Apollo 11's ascent. */
     const life = (1.1 + Math.random() * 1.2) * (0.6 + 0.4 * throttle) * (onMoon ? 2.2 : 1);
-    pLife[i] = life; pInv[i] = 1 / life; pAge[i] = 0; pHeat[i] = 1;
+    pLife[i] = life - tau; pInv[i] = 1 / life; pAge[i] = tau;
+    pHeat[i] = Math.max(0, 1 - tau * 1.25);              // the same cooling rate stepParcel applies
     pTh[i] = 0;
   }
 }
@@ -615,7 +636,7 @@ function stepParcel(i, h) {
           let bal = BAL0 * (pMode[i] === 2 ? 6 : 1) / (pR[i] * pR[i]);
           /* Ground-marked smoke drags like the air-full puff it has become; a 1/r² law alone lets
              it coast at hundreds of m/s for its whole life, which reads as shrapnel, not soot. */
-          if (pMode[i] === 1 && pSmoke[i] && pAge[i] > 0.12) bal = Math.max(bal, 0.0026);
+          if (pMode[i] === 1 && pSmoke[i] && pAge[i] > 0.03) bal = Math.max(bal, 0.005);
           bal = Math.min(BAL_CAP, bal);
           const f = 1 / (1 + bal * rho * vMps * h);                 // exact linearised drag step
           const diss = (1 - f) * vMps;                              // m/s of slip shed → entrainment
@@ -656,6 +677,15 @@ function stepParcel(i, h) {
              flow", not "soot": it drives the faster cooling, the entrainment swell and the drag
              floor, while the colour stays on the heat curve — the deflected sheet is flame until
              its own heat says smoke. */
+          /* One cut of life on first contact. Deflectate used to live its whole 3 s and the roll
+             crept out to the horizon as a flat ground fog; the real blast cloud is a few hundred
+             metres of churn around the pad that thins fast. Guarded on the flag so a parcel resting
+             on the ground is not re-capped every step. */
+          if (!pSmoke[i]) pLife[i] = Math.min(pLife[i], 1.15);
+          /* Inside the trench itself the flow is still a coherent jet: hold the heat there so the
+             pad keeps a bright fire under the vehicle, while the roll climbing out of it cools to
+             cloud. Without this the whole event read as grey smoke with a few sparks. */
+          if (h2 < TRP2) pHeat[i] = Math.max(pHeat[i], 0.82);
           pSmoke[i] = 1;
           pR[i] = Math.min(R_CAP, pR[i] * 1.6 + 0.6);
         }
@@ -702,7 +732,9 @@ function stepParcel(i, h) {
     /* Entrainment: ground-marked smoke swells fast — a Saturn's blast cloud doubles and redoubles
        in its first second, and a sprite that stays 2 m never dwarfs the crawler. Vacuum smoke
        (lunar dust) grows far less: there is no air to roll in. */
-    pR[i] = Math.min(R_CAP, pR[i] + (pSmoke[i] ? (moon ? 5 : 16) : 0.35) * h);
+    /* Non-deflected exhaust entrains too: at 0.35 m/s the ascent trail was a string of separate beads
+       rather than a column. Lunar parcels stay thin — a vacuum rolls in no air. */
+    pR[i] = Math.min(R_CAP, pR[i] + (pSmoke[i] ? (moon ? 5 : 10) : (moon ? 0.4 : 1.2)) * h);
   } else {
     pR[i] = Math.min(R_CAP, pR[i] + 2.4 * h);
   }
@@ -724,7 +756,7 @@ function fillBuffers() {
   for (let k = 0; k < nAlive; k++) {
     const i = alive[k], i3 = i * 3;
     const x = pPos[i3], y = pPos[i3 + 1], z = pPos[i3 + 2];
-    const sz = pR[i] * 0.005;             // generous glow diameter: 2.5× parcel radius
+    let sz = pR[i] * 0.005;               // generous glow diameter: 2.5× parcel radius
     if (sz === 0) zs++;
     let a, ad, cr, cg, cb;
     if (pMode[i] === 2) {
@@ -734,17 +766,29 @@ function fillBuffers() {
     } else {
       const q = pHeat[i];
       let b = q > 0.75 ? 0 : q > 0.5 ? 1 : q > 0.22 ? 2 : (pMoon[i] ? 4 : 3);
-      /* Ground-deflected flow cools twice as fast (stepParcel) and floors to smoke the moment it
-         drops below ember — but there is deliberately NO age-based floor: at the pad every parcel
-         touches "ground" within one step of birth (that is what a flame trench is), and the old
-         fixed 0.12 s floor erased the whole deflected flame sheet, leaving the pad with a puddle.
-         The bright sheet climbing out of the trench is heat, and heat now decides. */
-      if (pSmoke[i] && pAge[i] > 0.04 && q < 0.62) b = pMoon[i] ? 4 : (b < 3 ? 3 : b);
-      /* The age gate is what separates the two: the sheet climbing out of the trench is young and
-         stays flame, anything that has had a tenth of a second to mix with air is smoke. Without it the
-         pad has no fire at all; with the old 0.35 threshold it had nothing but fire, because ember
-         glows and the far field read as a ring of lanterns. */
+      /* Deflected flow is smoke once it has mixed at all: 20 ms, or above-ember heat, either one
+         keeps it flame. The gate has to be that short because the trench floor is one step from the
+         bell — at the old 0.12 s the whole rolling cloud fired as flame and the pad bloomed orange;
+         with no gate at all the pad had no fire whatsoever. Inside the trench the heat is held
+         (stepParcel), so a bright sheet survives under the vehicle while the roll out to the FLR is
+         already cloud. */
+      if (pSmoke[i] && pAge[i] > 0.02 && q < 0.75) b = pMoon[i] ? 4 : (b < 3 ? 3 : b);
+      /* Cloud discs are drawn at ~5.75× the parcel radius against the flame's 2.5×. At 2.5× a whole
+         blast cloud rendered as a few hundred separate coins sprinkled over the flat — the parcels
+         are metres across and hundreds of metres apart, and nothing merges. Wide discs overlap into
+         one body; fire stays compact so the trench keeps an edge. */
+      if (b >= 3) sz = pR[i] * 0.0115;
+      /* The blast roll that hugs the ground is cloud, not soot: against grass a dark grey sprite reads
+         as a scorch mark, and the pad ended up ringed with brown blots. Within 50 m of the sphere the
+         smoke band swaps to the pale foot tone; higher up, where the same parcel silhouettes against
+         the sky, it goes back to the dark grey that makes a column read. */
+      if (b === 3 && (Math.sqrt(x * x + y * y + z * z) - RE) < 0.05) b = 5;
       const c = BAND_C[b]; cr = c[0]; cg = c[1]; cb = c[2];
+      /* Deflected flow is air-mixed the moment it leaves the trench, so it carries almost no light:
+         at 0.5 it still read as a ring of flaming lanterns rolling across the flat, because glow is
+         order-free and a hot parcel anywhere in the cloud lights whatever is behind it. The fire
+         belongs to the trench (heat held there) and to the drawn cone, not to the roll. */
+      if (pSmoke[i]) ad *= 0.18;
       const fade = Math.min(1, pAge[i] * 8 + 0.05) * Math.min(1, pLife[i] * pInv[i] * 2.5 + 0.05);
       a = BAND_A[b] * fade; ad = BAND_G[b] * fade;
     }

@@ -138,8 +138,12 @@ export function glowTex() {
     for (let x = 0; x < N; x++) {
       const r = Math.min(1, Math.hypot(x - (N - 1) / 2, y - (N - 1) / 2) / ((N - 1) / 2));
       let R, G, B, A;
-      if (r <= 0.4) { const k = r / 0.4; R = 255; G = 235 - 65 * k; B = 190 - 120 * k; A = 1 - 0.35 * k; }
-      else { const k = (r - 0.4) / 0.6; R = 255; G = 170 - 50 * k; B = 70 - 40 * k; A = 0.65 * (1 - k); }
+      /* Alpha holds a plateau out to 0.62 r and then falls away steeply. The old profile ramped down
+         from the centre, so every sprite was a soft gradient and a pile of them composited into
+         cotton wool — a launch cloud wants lobes with a readable silhouette. Only .a is sampled
+         (js/vehicle.js:plumeMat); the RGB below is legacy from when the map was also drawn direct. */
+      if (r <= 0.4) { const k = r / 0.4; R = 255; G = 235 - 65 * k; B = 190 - 120 * k; A = 1 - 0.06 * k; }
+      else { const k = (r - 0.4) / 0.6; R = 255; G = 170 - 50 * k; B = 70 - 40 * k; A = 0.94 * Math.pow(1 - k, 2.4); }
       const i = (y * N + x) * 4;
       data[i] = R; data[i + 1] = G; data[i + 2] = B; data[i + 3] = (A * 255) | 0;
     }
