@@ -449,7 +449,7 @@ const plumeMat = new THREE.ShaderMaterial({
       gl_PointSize = clamp(size * (uScale / max(-mv.z, 1e-6)), 1.0, cap);
       gl_Position = projectionMatrix * mv;
       #include <logdepthbuf_vertex>
-    `,
+    }`,
   fragmentShader: /* glsl */`
     #include <common>
     #include <logdepthbuf_pars_fragment>
