@@ -57,13 +57,13 @@ Ignition mass 3,433 t; ideal staged budget **17,090 m/s = 1.13× the requirement
 | Candidate | ignition t | ideal Δv m/s | ratio | outcome when flown |
 | --- | --- | --- | --- | --- |
 | **shipped** (above) | 3,433 | 17,090 | 1.13× | **WON**, 20.1 m/s, 7.6 t spare |
-| previous (`retro`) | 3,780 | 16,303 | 1.08× | LOST — `HARD IMPACT ON THE MOON AT 5577 m/s`, tank dry |
+| previous (`retro`) | 3,780 | 16,303 | 1.08× | LOST — `HARD IMPACT ON THE MOON AT 1235 m/s`, tank dry |
 | oversized (`nova`) | 5,475 | 20,608 | 1.36× | not flown: nothing the margin is spent on, and a 3,000 t first stage is a different game |
 
 The previous stack is the instructive one. On paper it had 1.08× the requirement, it reached a
 parking orbit, it executed TLI, it entered the lunar sphere of influence, it achieved lunar orbit at
 200 km — and then it burnt the last of 400 t of CSM propellant on the descent and reached the
-surface at 1,233 m/s. 1.08× of an ideal number is not a mission. The verification harness exists
+surface at 1,235 m/s. 1.08× of an ideal number is not a mission. The verification harness exists
 because that failure is invisible to budget arithmetic.
 
 ## The flight, as measured

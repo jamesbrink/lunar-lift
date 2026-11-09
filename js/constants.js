@@ -109,7 +109,7 @@ export const SKY_DAY = new THREE.Color(0x79b1de), SKY_NULL = new THREE.Color(0x0
        instead of trying to hover. Throttle granularity, not thrust level, is what limits a soft
        landing.
    The 2,400/700/400 t stack this replaced had 16,303 m/s of ideal budget (1.08x) and still failed:
-   it reached lunar orbit, then ran the tank dry on the descent and hit the surface at 1,233 m/s.
+   it reached lunar orbit, then ran the tank dry on the descent and hit the surface at 1,235 m/s.
    Margin on paper is not margin; the descent has to be flown. */
 export const SPECS = [
   { name: 'S-1 SATURN I', dry: 130, fuel: 1800, thrust: 46000, isp: 304 },
