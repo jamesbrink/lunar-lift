@@ -67,7 +67,8 @@
   </div>
   <div id="modes" class="panel">
     <button id="mSas" data-key="p"><kbd>P</kbd><span>SAS</span><b id="oSas">OFF</b></button>
-    <button id="mDir" data-key="v"><kbd>V</kbd><span>HOLD</span><b id="mDirV">PRO</b></button>
+    <button id="mDir" data-key="v"><kbd>V</kbd><span>AIM</span><b id="mDirV">PRO</b></button>
+    <button id="mHold" data-key="h"><kbd>H</kbd><span>HOLD</span><b id="mHoldV">OFF</b></button>
     <button id="mRcs" data-key="t"><kbd>T</kbd><span>RCS</span><b id="mRcsV">ON</b></button>
     <button id="mStage" data-key="x"><kbd>X</kbd><span>STAGE</span><b id="mStageV">S-1</b></button>
   </div>
@@ -77,26 +78,22 @@
 <div id="views" class="hud onmap">
   <button data-key="c"><kbd>C</kbd><span>CAM</span><b id="vCam">ORBIT</b></button>
   <button data-key="m"><kbd>M</kbd><span>MAP</span></button>
+  <button data-key="f" class="maponly"><kbd>F</kbd><span>FOCUS</span><b id="vFocus">EARTH</b></button>
   <button data-key="["><kbd>[</kbd><span>SLOWER</span></button>
   <button data-key="]"><kbd>]</kbd><span>FASTER</span><b id="vWarp">×1</b></button>
   <button id="helpBtn"><kbd>?</kbd><span>KEYS</span></button>
 </div>
 <span id="oCtrl" hidden></span>
 
-<!-- M toggles body.map: the whole screen becomes the orbital map. The shared .onmap panels
-     (clock, guide, flight, orbit, views) ride above it. -->
-<div id="mapview">
-  <canvas id="mapCanvas"></canvas>
-</div>
-
 <div id="helpCard" class="panel">
   <div class="cols">
     <div><kbd>SPACE</kbd>ignite / cut engine</div><div><kbd>W</kbd><kbd>S</kbd>pitch</div>
     <div><kbd>⇧</kbd><kbd>CTRL</kbd>throttle up / down</div><div><kbd>A</kbd><kbd>D</kbd>yaw</div>
     <div><kbd>X</kbd>drop the spent stage</div><div><kbd>Q</kbd><kbd>E</kbd>roll</div>
-    <div><kbd>P</kbd>SAS autopilot on / off</div><div><kbd>V</kbd>SAS prograde / retrograde</div>
+    <div><kbd>P</kbd>SAS autopilot on / off</div><div><kbd>V</kbd>SAS aims prograde / retrograde</div>
+    <div><kbd>H</kbd>hold attitude: stop all rotation</div><div><kbd>←</kbd><kbd>→</kbd><kbd>↑</kbd><kbd>↓</kbd>look around · <kbd>-</kbd><kbd>=</kbd>zoom</div>
     <div><kbd>T</kbd>RCS stability assist</div><div><kbd>C</kbd>camera: orbit / chase / system</div>
-    <div><kbd>[</kbd><kbd>]</kbd>time warp ×1 → ×1000</div><div><kbd>M</kbd>orbital map</div>
+    <div><kbd>[</kbd><kbd>]</kbd>time warp ×1 → ×1000</div><div><kbd>M</kbd>3-D map · <kbd>F</kbd>focus</div>
     <div><kbd>R</kbd>restart mission</div><div>drag · wheel · double-click: look · zoom · re-centre</div>
   </div>
   <p>The <b>S-1 solid booster</b> burns at full thrust once lit and drops itself at burnout; the S-2 and CSM engines throttle. <b>SAS</b> flies the gravity turn for you and then holds the velocity vector — prograde to speed up, retrograde to brake. In thick air keep the nose near the airflow: the <b>side load</b> readout turns red before the stack breaks.</p>

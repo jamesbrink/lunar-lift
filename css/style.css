@@ -187,3 +187,9 @@
   #views button{min-width:0;background:var(--panel);backdrop-filter:blur(6px)}
   #helpCard b{color:var(--fg)}
   @media (max-width:1100px){ #modes button{min-width:96px} #guide{max-width:calc(100vw - 40px);top:44px} #tel,#orb{width:200px} }
+  .rating{margin:0 auto 16px;font-family:var(--mono)}
+  .rating .stars{font-size:34px;letter-spacing:.18em;color:#ffd166;text-shadow:0 2px 0 #7a4a00}
+  .rating .stars i{font-style:normal;color:#2a3446;text-shadow:none}
+  .rating .score{font-size:26px;font-weight:700;color:var(--fg)} .rating .score small{font-size:11px;color:var(--accent);margin-left:8px;letter-spacing:.08em}
+  .rating .marks{font-size:12px;color:var(--fg);margin-top:4px} .rating .marks.dim{color:var(--muted)}
+  body:not(.map) .maponly{display:none !important}

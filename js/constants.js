@@ -51,7 +51,7 @@ export const MOON_V = new THREE.Vector3().crossVectors(MOON_PLANE_N, MOON_U).nor
    from the last flight that lands. js/targeting.js turns that into a HUD readout, so the aim is
    no longer invisible; the corridor it paints green (140-600 km) is the landed flights above.
    Waiting on the pad and warping advances the Moon, so any other start time can still reach one. */
-export const MOON_PHASE0 = 4.9198031;                      // rad — 281.88° along the lunar orbit
+export const MOON_PHASE0 = 4.9187044;                      // rad — 281.88° along the lunar orbit
 let moonPhase = MOON_PHASE0;
 export const getMoonPhase = () => moonPhase;
 export function setMoonPhase(p) { moonPhase = p; }

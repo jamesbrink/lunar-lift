@@ -34,6 +34,8 @@ let trail = [];
 let distFlown = 0;
 let sasHoldTime = 0;
 let rcsAssist = true, aeroLoad = 0;
+/* What the touchdown was, for the debrief: m/s, degrees from vertical, tonnes left, seconds. */
+export const landing = { speed: 0, tilt: 0, fuel: 0, time: 0 };
 /* Lateral aerodynamic load the airframe survives, in g. Set against the measured nominal ascent
    (see docs/reference/atmosphere.md): the stack is a pressure-stabilised tank and folds early. */
 export const LOAD_LIMIT_STACK = 0.5, LOAD_LIMIT_CSM = 6;
@@ -56,7 +58,7 @@ export const getWarpIndex = () => warpIdx;
 export const setWarpIndex = i => { warpIdx = i; };
 export const getSasOn = () => sasOn;
 export const getSasRetro = () => sasRetro;
-export const setSas = (on, retro = false) => { sasOn = on; sasRetro = retro; };
+export const setSas = (on, retro = false) => { sasOn = on; sasRetro = retro; if (on) holdOn = false; };
 export const getMaxQ = () => maxQ;
 export const getDistFlown = () => distFlown;
 export const addDistFlown = d => { distFlown += d; };
@@ -69,8 +71,20 @@ export function cycleWarp(delta) {
   hooks.addLog(`TIME WARP ×${WARPS[warpIdx]}`);
 }
 
+/* Attitude hold: stop every rotation and keep the nose where it is. The same rate servo as SAS,
+   aimed at a remembered attitude instead of the velocity vector; steering by hand moves the
+   remembered attitude with you, so letting go of the keys is what stops the ship. */
+let holdOn = false;
+const holdQ = new THREE.Quaternion();
+export const getHold = () => holdOn;
+export function toggleHold() {
+  holdOn = !holdOn;
+  if (holdOn) { sasOn = false; holdQ.copy(S.q); }
+  hooks.addLog(holdOn ? 'ATTITUDE HOLD — ROTATION STOPPED' : 'ATTITUDE HOLD OFF');
+}
+
 export function toggleSas() {
-  sasOn = !sasOn;
+  sasOn = !sasOn; if (sasOn) holdOn = false;
   hooks.addLog(`SAS ${sasOn ? (sasRetro ? 'RETROGRADE HOLD' : 'PROGRADE HOLD') : 'OFF'}`);
 }
 export function toggleSasRetro() {
@@ -353,8 +367,8 @@ export function physStep(dt) {
   const ratio = I0.py / I.py, ratioR = I0.roll / I.roll;
   const altE = S.pos.length() - RE;
   if (!lesSeparated && altE > LES_ALT) separateLES();
-  const pitchIn = (keys['w'] ? 1 : 0) - (keys['s'] ? 1 : 0) + (keys['arrowup'] ? 1 : 0) - (keys['arrowdown'] ? 1 : 0);
-  const yawIn = (keys['a'] ? 1 : 0) - (keys['d'] ? 1 : 0) + (keys['arrowleft'] ? 1 : 0) - (keys['arrowright'] ? 1 : 0);
+  const pitchIn = (keys['w'] ? 1 : 0) - (keys['s'] ? 1 : 0);          // the arrow keys belong to the camera
+  const yawIn = (keys['a'] ? 1 : 0) - (keys['d'] ? 1 : 0);
   const rollIn = (keys['e'] ? 1 : 0) - (keys['q'] ? 1 : 0);
   const manual = pitchIn !== 0 || yawIn !== 0 || rollIn !== 0;
   omega.x += pitchIn * 0.12 * ratio * dt;                          // commanded angular acceleration
@@ -362,6 +376,8 @@ export function physStep(dt) {
   omega.z += rollIn * 0.25 * ratioR * dt;
   if (manual && sasOn) sasHoldTime = 0;                            // hands-on overrides SAS briefly
 
+  if (holdOn && manual) holdQ.copy(S.q);
+  if (holdOn && !manual) servo(holdQ, ratio, dt);
   if (sasOn && !manual) {                                          // SAS: rate servo toward the reference
     sasHoldTime = Math.min(6, sasHoldTime + dt);
     /* Below a few km the ground-relative velocity is a few m/s and is dominated by the
@@ -395,22 +411,7 @@ export function physStep(dt) {
       _md.copy(PAD_EAST).addScaledVector(_up, -PAD_EAST.dot(_up)).normalize();
       dir = _up.clone().multiplyScalar(Math.cos(th)).addScaledVector(_md, Math.sin(th));
     } else dir = navVel(_md);
-    if (dir.lengthSq() > 1e-4) {
-      const tq = new THREE.Quaternion().setFromUnitVectors(UP_Z, dir.normalize());
-      const errB = S.q.clone().invert().multiply(tq);              // pointing error in body frame
-      if (errB.w < 0) errB.set(-errB.x, -errB.y, -errB.z, -errB.w);  // Quaternion has no multiplyScalar
-      errB.normalize();
-      const angle = 2 * Math.acos(THREE.MathUtils.clamp(errB.w, -1, 1));
-      if (angle > 1e-3) {
-        const axis = _ax.set(errB.x, errB.y, errB.z);
-        if (axis.lengthSq() > 1e-9) axis.normalize(); else axis.set(1, 0, 0);
-        const want = Math.min(0.85 * MAX_RATE_PY, 1.6 * angle);
-        const k = Math.min(0.9, 1.2 * ratio * dt);
-        omega.x += (axis.x * want - omega.x) * k;
-        omega.y += (axis.y * want - omega.y) * k;
-        omega.z += (axis.z * want - omega.z) * k;
-      }
-    }
+    if (dir.lengthSq() > 1e-4) servo(_sq.setFromUnitVectors(UP_Z, dir.normalize()), ratio, dt);
   }
 
   /* Rates. In vacuum nothing stops a rotation but a thruster, so the only damping there is the
@@ -441,7 +442,7 @@ export function physStep(dt) {
     aeroLoad = (aeroState.nBody + aeroState.nFin) * 1000 / mass / 9.81;   // lateral g
     const limit = i === 2 || i < 0 ? LOAD_LIMIT_CSM : LOAD_LIMIT_STACK;
     if (state === 'flying' && overstressed(aeroLoad, limit, dt)) return breakup();
-  } else aeroLoad = 0;
+  } else { aeroLoad = 0; strain = Math.max(0, strain - 0.5 * dt); }
 
   omega.x = THREE.MathUtils.clamp(omega.x, -MAX_RATE_PY, MAX_RATE_PY);
   omega.y = THREE.MathUtils.clamp(omega.y, -MAX_RATE_PY, MAX_RATE_PY);
@@ -464,6 +465,23 @@ export function physStep(dt) {
   }
 }
 
+/* Rate servo: turn toward attitude `tq` at a rate proportional to the error, shortest way round. */
+const _sq = new THREE.Quaternion(), _eq = new THREE.Quaternion();
+function servo(tq, ratio, dt) {
+  const errB = _eq.copy(S.q).invert().multiply(tq);              // pointing error in body frame
+  if (errB.w < 0) errB.set(-errB.x, -errB.y, -errB.z, -errB.w);  // Quaternion has no multiplyScalar
+  errB.normalize();
+  const angle = 2 * Math.acos(THREE.MathUtils.clamp(errB.w, -1, 1));
+  const k = Math.min(0.9, 1.2 * ratio * dt);
+  if (angle <= 1e-3) { if (holdOn) omega.multiplyScalar(1 - k); return; }
+  const axis = _ax.set(errB.x, errB.y, errB.z);
+  if (axis.lengthSq() > 1e-9) axis.normalize(); else axis.set(1, 0, 0);
+  const want = Math.min(0.85 * MAX_RATE_PY, 1.6 * angle);
+  omega.x += (axis.x * want - omega.x) * k;
+  omega.y += (axis.y * want - omega.y) * k;
+  omega.z += (axis.z * want - omega.z) * k;
+}
+
 function checkImpact() {
   if (state !== 'flying') return;
   moonPos(simTime, _moon);
@@ -481,11 +499,13 @@ function impact(onMoon) {
     return;
   }
   if (onMoon && speed <= LAND_SAFE) {
+    landing.speed = disp; landing.tilt = Math.acos(Math.min(1, fwd().dot(bodyUp(_rad)))) * 57.2958;
+    landing.fuel = stages[2].separated ? 0 : stages[2].fuel; landing.time = simTime;
     state = 'won'; vehicleOps.setVisible(true);
     hooks.addLog(`TOUCHDOWN — ${disp.toFixed(1)} m/s. THE MOON IS OURS.`, 'good');
     audio.win();
     hooks.showEndOverlay('TOUCHDOWN ON THE MOON',
-      `The CSM rests on the lunar surface at <b>${disp.toFixed(1)} m/s</b> after a ${fmtDuration(simTime)} mission, all three stages spent along the way. ${disp < 16 ? 'A textbook landing.' : 'Close to the soft-landing limit — push lower next time.'}`,
+      `The CSM rests on the lunar surface at <b>${disp.toFixed(1)} m/s</b> after a ${fmtDuration(simTime)} mission, all three stages spent along the way. ${disp < 5 ? 'A textbook landing.' : disp < 15 ? 'Firm, but she stands.' : 'Close to the limit — brake earlier next time.'}`,
       'FLY AGAIN');
     return;
   }
@@ -506,20 +526,18 @@ function impact(onMoon) {
     }
   }
 }
-/* Structural failure policy: does this step's side load break the airframe?
-   load, limit in g; dt in s (always <= DTPHYS). `strain` is yours to use as memory between steps
-   and is zeroed on reset. Called every step while q > 0.5 Pa.
-
-   TODO(james): this is the placeholder — the instant the load crosses the limit, the stack is gone.
-   Alternatives worth weighing: a grace period (fail only after N seconds over the limit, so a
-   gust-like spike is survivable and the HUD's red side-load readout becomes a warning you can act
-   on), or accumulated damage (strain grows with (load/limit − 1)·dt and heals slowly, failing at a
-   threshold — forgiving of brief excursions, unforgiving of sustained ones). Whatever you choose,
-   re-run: node tools/mission-sim.mjs game --phase=4.9198031 (nominal peak is 0.024 g — it must
-   never trip) and the breakup table in docs/reference/atmosphere.md. */
+/* Structural failure policy: accumulated strain. Over the limit, strain grows with how far over
+   (load/limit − 1) per second; under it, it relaxes at 0.5/s. The airframe goes at strain 0.6 —
+   1.5× the limit held for 1.2 s, or 2× for 0.6 s — and at once above 3×. So a spike while you
+   wrestle the nose back is survivable and the HUD's red side-load readout is a warning you can
+   act on, but a stack held broadside through max-Q is still lost. */
 let strain = 0;
+export const getStrain = () => strain / STRAIN_FAIL;      // 0 sound … 1 gone
+const STRAIN_FAIL = 0.6;
 function overstressed(load, limit, dt) {
-  return load > limit;
+  if (load > 3 * limit) return true;
+  strain = load > limit ? strain + (load / limit - 1) * dt : Math.max(0, strain - 0.5 * dt);
+  return strain >= STRAIN_FAIL;
 }
 
 function breakup() {
@@ -578,7 +596,7 @@ export function resetSim() {
   engineOn = false; throttle = targetThrottle = 0;
   sasOn = false; sasRetro = false; simTime = 0; warpIdx = 0; maxQ = 0;
   tliLogged = loiLogged = loggedMaxQ = turnHintLogged = false; distFlown = 0; trail = [];
-  flightStarted = false; state = 'pad'; omega.set(0, 0, 0); I0 = null; rcsAssist = true; aeroLoad = 0; strain = 0;
+  flightStarted = false; state = 'pad'; omega.set(0, 0, 0); I0 = null; holdOn = false; rcsAssist = true; aeroLoad = 0; strain = 0;
 }
 
 /* teleport() starts the flight directly, bypassing the liftoff guard */

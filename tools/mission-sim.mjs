@@ -53,7 +53,8 @@ const TRACE = process.argv.includes('--trace');
 const G0 = 9.80665;
 const H = 0.1;                              // s — the step js/main.js never exceeds
 const PARK_PE = 150, PARK_AP = 185;         // km — parking orbit targets
-const AIM_PERI = 200;                       // km — periselene to aim for before capture
+const AIM_PERI = 350;                       // km — periselene the window is solved for: the middle of the band flown to a
+                                            //      soft landing (142-597 km), not its late edge — 110 km is a dry tank
 const PE_TARGET = 20;                       // km — periselene of the descent ellipse
 const PDI_ALT = 70;                         // km — powered descent initiation
 const PDI_TAU = 2.5;                        // s  — guidance time constant

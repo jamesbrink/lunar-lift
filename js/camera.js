@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import * as WORLD from './world.js';
-import { RE, RM, SOI_M, VS, PAD_SCALE, PAD_POS, PAD_UP, moonPos } from './constants.js';
-import { S, fwd, getSimTime, activeStage, isBurning, getThrottle, airDensity, groundVel, navVel } from './physics.js';
+import { RE, RM, MU_E, SOI_M, MOON_DIST, VS, PAD_SCALE, PAD_POS, PAD_UP, moonPos } from './constants.js';
+import { S, keys, fwd, getSimTime, activeStage, isBurning, getThrottle, airDensity, groundVel, navVel, orbitalElements } from './physics.js';
 import { stages } from './saturn.js';
 
 /* distances are km; 1 m near plane so the 105 m rocket resolves, 3 M km far plane
@@ -15,10 +15,15 @@ export const camera = new THREE.PerspectiveCamera(58, innerWidth / innerHeight, 
    chase   sits behind the flight path: heading follows the horizontal velocity, elevation follows
            the climb angle, so "forward" on screen is where the ship is going (not where it points —
            those differ by 180° in a braking burn, and the old nose-chase spun round with every flip).
-   system  Earth, Moon and the transfer between them.
+   map     (M, not in the C cycle) the same scene from far off, pivoting on a body you choose with F:
+           Earth, Moon or the ship. North is always up, drag and the arrow keys turn it, the wheel
+           zooms. It replaced a 'system' view that pivoted on the empty point halfway to the Moon.
    Nothing eases the view "home" on a timer any more: that took the camera out of the user's hand
    two seconds after every drag. Double-click re-centres. */
-export const camModes = ['orbit', 'chase', 'system'];
+export const camModes = ['orbit', 'chase'];
+const FOCI = ['earth', 'moon', 'ship'];
+let mapOn = false, focus = 0;
+const MAP_RANGE = { earth: [RE * 1.25, 1.6e6], moon: [RM * 1.4, 4e5], ship: [30, 1.6e6] };
 // getCamDist removed with the world-space nav arrows (round 6b); nothing else reads curDist.
 let camMode = 0, dragging = false, lastInput = 0;
 
@@ -51,7 +56,8 @@ const refH = new THREE.Vector3(1, 0, 0);     // the carried heading, horizontal 
 let refOk = false, climb = 0, frame = 1;
 const FULL_SPAN = 0.5 * (NOSE_Z + 42) * VS; // half-length of the whole stack
 const saved = { yaw: PAD_YAW, pitch: 0, dist: 0.13 };
-const CAM_RANGE = { chase: [0.02, 1000, 0.13], orbit: [0.02, 1000, 0.13], system: [4000, 900000, 150000] };
+const CAM_RANGE = { chase: [0.02, 1000, 0.13], orbit: [0.02, 1000, 0.13] };
+const range = () => mapOn ? MAP_RANGE[FOCI[focus]] : CAM_RANGE[camModes[camMode]];
 const SOI_BLEND_HI = SOI_M * 1.4, SOI_BLEND_LO = SOI_M * 0.8;
 
 /* Collision volumes. The camera may come to rest on these and may slide along them; it may not enter.
@@ -95,34 +101,61 @@ export function initCamera(canvas, log) {
     lastInput = performance.now();
   });
   canvas.addEventListener('dblclick', () => {
-    if (camModes[camMode] === 'system') { wantYaw = 0; wantPitch = 0.25; return; }
+    if (mapOn) { wantYaw = 0; wantPitch = 0.5; return; }
     let d = (-wantYaw) % (2 * Math.PI);                         // the short way round to "behind"
     if (d > Math.PI) d -= 2 * Math.PI; else if (d < -Math.PI) d += 2 * Math.PI;
     wantYaw += d; wantPitch = 0;
   });
   canvas.addEventListener('wheel', e => {
     e.preventDefault();
-    const [lo, hi] = CAM_RANGE[camModes[camMode]];
+    const [lo, hi] = range();
     wantDist = THREE.MathUtils.clamp(wantDist * (e.deltaY > 0 ? 1.12 : 0.9), lo, hi);
   }, { passive: false });
 }
 
 export function cycleCamera() {
-  const from = camModes[camMode];
+  if (mapOn) return;
   camMode = (camMode + 1) % camModes.length;
-  const mode = camModes[camMode];
-  /* orbit <-> chase keep the zoom and are a glide; only the system view is a cut (its pivot is
-     190 000 km away), and coming back from it restores the flight view that was left. */
-  if (mode === 'system') {
-    saved.yaw = wantYaw; saved.pitch = wantPitch; saved.dist = wantDist;
-    wantDist = CAM_RANGE.system[2]; wantYaw = 0; wantPitch = 0.25; placed = false;
-  } else if (from === 'system') {
-    wantYaw = saved.yaw; wantPitch = saved.pitch; wantDist = saved.dist; placed = false;
-  } else { wantYaw = 0; wantPitch = 0; }
-  lastInput = performance.now();
-  addLog(`CAMERA: ${mode.toUpperCase()}`);
+  wantYaw = 0; wantPitch = 0;                 // orbit <-> chase keep the zoom and glide
+  addLog(`CAMERA: ${camModes[camMode].toUpperCase()}`);
 }
-export const getCamMode = () => camModes[camMode];
+export const getCamMode = () => mapOn ? 'map' : camModes[camMode];
+export const isMap = () => mapOn;
+export const getMapFocus = () => FOCI[focus];
+
+/* A distance that shows what matters around the focus: the whole orbit when it is a closed one near
+   the Earth, both bodies when the path goes to the Moon. */
+function mapFrame() {
+  const f = FOCI[focus], [lo, hi] = MAP_RANGE[f];
+  moonPos(getSimTime(), _moon);
+  let d;
+  if (f === 'moon') d = Math.max(RM * 4, 3 * S.pos.distanceTo(_moon));
+  else if (f === 'ship') d = Math.max(2000, 0.6 * Math.min(S.pos.length(), S.pos.distanceTo(_moon)));
+  else {
+    const el = orbitalElements(S.pos, S.v, MU_E, RE);
+    const reach = el.escape || el.ap > MOON_DIST * 0.5 ? MOON_DIST : RE + Math.max(el.ap, S.pos.length() - RE);
+    d = 2.6 * Math.max(reach, RE * 1.4);
+  }
+  return THREE.MathUtils.clamp(d, lo, hi);
+}
+export function setMap(on) {
+  if (on === mapOn) return;
+  if (on) {
+    saved.yaw = wantYaw; saved.pitch = wantPitch; saved.dist = wantDist;
+    mapOn = true;
+    moonPos(getSimTime(), _moon);
+    focus = S.pos.distanceTo(_moon) < SOI_M ? 1 : 0;
+    wantYaw = 0.6; wantPitch = 0.5; wantDist = mapFrame();
+  } else { mapOn = false; wantYaw = saved.yaw; wantPitch = saved.pitch; wantDist = saved.dist; }
+  curYaw = wantYaw; curPitch = wantPitch; curDist = wantDist;
+  placed = false;                             // a cut: the pivots can be 380 000 km apart
+}
+export function cycleMapFocus() {
+  if (!mapOn) return;
+  focus = (focus + 1) % FOCI.length;
+  wantDist = curDist = mapFrame(); placed = false;
+  addLog(`MAP FOCUS: ${FOCI[focus].toUpperCase()}`);
+}
 
 export function setCamMode(name) { const k = camModes.indexOf(name); if (k >= 0 && k !== camMode) { camMode = k; placed = false; } }
 
@@ -140,7 +173,7 @@ export function setCamView(yaw, pitch, dist) {
 }
 
 export function resetCameraView() {
-  camMode = 0; saved.yaw = PAD_YAW; saved.pitch = 0; saved.dist = 0.13; wantYaw = curYaw = PAD_YAW; wantPitch = curPitch = 0; wantDist = curDist = 0.13;
+  camMode = 0; mapOn = false; saved.yaw = PAD_YAW; saved.pitch = 0; saved.dist = 0.13; wantYaw = curYaw = PAD_YAW; wantPitch = curPitch = 0; wantDist = curDist = 0.13;
   camUp.copy(PAD_UP).normalize();
   focusZ = null; refOk = false; climb = 0; frame = 1;
   placed = false;            // updateCamera places it on the first frame, from the numbers above
@@ -278,17 +311,27 @@ function shake(dt) {
 }
 
 export function updateCamera(dt) {
-  const mode = camModes[camMode];
+  const mode = mapOn ? 'map' : camModes[camMode];
+  /* Arrow keys look around, - and = zoom: the same numbers the mouse writes. */
+  const kx = (keys['arrowleft'] ? 1 : 0) - (keys['arrowright'] ? 1 : 0), ky = (keys['arrowup'] ? 1 : 0) - (keys['arrowdown'] ? 1 : 0);
+  const kz = (keys['-'] || keys['_'] ? 1 : 0) - (keys['='] || keys['+'] ? 1 : 0);
+  if (kx || ky || kz) {
+    wantYaw += kx * 1.6 * dt;
+    wantPitch = THREE.MathUtils.clamp(wantPitch + ky * 1.2 * dt, -1.3, 1.3);
+    const [lo, hi] = range();
+    wantDist = THREE.MathUtils.clamp(wantDist * Math.exp(kz * 1.4 * dt), lo, hi);
+  }
   const kAng = 1 - Math.exp(-16 * dt), kDist = 1 - Math.exp(-8 * dt);
   curYaw += (wantYaw - curYaw) * kAng;
   curPitch += (wantPitch - curPitch) * kAng;
   curDist = Math.exp(THREE.MathUtils.lerp(Math.log(curDist), Math.log(wantDist), kDist));
 
-  if (mode === 'system') {
-    wantFov = 58;
+  if (mode === 'map') {
+    wantFov = 50;
     moonPos(getSimTime(), _moon);
-    _up.copy(AXIS);
-    _target.set(_moon.x / 2, 0, _moon.z / 2);                    // system pivot: halfway to the Moon
+    _up.copy(AXIS);                                              // north up, always
+    const f = FOCI[focus];
+    if (f === 'earth') _target.set(0, 0, 0); else if (f === 'moon') _target.copy(_moon); else _target.copy(S.pos);
     _dir.set(Math.sin(curYaw) * Math.cos(curPitch), Math.sin(curPitch), Math.cos(curYaw) * Math.cos(curPitch));
     desired.copy(_target).addScaledVector(_dir, curDist);
   } else {
@@ -359,15 +402,15 @@ export function updateCamera(dt) {
     desired.copy(_target).addScaledVector(_dir, curDist * frame);
   }
 
-  collide(desired, mode === 'system');
+  collide(desired, mode === 'map');
 
-  const k = 1 - Math.exp(-(mode === 'system' ? 7 : 15) * dt);
+  const k = 1 - Math.exp(-(mode === 'map' ? 7 : 15) * dt);
   desired.sub(_target);                                          // now an offset
   if (!placed) { camOff.copy(desired); placed = true; } else camOff.lerp(desired, k);
   camPos.copy(_target).add(camOff);
   /* Second collision pass, on the blended place: a lerp between two legal offsets is a chord, and a
      chord can pass through the vehicle, the pad or the ground. */
-  collide(camPos, mode === 'system');
+  collide(camPos, mode === 'map');
   camTgt.copy(_target);                                          // the ship is the centre of the frame, exactly
   camUp.lerp(_up, k).normalize();
   camera.position.copy(camPos); camera.up.copy(camUp); camera.lookAt(camTgt);
@@ -375,5 +418,5 @@ export function updateCamera(dt) {
     camera.fov += (wantFov - camera.fov) * (placedFov ? 1 - Math.exp(-2 * dt) : 1); placedFov = true;
     camera.updateProjectionMatrix();
   }
-  if (mode !== 'system') shake(dt);
+  if (mode !== 'map') shake(dt);
 }

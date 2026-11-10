@@ -3,9 +3,10 @@ import { RE, RM, WARPS, DTPHYS, PAD_POS, moonPos } from './constants.js';
 import { initWorld, spinBodies, syncTime, updateSky, updateSunShadow, groundHeight, moonGroundHeight } from './world.js';
 import { stages, lesGroup } from './saturn.js';
 import { initVehicle, spawnParticle, addDebris, detachStage, setVisible, updateParticles, updateDebris, updateBurnVisuals, clearDebris, resetStages, plumeLive } from './vehicle.js';
-import { S, keys, initPhysics, getState, getSimTime, setSimTime, getEngineOn, getThrottle, getWarpIndex, setWarpIndex, setTargetThrottle, getSasOn, setSas, cycleWarp, toggleSas, toggleSasRetro, activeStage, fwd, isBurning, accelAt, physStep, toggleIgnite, separateStage, separateLES, addDistFlown, pushTrail, resetSim, markTeleported, airDensity, groundVel, omega, getControlAuthority, toggleRcsAssist, aeroState, getAeroLoad, stability } from './physics.js';
-import { camera, initCamera, cycleCamera, updateCamera, resetCameraView, setCamMode, setCamDist, setCamView, resizeCamera } from './camera.js';
-import { initHUD, addLog, updateHUD, drawMap, toggleMapView, endOverlay, setWarn, hideOverlay, clearLog } from './hud.js';
+import { S, keys, initPhysics, getState, getSimTime, setSimTime, getEngineOn, getThrottle, getWarpIndex, setWarpIndex, setTargetThrottle, getSasOn, setSas, cycleWarp, toggleSas, toggleSasRetro, activeStage, fwd, isBurning, accelAt, physStep, toggleIgnite, separateStage, separateLES, addDistFlown, pushTrail, resetSim, markTeleported, airDensity, groundVel, omega, getControlAuthority, toggleRcsAssist, toggleHold, aeroState, getAeroLoad, stability } from './physics.js';
+import { camera, initCamera, cycleCamera, updateCamera, resetCameraView, setCamMode, setCamDist, setCamView, resizeCamera, setMap, isMap, cycleMapFocus } from './camera.js';
+import { initMapView, updateMapView } from './mapview.js';
+import { initHUD, addLog, updateHUD, toggleMapView, endOverlay, setWarn, hideOverlay, clearLog } from './hud.js';
 import { audioInit, audioEngine, audioThud, audioExplosion, audioWin, updateAudio } from './audio.js';
 import { updateAim, resetAim } from './targeting.js';
 import { initHalfRes, occlude, renderHalfRes } from './halfres.js';
@@ -47,6 +48,7 @@ function resetMission() {
   resetCameraView();
   hideOverlay();
   document.body.classList.remove('map');   // a reset returns to the flight screen, even from the map
+  setMap(false);
   clearLog();
   clearPredictor();
   resetAim();
@@ -69,13 +71,14 @@ initPhysics({
 });
 initPredictor({ scene, groundE: groundHeight, groundM: moonGroundHeight, setWarn });
 initCamera(canvas, addLog);
+initMapView(scene);
 initHUD({ resetMission });
 initHalfRes(scene, plumeLive);
 occlude(scene);          // every opaque mesh built so far hides the half-resolution layer
 
 addEventListener('keydown', e => {
   const k = e.key.toLowerCase();
-  if ([' ', 'arrowup', 'arrowdown', 'arrowleft', 'arrowright'].includes(k) || (k === ']' || k === '[')) e.preventDefault();
+  if ([' ', 'arrowup', 'arrowdown', 'arrowleft', 'arrowright', '-', '='].includes(k) || (k === ']' || k === '[')) e.preventDefault();
   if (e.repeat) return; keys[k] = true;
   if (!audioArmed) { audioArmed = true; audioInit(); }          // browsers gate sound on a user gesture
   const mode = getState();
@@ -91,7 +94,9 @@ addEventListener('keydown', e => {
   else if (k === ']') cycleWarp(1);
   else if (k === '[') cycleWarp(-1);
   else if (k === 'c') cycleCamera();
-  else if (k === 'm') toggleMapView();
+  else if (k === 'm') setMap(toggleMapView());
+  else if (k === 'f') cycleMapFocus();
+  else if (k === 'h') toggleHold();
   else if (k === 'r') resetMission();
 });
 addEventListener('keyup', e => { keys[e.key.toLowerCase()] = false; });
@@ -139,7 +144,7 @@ function frame() {
   updateHUD(dtReal);
   updateSky(S.pos, camera.position);
   updateSunShadow(S.pos);
-  drawMap();
+  updateMapView(isMap());
   renderHalfRes(renderer, scene, camera);   // weather and exhaust, at a quarter of the pixels
   renderer.render(scene, camera);
   } catch (err) {
@@ -165,7 +170,7 @@ window.game = {
     omega: [omega.x, omega.y, omega.z], authority: getControlAuthority().py,
     aero: { q: aeroState.q, mach: aeroState.mach, aoa: aeroState.aoa, load: getAeroLoad(), margin: stability() } }),
   ignite: toggleIgnite, stage: separateStage, jettisonLES: separateLES, setSas,
-  warp: m => { setWarpIndex(WARPS.indexOf(m)); }, camera: n => { setCamMode(n); },
+  warp: m => { setWarpIndex(WARPS.indexOf(m)); }, camera: n => { setCamMode(n); }, map: on => { document.body.classList.toggle('map', on); setMap(on); },
   ff(sec) { let left = sec; while (left > 1e-9) { const h = Math.min(DTPHYS, left); physStep(h); left -= h; } syncTime(getSimTime()); },
   setThrottle(v) { setTargetThrottle(v); },
   nudge(ax, ay, az) { omega.set(ax, ay, az); },
