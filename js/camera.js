@@ -313,7 +313,7 @@ function shake(dt) {
   camera.rotateY(amp * 0.0045 * (Math.sin(t * 41.3 + 2.1) + Math.sin(t * 59.9 + 0.4)));
 }
 
-export function updateCamera(dt) {
+export function updateCamera(dt, paused = false) {
   const mode = mapOn ? 'map' : camModes[camMode];
   /* Arrow keys look around, - and = zoom: the same numbers the mouse writes. */
   const kx = (keys['arrowleft'] ? 1 : 0) - (keys['arrowright'] ? 1 : 0), ky = (keys['arrowup'] ? 1 : 0) - (keys['arrowdown'] ? 1 : 0);
@@ -431,5 +431,7 @@ export function updateCamera(dt) {
     camera.fov += (wantFov - camera.fov) * (placedFov ? 1 - Math.exp(-2 * dt) : 1); placedFov = true;
     camera.updateProjectionMatrix();
   }
-  if (mode !== 'map') shake(dt);
+  /* Shake is the engine and the air, and neither is happening while time is stopped. The view
+     itself stays live: a pause is for looking around. */
+  if (mode !== 'map' && !paused) shake(dt);
 }

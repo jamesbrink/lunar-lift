@@ -164,7 +164,8 @@ function frame() {
     updateAim();   // predicted lunar aim; spends a fixed step budget per frame and self-throttles
   }
   if (!paused) updateParticles(Math.min(1, dtReal * WARPS[getWarpIndex()]));
-  updateCamera(dtReal);
+  updateCamera(dtReal, paused);
+  if (paused) updateAudio({ burning: false, throttle: 0, rho: 0, q: 0 });   // and the engine is silent
   if (getState() === 'flying') updatePredictor(camera); else clearPredictor();
   updateHUD(dtReal);
   /* The sky belongs to where the EYE is: on the map that is space, whatever air the ship is in. */
