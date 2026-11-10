@@ -131,15 +131,34 @@ state differs from the ship's real trajectory by ~100 km, which would make the r
   the surface fills with straight-edged wedges of the tile's mip average. The weather shell is safe
   because its uv is rebuilt per fragment from the fragment's own position (12.5 km triangles against a
   160 km tile); anything new that tiles across a large mesh has to pass the same test.
-- **Weather is one marched shell, and a coverage field must move coverage, not opacity.**
-  `js/clouds.js` is a sphere at RE + 11 km whose fragment shader integrates optical depth through a
-  4–11 km band; the planet-scale decks and the vehicle-following caps are gone. The macro sheet sets the
-  *fraction of sky covered* (a threshold on a rank-uniform lattice); scaling density by it instead gave
-  a planet-wide white fog with no edges. Past ~5 lattice texels per pixel the mips average the rank to
-  0.5 and the threshold is meaningless, so density falls back to the coverage fraction itself. The shell
-  keeps `castShadow = false` — a low sun drags its silhouette hundreds of kilometres through the ±48 km
-  shadow box — and ground shade is the same march aimed up the sun ray, injected into the globe and the
-  patch. See `docs/reference/painted-planets.md`.
+- **Weather is one field drawn as shapes, and a coverage field must move coverage, not opacity.**
+  `js/clouds.js` is a sphere at RE + 11 km; `js/cloudfields.js` is the data. A cloud is where one
+  scalar field exceeds one threshold that climbs with height, found by a short walk and a bisection —
+  an opaque surface, not an optical depth. The macro sheet moves the *fraction of sky covered*
+  (thresholds are solved from the uploaded bytes); scaling density by it instead gave a planet-wide
+  white fog with no edges. Unresolved octaves drop out through explicit mips and the remaining
+  contrast is scaled back up, so far cloud simplifies instead of dissolving — never swap the field
+  for "density = coverage", which is the grey smear orbit used to wear. The shell keeps
+  `castShadow = false` — a low sun drags its silhouette hundreds of kilometres through the ±48 km
+  shadow box — and ground shade is the same field looked up along the sun ray, injected into the
+  globe and the patch. See `docs/reference/painted-planets.md`.
+- **A ray walk may not read the field finer than its stride.** A lobe narrower than the stride is hit
+  by some rays and jumped by their neighbours, and the cloud comes out as the slices the samples cut:
+  a stack of plates from the pad, a comb on every flank. Jitter hid this in the old march and paid
+  for it in stipple; the fix is to band-limit the read (explicit `textureLod`) to twice the stride.
+- **A half-resolution pass can still have a full-resolution edge.** The weather target holds
+  coverage as a ramp through 0.5 and light as a scalar, not a colour; the main pass thresholds them
+  per screen pixel. Upsampling a colour blurs it, upsampling a ramp and cutting it does not.
+- **Sixteen opaque draws in one render pass are one draw to a tile-based GPU.** A timing harness
+  that repeats a pass to amplify it must clear between repeats, or the figure is sixteen times low;
+  and a single light frame reads 0.7 to 2.5 ms for the same picture, so do amplify.
+  `tools/cloud-views.mjs` does both.
+- **A function-like GLSL macro rewrites its parameter everywhere in its body, swizzles included.**
+  `#define SLOW(x) ... slow.x ...` expands to `slow.( expr )` and the program dies with "illegal
+  character at fieldname start"; and `#define SLOW( x )` with a space is not a function at all.
+- **A define used by an injected helper must be in the injected text.** The shell compiled with
+  `TURRET` defined in its own preamble while the ground materials got the shared field without it:
+  the planet went black and the clouds, drawn over nothing, looked better than ever.
 - **The near patch and the globe are one surface and must be shaded as one.** The "giant flat square
   plate around the ship" at full zoom-out was the ±220 km ground patch, not weather, and it showed for
   two reasons, each found by toggling `drawRange` on that one mesh and diffing frames: it took scene
@@ -164,7 +183,7 @@ state differs from the ship's real trajectory by ~100 km, which would make the r
   staircase. `js/main.js` now uses `PCFShadowMap` with a 4096² map: p90 17.1 ms against 17.9 for
   `PCFSoftShadowMap` over 90 rAF deltas at the pad, and the softer kernel sanded off the edge the drawn
   look wants. Filtering the depth map cannot hurt the cloud shade, because that shade is not a shadow-map
-  caster (js/clouds.js marches its own optical depth into the ground materials) — the old comment claiming Basic "gives the cloud shadows
+  caster (js/clouds.js looks its own field up along the sun ray in the ground materials) — the old comment claiming Basic "gives the cloud shadows
   the soft filter blurs away" was never true, which is worth knowing before anyone reverts this to protect
   them. `logarithmicDepthBuffer` is unrelated: the compare uses `vShadowCoord` from the light's projection.
 - **A factor written on one component of three is a bug wearing a tuning knob.** `groundHit` bled the
@@ -228,7 +247,8 @@ state differs from the ship's real trajectory by ~100 km, which would make the r
   keeps the prepass (smoke is in front of the ship as often as behind) and is skipped when no parcel
   is alive. Remember: a shader in these passes sees pixels twice the size (footprints and point sizes
   scale by `RES_SCALE`); a new opaque mesh must go through `occlude()` or smoke draws over it;
-  ordered dither survives the tent as a weave, white noise does not; and the shell's mesh density
+  ordered dither survives the exhaust's tent as a weave, white noise does not (the weather no longer
+  dithers or uses the tent: it writes ramps and the main pass cuts them); and the shell's mesh density
   buys nothing — 512 × 256 cost ~1 ms over 192 × 96 for the same picture.
 - **A ground colour cannot hold a road; geometry can.** The pad stood on 360 m of terrain painted
   concrete-grey because the patch's vertices are 25 m apart at best. The site is now slabs in
@@ -379,7 +399,7 @@ await tab.evaluate(`(async () => {
 
 ## Structure
 
-One concern per file; no god files. Current sizes: `toonmap.js` 1778, `vehicle.js` 1374, `world.js` 687, `terrain.js` 549, `navball.js` 498, `physics.js` 472, `clouds.js` 443, `hud.js` 437, `camera.js` 300, `predictor.js` 275, `textures.js` 232, `saturn.js` 231, `ribbon.js` 213, `pad.js` 202, `main.js` 172, `toon.js` 138, `constants.js` 119, `targeting.js` 108, `halfres.js` 103, `audio.js` 62, `haze.js` 62.
+One concern per file; no god files. Current sizes: `toonmap.js` 1778, `vehicle.js` 1374, `world.js` 687, `terrain.js` 549, `navball.js` 498, `physics.js` 472, `clouds.js` 619, `hud.js` 437, `camera.js` 300, `predictor.js` 275, `cloudfields.js` 274, `saturn.js` 231, `ribbon.js` 213, `pad.js` 202, `main.js` 172, `toon.js` 138, `constants.js` 119, `targeting.js` 108, `halfres.js` 103, `textures.js` 84, `audio.js` 62, `haze.js` 62.
 `vehicle.js` is now the exhaust and debris alone — the hardware it used
 to build is `saturn.js`, the launch complex left `world.js` for `pad.js`. It is still the largest
 behavioural module; if the particle field grows, split its renderer from its integrator.
