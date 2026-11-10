@@ -146,7 +146,7 @@ function frame() {
   updateHUD(dtReal);
   updateSky(S.pos, camera.position);
   updateSunShadow(S.pos);
-  updateMapView(isMap());
+  updateMapView(isMap(), dtReal);
   updateChutes();
   renderHalfRes(renderer, scene, camera);   // weather and exhaust, at a quarter of the pixels
   renderer.render(scene, camera);

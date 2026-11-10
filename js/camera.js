@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import * as WORLD from './world.js';
-import { RE, RM, MU_E, SOI_M, MOON_DIST, VS, PAD_SCALE, PAD_POS, PAD_UP, moonPos } from './constants.js';
+import { RE, RM, MU_E, SOI_M, MOON_DIST, MOON_PLANE_N, MOON_U, MOON_V, VS, PAD_SCALE, PAD_POS, PAD_UP, moonPos } from './constants.js';
 import { S, keys, fwd, getSimTime, activeStage, isBurning, getThrottle, airDensity, groundVel, navVel, orbitalElements, getChute } from './physics.js';
 import { stages } from './saturn.js';
 
@@ -16,7 +16,7 @@ export const camera = new THREE.PerspectiveCamera(58, innerWidth / innerHeight, 
            the climb angle, so "forward" on screen is where the ship is going (not where it points —
            those differ by 180° in a braking burn, and the old nose-chase spun round with every flip).
    map     (M, not in the C cycle) the same scene from far off, pivoting on a body you choose with F:
-           Earth, Moon or the ship. North is always up, drag and the arrow keys turn it, the wheel
+           Earth, Moon or the ship. The pole of the Moon's orbit is up, drag and the arrow keys turn it, the wheel
            zooms. It replaced a 'system' view that pivoted on the empty point halfway to the Moon.
    Nothing eases the view "home" on a timer any more: that took the camera out of the user's hand
    two seconds after every drag. Double-click re-centres. */
@@ -101,7 +101,7 @@ export function initCamera(canvas, log) {
     lastInput = performance.now();
   });
   canvas.addEventListener('dblclick', () => {
-    if (mapOn) { wantYaw = 0; wantPitch = 0.5; return; }
+    if (mapOn) { wantYaw = 0.6; wantPitch = 0.95; return; }
     let d = (-wantYaw) % (2 * Math.PI);                         // the short way round to "behind"
     if (d > Math.PI) d -= 2 * Math.PI; else if (d < -Math.PI) d += 2 * Math.PI;
     wantYaw += d; wantPitch = 0;
@@ -145,7 +145,7 @@ export function setMap(on) {
     mapOn = true;
     moonPos(getSimTime(), _moon);
     focus = S.pos.distanceTo(_moon) < SOI_M ? 1 : 0;
-    wantYaw = 0.6; wantPitch = 0.5; wantDist = mapFrame();
+    wantYaw = 0.6; wantPitch = 0.95; wantDist = mapFrame();
   } else { mapOn = false; wantYaw = saved.yaw; wantPitch = saved.pitch; wantDist = saved.dist; }
   curYaw = wantYaw; curPitch = wantPitch; curDist = wantDist;
   placed = false;                             // a cut: the pivots can be 380 000 km apart
@@ -329,10 +329,14 @@ export function updateCamera(dt) {
   if (mode === 'map') {
     wantFov = 50;
     moonPos(getSimTime(), _moon);
-    _up.copy(AXIS);                                              // north up, always
+    /* 'Up' is the pole of the Moon's orbit, not the Earth's: the transfer, the parking orbit and the
+       Moon all lie in that one plane (the launch window is built that way), so this is the view
+       that looks DOWN on the mission. With north up the whole picture was an edge-on sliver. */
+    _up.copy(MOON_PLANE_N);
     const f = FOCI[focus];
     if (f === 'earth') _target.set(0, 0, 0); else if (f === 'moon') _target.copy(_moon); else _target.copy(S.pos);
-    _dir.set(Math.sin(curYaw) * Math.cos(curPitch), Math.sin(curPitch), Math.cos(curYaw) * Math.cos(curPitch));
+    _dir.set(0, 0, 0).addScaledVector(MOON_U, Math.sin(curYaw) * Math.cos(curPitch)).addScaledVector(MOON_PLANE_N, Math.sin(curPitch))
+      .addScaledVector(MOON_V, Math.cos(curYaw) * Math.cos(curPitch));
     desired.copy(_target).addScaledVector(_dir, curDist);
   } else {
     const i = activeStage();
