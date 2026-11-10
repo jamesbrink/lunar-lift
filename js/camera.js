@@ -183,10 +183,10 @@ const AXIS = new THREE.Vector3(0, 1, 0);
 let placed = false;
 
 /* The instrument cluster owns the bottom-centre of the screen, so the optical centre is lifted
-   8 % of the height: the ship the camera aims at stands above the attitude ball, not behind it. */
+   12 % of the height: the ship the camera aims at stands above the attitude ball, not behind it. */
 export function resizeCamera() {
   camera.aspect = innerWidth / innerHeight;
-  camera.setViewOffset(innerWidth, innerHeight, 0, Math.round(innerHeight * 0.08), innerWidth, innerHeight);
+  camera.setViewOffset(innerWidth, innerHeight, 0, Math.round(innerHeight * 0.12), innerWidth, innerHeight);
   camera.updateProjectionMatrix();
 }
 resizeCamera();
