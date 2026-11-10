@@ -16,10 +16,11 @@ const sweep = name => page.evaluate(async name => {
   const { NOSE_Z } = await import('/js/stations.js');
   const { updateCamera, camera } = await import('/js/camera.js');
   const moon = new T.Vector3(), d = new T.Vector3(), ax = new T.Vector3(), rel = new T.Vector3();
-  let n = 0, minGround = 1e9, minHull = 1e9; const bad = [];
+  let n = 0, minGround = 1e9, minHull = 1e9, inTower = 0; const bad = [];
+  const inv = new T.Matrix4(), loc = new T.Vector3();
   for (const mode of ['orbit', 'chase']) {
     game.camera(mode);
-    for (const dist of [0.02, 0.05, 0.13, 0.6, 3])
+    for (const dist of [0.02, 0.03, 0.04, 0.05, 0.13, 0.6, 3])
       for (let pitch = -1.3; pitch <= 1.31; pitch += 0.26)
         for (let yaw = 0; yaw < 6.28; yaw += 0.393) {
           game.setView(yaw, pitch, dist);
@@ -36,12 +37,21 @@ const sweep = name => page.evaluate(async name => {
           const z = T.MathUtils.clamp(rel.dot(ax), P.tailStation() * C.VS, NOSE_Z * C.VS);
           const hull = rel.addScaledVector(ax, -z).length() - 3.6 * C.VS;       // the test's own 5 m hull: a hair outside the 3.57 u tanks
           minGround = Math.min(minGround, ground); minHull = Math.min(minHull, hull);
-          if (ground < 0.002 || hull < 0.002 || !Number.isFinite(ground + hull))
-            bad.push({ mode, dist, pitch: +pitch.toFixed(2), yaw: +yaw.toFixed(2), ground: +(ground * 1000).toFixed(1), hull: +(hull * 1000).toFixed(1) });
+          /* inside the umbilical tower: its legs' box in the pad's own build units (js/pad.js: TX -21, 9 u
+             square with 0.8 u of floor overhang, z -3 .. 94) */
+          const pm = W.padMatrix();
+          let tower = false;
+          if (pm && c.distanceTo(d.setFromMatrixPosition(pm)) < 0.4) {
+            loc.copy(c).applyMatrix4(inv.copy(pm).invert());
+            tower = Math.abs(loc.x + 21) < 5.3 && Math.abs(loc.y) < 5.3 && loc.z > -3 && loc.z < 94;
+          }
+          if (tower) inTower++;
+          if (tower || ground < 0.002 || hull < 0.002 || !Number.isFinite(ground + hull))
+            bad.push({ mode, dist, pitch: +pitch.toFixed(2), yaw: +yaw.toFixed(2), ground: +(ground * 1000).toFixed(1), hull: +(hull * 1000).toFixed(1), tower });
         }
   }
   game.camera('orbit'); game.setView(2.33, 0, 0.13);
-  return { name, n, minGround_m: +(minGround * 1000).toFixed(1), minHull_m: +(minHull * 1000).toFixed(1), violations: bad.length, first: bad.slice(0, 4) };
+  return { name, n, minGround_m: +(minGround * 1000).toFixed(1), minHull_m: +(minHull * 1000).toFixed(1), inTower, violations: bad.length, first: bad.slice(0, 4) };
 }, name);
 
 let fail = 0;

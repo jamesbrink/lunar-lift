@@ -63,8 +63,8 @@ const SOI_BLEND_HI = SOI_M * 1.4, SOI_BLEND_LO = SOI_M * 0.8;
 /* Collision volumes. The camera may come to rest on these and may slide along them; it may not enter.
    - the two bodies, offset by whatever relief js/world.js reports for the direction the camera sits in,
      so a mountain lifts the camera instead of swallowing it
-   - the launch complex as three ellipsoids in the pad's own build-unit frame (js/pad.js): the mobile
-     launcher's deck, the umbilical tower with its crane, the propellant farm. Three, not one dome
+   - the launch complex as two ellipsoids and a box in the pad's own build-unit frame (js/pad.js): the
+     mobile launcher's deck, the propellant farm, and the umbilical tower as a box. Not one dome
      over the whole site: a dome keeps the camera out of the towers by keeping it off the apron, and
      the view from the apron looking up the stack is the one that makes a Saturn V big
    - the vehicle itself as an ellipsoid along its axis: with the zoom floor at 20 m the viewpoint
@@ -72,10 +72,21 @@ const SOI_BLEND_HI = SOI_M * 1.4, SOI_BLEND_LO = SOI_M * 0.8;
    Damping alone is not enough here, because the target outruns the damping whenever warp, staging or a
    reset moves it, and that step is exactly what lands a camera under the surface.
    PAD_SOLIDS: [radii xyz, centre xyz] */
-/* The tower's ellipsoid is 11 x 11 x 80: tall enough that it is still wider than the lattice's
-   6.4 u half-diagonal at ground level (at 9 x 9 x 58 it pinched to 5.5 u there and the camera could
-   sit inside the steel at 30 m). */
-const PAD_SOLIDS = [[42, 30, 3.5, 0, 0, 0], [11, 11, 80, -21, 0, 46], [26, 20, 15, 52, 38, 6]];
+const PAD_SOLIDS = [[42, 30, 3.5, 0, 0, 0], [26, 20, 15, 52, 38, 6]];
+/* The umbilical tower is a BOX: half-width 6.2 u (the floors' 5.3 plus standoff), z -6 .. 98. As an
+   11 u ellipsoid its skin toward the vehicle stood 10 u from the tower's axis, the vehicle's own
+   collider reached past that, and a camera asked to sit 30 m out on that side had no legal place
+   between the two — three rounds of push-out left it inside the lattice (tools/clip-test.mjs, pad,
+   distance 0.03, yaw 0). A camera inside leaves through the nearer of the four walls; `side` forces
+   the two walls that do not face the vehicle, for the case where the hull pushes it back in. */
+const TOWER = { x: -21, y: 0, hx: 6.2, hy: 6.2, z0: -6, z1: 98 };
+function towerOut(loc, side) {
+  const dx = TOWER.hx - Math.abs(loc.x - TOWER.x), dy = TOWER.hy - Math.abs(loc.y - TOWER.y);
+  if (dx <= 0 || dy <= 0 || loc.z < TOWER.z0 || loc.z > TOWER.z1) return false;
+  if (!side && dx <= dy) loc.x += loc.x > TOWER.x ? dx : -dx;
+  else loc.y += loc.y > TOWER.y ? dy : -dy;
+  return true;
+}
 const SHIP_R = 10 * PAD_SCALE;                               // stage radius; the length is the live span
 const SKIN = 0.02;                                           // km of standoff so nothing z-fights
 const ORIGIN = new THREE.Vector3();
@@ -258,6 +269,7 @@ function collide(pos, map) {
     if (padD2 < 0.09) {                                                       // within 300 m of the complex
       _loc.copy(pos).applyMatrix4(_inv.copy(pm).invert());
       for (const s of PAD_SOLIDS) pushOut(X_AXIS, Y_AXIS, Z_AXIS, s[0], s[1], s[2], _c.set(s[3], s[4], s[5]), _loc);
+      towerOut(_loc, round === 2);
       pos.copy(_loc).applyMatrix4(pm);
     } else if (padD2 > 20 && padD2 < 40) {                                    // 4.5 to 6.3 km out: the assembly building's group
       /* Boxes, not ellipsoids: an ellipsoid that holds a 160 m box is 100 m wider than it. A point

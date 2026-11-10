@@ -494,8 +494,8 @@ These five are carried as written — rule and history together — because `js/
 - `js/entry-fx.js` is one closed mesh drawn back faces only, on `getHeat()` (nothing under 0.5) and
   `getCooking()`. `js/splash-fx.js` draws the water landing.
 - `half` is a reserved word in GLSL ES 3 and the linter does not catch it.
-- Open, intermittent, not fixed: pausing within seconds of automatic staging can leave tens of
-  thousands of pixels changing between paused frames; measured the same before the effects work.
+- Pausing just after automatic staging: 20-36 pixels still change 0.3 s after the pause and 0 from
+  1.2 s on (three runs). The tens of thousands reported earlier did not reproduce on this tree.
 - The flame is one mesh drawn twice: full resolution in the main pass (renderOrder 1), and again
   into the FX target as an eraser with `ZeroFactor / OneMinusSrcAlphaFactor`.
 - Smoke shadows come from the layer-0 `Points` with a `customDepthMaterial` in
