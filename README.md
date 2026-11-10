@@ -189,8 +189,13 @@ One concern per file.
 - `js/exhaust-emit.js` — where parcels are born: nozzles, the smoke trail, ignition steam, lunar dust.
 - `js/exhaust-sim.js` — how they move: drag from the same `airDensity` the vehicle flies in, the
   flame trench, the hull.
-- `js/exhaust-draw.js` — how they are drawn: opaque three-tone puffs that write their own depth,
-  and a shadow-casting pass so the smoke column shades the ground.
+- `js/exhaust-draw.js` — how they are drawn: opaque three-tone puffs that write their own depth
+  and take the fire's colour on the side that faces it, flat grey lenses for lunar dust, hard-edged
+  shards for sparks and flashes, and a shadow-casting pass so the smoke column shades the ground.
+- `js/entry-fx.js` — atmospheric entry, drawn from the flight model's own heat proxy: a bow-shock
+  cap, a sheath of fire and a trailing streak; crimson and shedding fragments when burning up.
+- `js/splash-fx.js` — the splash at a water landing: a crown, droplets, two rings and foam.
+- `js/dust-sheet.js` — the flat sheet of dust a lunar burn drives out along the ground.
 
 ### Worlds
 

@@ -1,15 +1,18 @@
 import * as THREE from 'three';
-import { VS, RE, RM, moonPos } from './constants.js';
+import { VS, RE, RM, EARTH_SPIN, DTPHYS, moonPos, moonVel } from './constants.js';
 import { rocketGroup, stages, lesGroup, bellMetal } from './saturn.js';
-import { airDensity, getSimTime } from './physics.js';
+import { S, airDensity, getSimTime, getState, landing } from './physics.js';
 import { ATMO_TOP } from './aero.js';
 import { TAIL_Z, R_SM_DRAWN } from './stations.js';
 import * as WORLD from './world.js';
-import { nAlive, resetPool, spawnParticle, ship, plumeDebug, SM_SMOKE, SM_SEAM, SM_FLASH } from './exhaust-pool.js';
+import { nAlive, alive, resetPool, spawnParticle as spawn, killKind, ship, plumeDebug, pPos, pVel, pAge, pMode, pSmoke, SM_SMOKE, SM_SEAM, SM_FLASH } from './exhaust-pool.js';
 import { BELL_SETS, emitExhaust, emitIdle, resetEmit } from './exhaust-emit.js';
 import { stepExhaust } from './exhaust-sim.js';
-import { initExhaustDraw, fillExhaust, clearExhaustDraw } from './exhaust-draw.js';
-import { buildFlames, updateFlames, flameReach } from './flame.js';
+import { initExhaustDraw, fillExhaust, clearExhaustDraw, setFireLight } from './exhaust-draw.js';
+import { buildFlames, updateFlames, flameReach, flameWidth, flameTint } from './flame.js';
+import { initEntryFx, updateEntryFx, resetEntryFx } from './entry-fx.js';
+import { initSplashFx, updateSplashFx, resetSplashFx } from './splash-fx.js';
+import { initDustSheet, updateDustSheet, resetDustSheet } from './dust-sheet.js';
 
 /* The vehicle as the rest of the game sees it: the hardware's pose each frame, staging and the
    debris it leaves, and the one entry point that turns "this stage is burning" into fire and smoke.
@@ -18,12 +21,16 @@ import { buildFlames, updateFlames, flameReach } from './flame.js';
      js/exhaust-pool.js  the parcel pool and the spawnParticle contract js/physics.js calls
      js/exhaust-emit.js  where parcels are born: nozzles, smoke trail, ignition steam, lunar ejecta
      js/exhaust-sim.js   how they move: drag, gravity, the trench, the hull
-     js/exhaust-draw.js  how they are drawn: shaded puffs and additive lights, half resolution
-   — and none of it feeds back into js/physics.js. */
-export { spawnParticle, plumeDebug };
+     js/exhaust-draw.js  how they are drawn: shaded puffs, flat lunar dust, hard-edged shards
+   — plus two effects that are not exhaust at all and ride the same per-frame call:
+     js/entry-fx.js      the bow shock, sheath and streak of atmospheric entry
+     js/splash-fx.js     the splash at a water landing
+     js/dust-sheet.js    the flat sheet of dust a lunar burn drives out along the ground
+   None of it feeds back into js/physics.js. */
+export { plumeDebug };
 export { parcelAudit, sprayCensus } from './exhaust-pool.js';
 
-let scene = null;
+let scene = null, wasHome = false, wasOver = false;
 const RHO_SEA = airDensity(0);
 const ZERO_V = new THREE.Vector3();
 buildFlames(stages);
@@ -32,9 +39,67 @@ buildFlames(stages);
    opaque scene) is skipped when there is not. */
 export const plumeLive = () => nAlive > 0;
 
+/* What js/physics.js calls for its sparks and puffs (js/main.js hands it over as vehicleOps).
+   Physics spawns at the TRUE state, inside a 0.1 s step; the picture is the state blended between
+   the last two steps, up to a step behind — 120 m at staging speed, 780 m in orbit — so a burst
+   left where it was spawned stands off ahead of the vehicle it came from (measured at automatic
+   staging: the sparks' first frame 18 m from the drawn stack's centre in two runs, by the luck of
+   the frame's phase; 7 m, the hull's own push, with this).
+   Everything spawned through here is therefore remembered until the next frame and moved by the
+   difference between the vehicle as drawn and the vehicle as it was when they were spawned. */
+const pend = [], pendRef = new THREE.Vector3(), seamOff = new THREE.Vector3();
+let pendT = 0;
+export function spawnParticle(pos, vel, life, color, size0, smoke) {
+  const i = spawn(pos, vel, life, color, size0, smoke);
+  if (pend.length === 0) { pendRef.copy(S.pos); pendT = getSimTime(); }
+  if (pend.length < 400) pend.push(i);
+  return i;
+}
+/* `dt` is what stepExhaust is about to advance them by: taken off first, so that after the step
+   they stand exactly where the drawn vehicle is. Not after an ff() jump (the vehicle has gone), and
+   not when the vehicle itself is gone (the camera stays on the true state). */
+function settle(dt, gone) {
+  if (!gone && Math.abs(getSimTime() - pendT) <= DTPHYS * 1.01) {
+    const sx = ship.pos.x - pendRef.x, sy = ship.pos.y - pendRef.y, sz = ship.pos.z - pendRef.z;
+    for (const i of pend) {
+      if (pMode[i] !== 2 || pAge[i] !== 0) continue;
+      const i3 = i * 3, k = pSmoke[i] === 0 ? 1 : 0;      // the staging sparks come from the seam, not the middle of the stack
+      pPos[i3] += sx + k * seamOff.x - pVel[i3] * dt; pPos[i3 + 1] += sy + k * seamOff.y - pVel[i3 + 1] * dt; pPos[i3 + 2] += sz + k * seamOff.z - pVel[i3 + 2] * dt;
+    }
+  }
+  pend.length = 0; seamOff.set(0, 0, 0);
+}
+
 /* Called once per rendered frame with the simulated dt for that frame (main.js: min(1, real × warp)). */
+const heldV = new THREE.Vector3();
 export function updateParticles(dt) {
-  stepExhaust(dt);
+  const st = getState(), over = st === 'won' || st === 'lost';
+  /* The mission clock stops on an end card and the planets with it. What is left alive is then
+     drawn in the frame of whatever the camera is left looking at: the ground, if the vehicle is on
+     it or in it; the vehicle's own last motion, if it came apart in flight. See stepExhaust. */
+  if (over && !wasOver) {
+    if (S.pos.length() < RE + 1.5) heldV.set(EARTH_SPIN * S.pos.z, 0, -EARTH_SPIN * S.pos.x);
+    else if (S.pos.distanceTo(moonPos(getSimTime(), _dmo)) < RM + 3) moonVel(getSimTime(), heldV);
+    else heldV.copy(S.v);
+  }
+  wasOver = over;
+  /* js/physics.js runs its explosion on every Earth contact before it decides the landing was
+     safe (impact() calls explode() ahead of the splashdown branch), so a good splashdown used to
+     throw 240 burning fragments out from the capsule: half of the yellow smear on the horizon of
+     the reviewer's splash frame (the other half is the stopped clock, above). The capsule is
+     whole; on the frame the mission is won at home those sparks are taken back before anything
+     draws them. */
+  const home = st === 'won' && landing.home;
+  if (home && !wasHome) killKind(0);
+  wasHome = home;
+  const boom = boomAt.x === boomAt.x && !home;
+  if (pend.length) settle(dt, boom || over);
+  if (boom) explosion(boomAt);
+  boomAt.x = NaN;
+  stepExhaust(dt, over ? heldV : null);
+  if (st !== 'flying') resetDustSheet();     // down, lost or back on the pad: no engine, no sheet
+  updateEntryFx();
+  updateSplashFx(dt);
   fillExhaust();
 }
 
@@ -45,12 +110,44 @@ export function initVehicle(target) {
   scene = target;
   scene.add(rocketGroup);
   initExhaustDraw(scene);
+  initEntryFx(scene); initSplashFx(scene); initDustSheet(scene);
 }
 
 export function setVisible(visible) {
   rocketGroup.visible = visible;
   ship.live = visible;     // after the explosion there is no hull to collide with, only wreckage
+  /* js/physics.js hides the vehicle in exactly one place, its explosion, and throws 240 sparks
+     there. The drawn event is decided a frame later (updateParticles), because the same call
+     precedes a safe splashdown, which shows the vehicle again at once. */
+  if (!visible) { boomAt.copy(S.pos); boomVel.copy(S.v); } else boomAt.x = NaN;
 }
+
+/* The explosion, drawn: three spiked flashes along what was the stack, the physics module's sparks
+   as burning slivers, and a knot of dark smoke that billows only if there is air to billow in.
+   All of it rides heldV — the ground's motion if the vehicle met the ground, its own if it came
+   apart in flight. The sparks arrive from js/physics.js with 0.3 of the vehicle's INERTIAL velocity,
+   which on the ground is 0.3 of the planet's spin: they left the crater at 286 m/s, always westward,
+   and in flight fell behind at kilometres a second before a frame was drawn. Their scatter is
+   kept and its base replaced. */
+function explosion(at) {
+  for (let k = 0; k < nAlive; k++) {
+    const i = alive[k], i3 = i * 3;
+    if (pMode[i] !== 2 || pSmoke[i] !== 0 || pAge[i] !== 0) continue;
+    pVel[i3] += heldV.x - 0.3 * boomVel.x; pVel[i3 + 1] += heldV.y - 0.3 * boomVel.y; pVel[i3 + 2] += heldV.z - 0.3 * boomVel.z;
+  }
+  spawn(at, heldV, 0.32, [1, 1, 1], 90, SM_FLASH);
+  for (let k = 0; k < 2; k++) {
+    _sp.set(0, 0, (k ? 1 : -1) * (14 + 10 * Math.random()) * VS).applyQuaternion(ship.quat).add(at);
+    spawn(_sp, heldV, 0.24 + 0.1 * k, [1, 1, 1], 50, SM_FLASH);
+  }
+  for (let k = 0; k < 18; k++) {
+    _trailRnd.randomDirection();
+    _sp.copy(at).addScaledVector(_trailRnd, 0.012 * Math.random());
+    _svv.copy(heldV).addScaledVector(_trailRnd, 0.008 + 0.022 * Math.random());
+    spawn(_sp, _svv, 2.2 + 2.2 * Math.random(), k % 3 ? BOOM_SMOKE : BOOM_SOOT, 5 + 5 * Math.random(), SM_SMOKE);
+  }
+}
+const boomAt = new THREE.Vector3(NaN, 0, 0), boomVel = new THREE.Vector3(), BOOM_SMOKE = [0.36, 0.34, 0.34], BOOM_SOOT = [0.2, 0.19, 0.2];
 
 export function detachStage(mesh, pos, quat) {
   rocketGroup.remove(mesh);
@@ -60,30 +157,24 @@ export function detachStage(mesh, pos, quat) {
 
 export function addDebris(entry) {
   debris.push(entry);
-  /* Staging-seam puffs: the trail flag marks exactly one event in this
-     game — separateStage hands over a flying booster (separateLES and the explosion never set
-     it). A real separation seam bursts a short ring of grey smoke with the flash and the
-     sparks; 6-10 puffs, 0.4-0.8 s, dark and LOW ALPHA (SM_SEAM's fillBuffers pass), drawn as
-     silhouettes against the flash rather than more glowing beads. They stay SMALL in vacuum
-     by construction: growth rides the certified airDensity gate (at the 67 km staging altitude
-     ρ≈0 caps them at a few tenths of m/s over a 0.5 s life), and the ±3 m birth scatter plus
-     5-13 m/s spread keeps them at the seam instead of orbiting it. */
+  entry.ref = S.pos.clone(); entry.t0 = getSimTime();     // see updateDebris: the piece is re-seated on the drawn vehicle
+  /* Staging. The trail flag marks exactly one event in this game — separateStage hands over a
+     flying booster (separateLES and the explosion never set it) — and what is drawn for it is a cel
+     flash at the seam: one spiked star, three flat drawings over a fifth of a second
+     (js/exhaust-draw.js), drawn in a 44 m square against a 59 m stage, plus the sparks js/physics.js throws and
+     a short ring of small dark puffs. It replaces four additive discs that, stacked with the
+     physics module's 26 burst parcels (10-18 m radius, each drawn as a soft light five radii
+     across), made a glowing ball bigger than the vehicle. The puffs stay small in vacuum by construction: their growth rides airDensity. */
   if (entry.trail) {
-    /* Light burst FIRST ("the flash is a lumpy soot-egg … and no light burst"): 4 tiny additive-white parcels
-       (SM_FLASH), 2.2-3.8 m → 15-27 m discs, lives 0.20-0.28 s. They peak at 22 ms — before the
-       seam puffs' 0.10 s fade-in lets any smoke exist — and are gone by 0.28 s. Then the smoke:
-       6-10 puffs, now at 0.13 coverage and 1.8-3.8 m births (was 0.22 / 2.5-4.5) so they ring
-       the seam instead of becoming the "lumpy soot-egg with two detached balls" the review saw. */
-    for (let k = 0; k < 4; k++) {
-      _trailRnd.randomDirection();
-      _sp.copy(entry.mesh.position).addScaledVector(_trailRnd, 0.0012 + Math.random() * 0.0012);
-      _svv.copy(entry.vel).addScaledVector(_trailRnd, 0.001);
-      spawnParticle(_sp, _svv, 0.20 + Math.random() * 0.08, [1, 1, 1], 2.2 + Math.random() * 1.6, SM_FLASH);
-    }
+    const k = stages.findIndex(st => st.meshes === entry.mesh);
+    const seam = k >= 0 && k < 2 ? BELL_SETS[k + 1].tailZ : 26;      // the next stage's exit plane, or the capsule's base
+    _seam.set(0, 0, seam * VS).applyQuaternion(entry.mesh.quaternion).add(entry.mesh.position);
+    spawnParticle(_seam, S.v, 0.2, [1, 1, 1], 44, SM_FLASH);
+    seamOff.subVectors(_seam, S.pos);
     const n = 6 + ((Math.random() * 5) | 0);           // 6..10
-    for (let k = 0; k < n; k++) {
+    for (let j = 0; j < n; j++) {
       _trailRnd.randomDirection();
-      _sp.copy(entry.mesh.position).addScaledVector(_trailRnd, 0.003);
+      _sp.copy(_seam).addScaledVector(_trailRnd, 0.003);
       _svv.copy(entry.vel).addScaledVector(_trailRnd, 0.005 + Math.random() * 0.008);
       spawnParticle(_sp, _svv, 0.4 + Math.random() * 0.4, SEAM_COLOUR, 1.8 + Math.random() * 2, SM_SEAM);
     }
@@ -98,17 +189,27 @@ export function addDebris(entry) {
 export function updateDebris(simDt, accelAt) {
   for (let i = debris.length - 1; i >= 0; i--) {
     const d = debris[i]; d.age += simDt;
+    /* A piece leaves at the true state and is first drawn beside a vehicle drawn up to a step
+       behind it (see spawnParticle above): on its first frame it is moved by that difference. */
+    if (d.ref) {
+      if (ship.live && Math.abs(getSimTime() - d.t0) <= DTPHYS * 1.01)
+        d.mesh.position.add(ship.pos).sub(d.ref).addScaledVector(d.vel, -simDt);
+      d.ref = null;
+    }
     const a = accelAt(d.mesh.position, d.vel, 8, null);
     d.vel.addScaledVector(a, simDt); d.mesh.position.addScaledVector(d.vel, simDt);
     d.mesh.rotation.x += d.angVel.x * simDt; d.mesh.rotation.y += d.angVel.y * simDt;
     if (d.trail) {
       const fall = Math.hypot(d.vel.x, d.vel.y, d.vel.z);
       /* Air-gated: a debris trail is smoke, and smoke needs air. The separation itself happens
-         at the edge of space, where the honest event is the flash (physics.js) and tumbling
-         metal, not a ribbon — the ribbon appears on the way down. */
+         at the edge of space, where the honest event is the flash and tumbling metal, not a
+         ribbon — the ribbon appears on the way down, below about 35 km (rho > 0.02). The gate was
+         0.004, which is 48.7 km — exactly where the shipped ascent stages (48.7 to 49.0 km over
+         the runs measured) — and a stage dropped any lower trailed puffs of up to 16 m radius,
+         drawn 48 m across, behind a 59 m stage. */
       const alt = d.mesh.position.length() - RE;
       const rho = alt < ATMO_TOP ? airDensity(alt) : 0;
-      if (rho > 0.004) {
+      if (rho > 0.02) {
         d.smokeAcc = (d.smokeAcc || 0) + simDt;
         const period = Math.max(0.033, 11 / Math.max(1, fall * 1000));   // ≥11 m apart, ≤30/s
         while (d.smokeAcc >= period) {
@@ -117,8 +218,8 @@ export function updateDebris(simDt, accelAt) {
           _trailPos.copy(d.mesh.position);
           _trailVel.copy(d.vel).multiplyScalar(0.12).addScaledVector(
             _trailRnd.randomDirection(), 0.004);
-          spawnParticle(_trailPos, _trailVel, 2.6 + Math.random() * 1.6, TRAIL_COLOUR,
-            (6 + Math.random() * 8) * spd, SM_SMOKE);
+          spawn(_trailPos, _trailVel, 2.6 + Math.random() * 1.6, TRAIL_COLOUR,
+            (3 + Math.random() * 3) * Math.min(spd, 1.6), SM_SMOKE);
         }
       } else d.smokeAcc = 0;
     }
@@ -135,7 +236,7 @@ export function updateDebris(simDt, accelAt) {
     if (down) {
       for (let k = 0; k < 14; k++) {
         _trailVel.copy(d.vel).multiplyScalar(0.02).addScaledVector(_trailRnd.randomDirection(), 0.012);
-        spawnParticle(d.mesh.position, _trailVel, 2.5 + Math.random() * 2, IMPACT_COLOUR, 5 + Math.random() * 6, SM_SMOKE);
+        spawn(d.mesh.position, _trailVel, 2.5 + Math.random() * 2, IMPACT_COLOUR, 5 + Math.random() * 6, SM_SMOKE);
       }
     }
     if (down || d.age > 400 || rE > 60000 && rE < 300000) { scene.remove(d.mesh); debris.splice(i, 1); }
@@ -150,7 +251,7 @@ function reliefE(p) {
 }
 const SEAM_COLOUR = [0.32, 0.33, 0.36];   // staging-seam smoke: dark grey against the flash
 const _trailPos = new THREE.Vector3(), _trailVel = new THREE.Vector3(), _trailRnd = new THREE.Vector3();
-const _sp = new THREE.Vector3(), _svv = new THREE.Vector3();
+const _sp = new THREE.Vector3(), _svv = new THREE.Vector3(), _seam = new THREE.Vector3();
 
 export function clearDebris() {
   debris.forEach(d => scene.remove(d.mesh)); debris.length = 0;
@@ -159,7 +260,8 @@ export function clearDebris() {
 export function resetStages() {
   /* A new mission starts with clean air. Stale smoke from the previous attempt would hang over
      the pad for its whole remaining life otherwise. */
-  resetPool(); resetEmit(); clearExhaustDraw();
+  resetPool(); resetEmit(); clearExhaustDraw(); resetEntryFx(); resetSplashFx(); resetDustSheet(); setFireLight(ZERO_V, 0, 0);
+  pend.length = 0; boomAt.x = NaN; wasOver = wasHome = false;
   ship.live = true; burnT0 = -1;
   stages.forEach(st => {
     /* detachStage hands a dropped stage to the scene at scale VS; back under rocketGroup (itself VS)
@@ -205,6 +307,13 @@ export function updateBurnVisuals({ pos, quat, vel, throttle, activeIdx, burn, o
     THREE.MathUtils.clamp(om.y, -1, 1) * 0.12, -THREE.MathUtils.clamp(om.x, -1, 1) * 0.12);
   /* A bell that is firing glows. All bells share one material; the others are inside interstages. */
   bellMetal.emissive.copy(on ? _hot : _cold).multiplyScalar(on ? 0.5 * Math.min(1, since * 2) : 1);
-  if (on) emitExhaust(activeIdx, pos, quat, vel, throttle, since, flameReach(activeIdx, throttle, VS));
-  else emitIdle();
+  if (on) {
+    const reach = flameReach(activeIdx, throttle, VS);
+    emitExhaust(activeIdx, pos, quat, vel, throttle, since, reach, flameWidth(activeIdx, VS));
+    /* The fire as a light on the smoke: a third of the way down the flame from the exit plane. */
+    _sp.set(0, 0, bellSet.tailZ * VS - reach * 0.3).applyQuaternion(quat).add(pos);
+    setFireLight(_sp, flameTint(activeIdx), Math.min(1, since * 2) * (0.4 + 0.6 * throttle));
+  } else { emitIdle(); setFireLight(pos, 0, 0); }
+  _sp.set(0, 0, (bellSet ? bellSet.tailZ : 26) * VS).applyQuaternion(quat).add(pos);
+  updateDustSheet(_sp, _svv.set(0, 0, -1).applyQuaternion(quat), on ? throttle : 0);
 }

@@ -68,17 +68,23 @@ These are the rules the frames enforced, in the order they were learned.
   share `js/haze.js`, keyed to the camera's altitude, so the haze is gone by orbit. The Moon, the
   stars, the dome and the weather shell stay unhazed.
 - **Fire is a shape; smoke is a pile of solid puffs.** The flame is a mesh with hard tone bands
-  (`js/flame.js`); smoke, steam and dust are opaque clumps shaded in three flat tones that occlude one
+  (`js/flame.js`); smoke and steam are opaque clumps shaded in three flat tones that occlude one
   another by depth (`js/exhaust-draw.js`). Both replaced blended sprites: additive fire over a pale sky
   washes to white, and alpha smoke composites into fog with no silhouette. A puff leaves by shrinking.
 - **Screen size is capped.** A puff a few metres from the lens would be the whole frame, so points
   are capped on screen and shrink away inside 35 m of the camera.
-- **Ejecta must be lighter than the ground it lifts.** The lunar dust band was specified "brighter than
-  regolith" and sampled at the same 8-bit value as the rendered surface, so the whole sheet vanished
-  into the ground. Out there there is no shadow and no atmosphere to separate them with; the tone does
-  it alone (now `0xf5eedd`). In vacuum the *gas* is faint and the dust is the visible event, so lunar
-  parcels also lose their incandescence faster than Earth parcels lose theirs to air.
-
+- **Ejecta must be lighter than the ground it lifts, and it must not billow.** The lunar dust band
+  was once specified "brighter than regolith" and sampled at the same 8-bit value as the rendered
+  surface, so the whole sheet vanished into the ground; then it was a cream (`0xf5eedd`) drawn as
+  shaded balls, which read as popcorn on grey ground. It is the regolith's own grey one step above
+  the brightest painted class (`0xb9b9bc`), drawn as flat lenses and a rayed sheet lying on the
+  ground: out there there is no shadow and no atmosphere to separate dust from surface, so the tone
+  does it alone, and no air to hold anything up, so nothing is round.
+- **An event is a few flat drawings, not a glow.** The staging flash is a spiked star shown as three
+  drawings over a fifth of a second; a spark is a rhombus; a splash is a crown of two-tone petals,
+  diamonds for droplets and rings on the water; entry heating is a white cap, a yellow-and-orange
+  sheath and a streak, each a flat band with a hard edge. Light that falls on smoke is two flat steps
+  of the fire's colour on the side of each puff that faces it. Nothing in the effects is additive.
 
 ## Consequences for what already shipped
 

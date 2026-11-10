@@ -429,18 +429,37 @@ These five are carried as written — rule and history together — because `js/
   its value: check that a factor is applied to all three components.
 - Spread a frame's parcels along the path the vehicle flew in that frame (`spawnPlume`
   back-projects each by its slice of the step).
-- Earth-side, parcels thin out between 28 and 50 km and none are emitted above 52; nozzle parcels
+- Earth-side, no parcels are emitted above 52 km; nozzle parcels
   are not born more than ~450 m up. Above that the drawn flame is the exhaust. Lunar parcels are
   exempt.
 - The trench hit bleeds tangential velocity to 0.12 on Earth, and `BILLOW` of the deflected parcels
   become the lasting pad cloud.
-- Smoke is opaque, depth-writing, unsorted (`NoBlending`, its own `gl_FragDepth`). Anything
-  translucent is a second, additive draw call.
+- Smoke is opaque, depth-writing, unsorted (`NoBlending`, its own `gl_FragDepth`). Nothing in the
+  exhaust is additive: sparks and the staging flash are opaque shards in the main pass
+  (renderOrder 6).
+- A trail is continuous only when a puff is wider than the gap to the next: trail puffs are born
+  at least a sixtieth of the airspeed in radius, and thin air shortens their life, not their size.
+- The integrator clamps generic parcels to `R_CAP` (16 m); growth-free kinds are exempt.
+- A clustered stage has one merged envelope under its jets; it widens on `vac²` and thins on `vac³`.
+- The fire lights the smoke in the puff shader (`setFireLight`); there is no scene light for it.
+- Lunar dust is flat grey lenses plus `js/dust-sheet.js` on `moonGroundHeight`; free gas is not
+  drawn in vacuum.
+- On an end card `stepExhaust(dt, frame)` advances parcels relative to the frozen frame, or they
+  slide off at the planet's spin.
+- `impact()` calls `explode()` before the splashdown branch; `js/vehicle.js` decides the drawn event
+  a frame later and takes the sparks back at a safe splashdown.
+- Physics spawns at the true state and the picture is up to a step behind: parcels and dropped
+  stages spawned by physics are re-seated on the drawn vehicle the next frame.
+- `js/entry-fx.js` is one closed mesh drawn back faces only, on `getHeat()` (nothing under 0.5) and
+  `getCooking()`. `js/splash-fx.js` draws the water landing.
+- `half` is a reserved word in GLSL ES 3 and the linter does not catch it.
+- Open, intermittent, not fixed: pausing within seconds of automatic staging can leave tens of
+  thousands of pixels changing between paused frames; measured the same before the effects work.
 - The flame is one mesh drawn twice: full resolution in the main pass (renderOrder 1), and again
   into the FX target as an eraser with `ZeroFactor / OneMinusSrcAlphaFactor`.
 - Smoke shadows come from the layer-0 `Points` with a `customDepthMaterial` in
   `js/exhaust-draw.js`, not from the puffs.
-- Smoke growth multiplies `airDensity(alt)`; debris trails are gated at ρ > 0.004. Nothing grows in
+- Smoke growth multiplies `airDensity(alt)`; debris trails are gated at ρ > 0.02. Nothing grows in
   vacuum.
 - Soft, fill-bound layers go in `js/halfres.js`. A shader there sees pixels twice the size (scale
   footprints and point sizes by `RES_SCALE`); a new opaque mesh goes through `occlude()` or smoke
@@ -560,6 +579,7 @@ await tab.evaluate(`(async () => {
 - `js/saturn.js` — the Saturn V as drawn hardware and the stage records (imported headless: must tolerate having no canvas).
 - `js/chutes.js` — the drawn drogues and mains; what is deployed is `physics.js`'s state.
 - `js/vehicle.js` — the conductor: pose, staging (`detachStage`, `resetStages`), debris, and `updateBurnVisuals`, which turns "this stage is burning" into calls on the five exhaust modules.
+- `js/entry-fx.js` — entry heating. `js/splash-fx.js` — the splash of a water landing. `js/dust-sheet.js` — the sheet of dust a lunar burn drives along the ground. All display-only, riding `updateParticles`.
 - `js/flame.js` — the drawn flames. `js/exhaust-pool.js` — the parcel pool and `spawnParticle`. `js/exhaust-emit.js` — where parcels are born. `js/exhaust-sim.js` — how they move (the largest; its lunar and Earth branches are the next split if it grows). `js/exhaust-draw.js` — how they are drawn, and their shadow caster.
 
 **Worlds**
@@ -794,6 +814,77 @@ await tab.evaluate(`(async () => {
   ordered dither survives the exhaust's tent as a weave, white noise does not (the weather no longer
   dithers or uses the tent: it writes ramps and the main pass cuts them); and the shell's mesh density
   buys nothing — 512 × 256 cost ~1 ms over 192 × 96 for the same picture.
+
+- **A column is continuous when a puff is wider than the gap to the next one, and for no other
+  reason.** The trail is laid at 60 puffs a second at most, so past 150 m/s the gap grows with the
+  speed and a fixed 3 m puff becomes beads: measured at 27 km and 714 m/s, puffs drawn 10 m across
+  stood a median 13 m apart. A trail puff is now born with a radius of at least a sixtieth of the
+  airspeed and half the width of the fire it leaves (drawn 37 m across there, median gap 11 m), and
+  the thin air shortens the column through the puffs' LIFE, not their size. A puff smaller than
+  2.4 px of the half-resolution pass is drawn at up to that until it is a third of a pixel, or the
+  far column breaks into the dots that survive the cut.
+  by shrinking. Hard tone edges at half resolution show a stair-step at deviceScaleFactor 1.
+- **Nothing in the exhaust is additive any more.** Sparks, burning fragments and the staging flash
+  were additive discs with a bright heart and two rings; twenty-six of them at a seam were a soft
+  ball of light bigger than the vehicle. They are opaque shapes now, in the main pass at full
+  resolution over the smoke layer (`shards`, renderOrder 6): a spark is a thin rhombus, the flash a
+  spiked star shown as three flat drawings, one after another. Two things bit while making them: the
+  integrator clamps EVERY generic parcel's radius to `R_CAP` (16 m), so a flash asked for at 34 m was
+  silently 16 until growth-free kinds were exempted; and a point sprite stood on the vehicle's axis is
+  inside the hull, so only the tips of its points showed round the stack until the star was drawn
+  nearer the eye by its own radius.
+- **The fire lights the smoke in the puff shader, with no light in the scene.** `setFireLight`
+  hands the puffs the flame's position, colour and strength; a puff takes the fire's colour on the
+  side facing it, in two flat steps, at a strength that falls in three steps with distance (260 m at
+  night; 140 m and 0.38 as strong by day). Night smoke also takes a lighter top and a darker
+  underside from the sky, or it is one flat lavender.
+- **Lunar dust is flat, grey and ballistic.** No air, so no billow: a dust parcel is drawn as a lens
+  lying in the ground plane, long axis on the line from the point under the engine, and the sheet
+  the engine drives out along the ground is a mesh of its own (`js/dust-sheet.js`: a polar grid stood
+  on `moonGroundHeight`, rays cut per fragment). Both are a step lighter than the brightest painted
+  regolith class, because out there the tone is all that separates dust from ground. Free gas is not
+  drawn at all in vacuum; the flame mesh is the fire.
+- **When the mission clock stops, the exhaust must stop riding the planet.** `js/main.js` freezes
+  the clock on an end card, so the bodies stand still, but parcel velocities are inertial: the air
+  over the pad does 409 m/s and the Moon's ground 1 km/s. Everything alive at the end slid away over
+  the frozen ground — measured after a crash by the pad, the wreck's sparks a median 741 m off at the
+  first look and 1,567 m 1.5 s later; that, and the next rule, were the "yellow smear on the horizon"
+  of a splashdown. `stepExhaust(dt, frame)` now advances positions relative to the frame the picture
+  is frozen in (the ground under the vehicle, or the vehicle's last velocity if it came apart in
+  flight): 47 m and 75 m in the same test.
+- **`js/physics.js` explodes first and asks afterwards.** `impact()` calls `explode()` on every
+  Earth contact before the splashdown branch, so a good splashdown threw 240 burning sparks, and it
+  gives every explosion's sparks 0.3 of the vehicle's INERTIAL velocity — on the ground that is 0.3
+  of the planet's spin, so they left a crater at 286 m/s, always the same way, and in flight they
+  were kilometres behind before a frame was drawn. `js/vehicle.js` decides the drawn event a frame
+  later: none at a safe splashdown (the sparks are taken back), otherwise flashes, smoke and the
+  same sparks re-based on the ground or on the vehicle.
+- **Anything physics spawns is spawned at the true state; the picture is up to a step behind it.**
+  The drawn vehicle is the last two 0.1 s steps blended, so a burst left where physics put it stands
+  ahead of the vehicle it came from (18 m at staging in the runs measured; the bound is a step of
+  flight, 120 m there). The `spawnParticle` that `js/main.js` hands to physics remembers what it
+  spawned, and on the next frame those parcels — and a dropped stage — are moved by the difference
+  between the vehicle as drawn and as it was.
+- **Entry heating is a closed body drawn inside out.** `js/entry-fx.js` is one mesh of revolution
+  about the air-relative velocity (bow-shock cap, sheath, streak), back faces only, depth-tested: a
+  closed surface has exactly one back face behind each pixel of its outline, so the shape fills once
+  with no sorting, and the vehicle — nearer than the far wall — covers its middle and stays readable.
+  It runs on `getHeat()` (nothing under 0.5; the shipped ascent peaks at 0.09) and turns crimson and
+  spiked with `getCooking()`.
+- **`half` is a reserved word in GLSL ES 3.** `float half = …` passes `tools/shader-lint.mjs` and
+  fails in the browser with "Illegal use of reserved word"; the object simply is not drawn.
+- **Open, measured, not fixed (not the exhaust's):** pausing within a few seconds of automatic
+  staging can leave 32,000-170,000 pixels changing between consecutive screenshots of the paused
+  frame (seven runs). The same script gives 79,000-103,000 on the commit before this work (three
+  runs), with different effects on screen, so it is upstream of them; the particle pool is still (the flash parcel stays
+  alive). Run to run it is intermittent — other runs of the same pause read 0.
+- **A cluster's fire is one shape, and it opens on a different clock from the one it thins on.**
+  Five jets a bell wide and half a stage long were "three short tongues". Each clustered stage now
+  carries an envelope tube under its jets — the merged fire — whose outline swells with `vac²`
+  (0.34 at 15 km, 0.63 at 27, 0.89 at staging) to several hull diameters, while the paint goes from
+  opaque to flat veils on `vac³`, so the flame is still solid colour at 15 km. The jets keep the
+  shock diamonds and the soot collar. The additive halo sprite is gone: it was the one soft thing
+  left in the picture.
 
 ### Camera, map and trajectory ribbon
 

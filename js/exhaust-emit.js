@@ -68,8 +68,8 @@ export function resetEmit() { emitAcc = trailAcc = steamAcc = 0; bellCursor = 0;
    flown, not per frame rendered. A jump past the cap thins the plume instead of banking a backlog.
    `since` is seconds since this burn lit: the first moment of an engine start is water and steam,
    and the fire's share of the parcels comes up behind it. `reach` is where the drawn flame ends, km
-   aft of the exit plane — the trail starts there. */
-export function emitExhaust(idx, pos, quat, vel, throttle, since, reach) {
+   aft of the exit plane, and `width` its radius there in metres — the trail starts there, that wide. */
+export function emitExhaust(idx, pos, quat, vel, throttle, since, reach, width) {
   const set = BELL_SETS[idx];
   if (!set) { plumeDebug.causeBell++; return; }
   const t = getSimTime();
@@ -88,7 +88,7 @@ export function emitExhaust(idx, pos, quat, vel, throttle, since, reach) {
   const low = onMoon ? 1 : 1 - THREE.MathUtils.smoothstep(alt - groundAlt(pos), 0.25, 0.45);
   if (low > 0) spawnPlume(set, pos, quat, vel, throttle * start, sdt * low, onMoon); else emitAcc = 0;
   if (!onMoon) {
-    if (set.trail) spawnTrail(set, pos, quat, vel, throttle, sdt, alt, reach);
+    if (set.trail) spawnTrail(set, pos, quat, vel, throttle, sdt, alt, reach, width);
     if (idx === 0 && since < STEAM_FOR) spawnSteam(pos, since, sdt);
   }
 }
@@ -102,12 +102,19 @@ export function emitIdle() { emitAcc = trailAcc = steamAcc = 0; lastSpawnT = get
 
 /* The smoke column. Exhaust that has left the flame has given its speed to the air, so a trail puff
    is born where the fire ends, nearly at rest in the AIR's frame (the atmosphere rides the planet's
-   spin, as js/physics.js drags the vehicle with), with a little of the jet's push left in it. It is
-   one puff every 2.5 m of ground-relative flight up to the stage's `trail` rate: a vehicle standing on
-   the pad lays none — the cloud there is deflected exhaust and steam — and a fast one lays them as
-   far apart as the pool affords. Life shortens as the air thins, because the puff is drawn by
-   entrainment and there is less and less to entrain. */
-function spawnTrail(set, pos, quat, vel, throttle, simDt, alt, reach) {
+   spin, as js/physics.js drags the vehicle with), with a little of the jet's push left in it. A
+   vehicle standing on the pad lays none — the cloud there is deflected exhaust and steam.
+
+   The column is continuous because a puff is never narrower than the gap to the next one. Puffs are
+   laid one every 2.5 m of flight through the air up to the stage's `trail` rate, and past that rate
+   they are born wider instead: radius at least a sixtieth of the airspeed, and never less than half
+   the width of the fire they come out of, which by then has opened as wide. It used to be a
+   2.6-3.5 m puff whatever the speed. Measured at 27 km, 714 m/s through the air: young puffs then
+   had a radius of 3.4 m (drawn 10 m across) with a median 13 m between them — the dotted line of
+   the review — and now 12.2 m (drawn 37 m across) with a median 11 m between them. The air thins
+   the column honestly instead: a puff's LIFE falls with the density, so the column gets shorter,
+   tapers over its last 40 %, and is gone by 52 km, where emission stops. */
+function spawnTrail(set, pos, quat, vel, throttle, simDt, alt, reach, width) {
   const rhoN = airDensity(Math.max(0, alt)) / airDensity(0);
   const wx = airVel(pos, _air).x, wz = _air.z;                    // the air's inertial velocity here
   const gs = Math.hypot(vel.x - wx, vel.y, vel.z - wz) * 1000;   // m/s through the air
@@ -117,6 +124,8 @@ function spawnTrail(set, pos, quat, vel, throttle, simDt, alt, reach) {
   if (n === 0) return;
   _ax.set(0, 0, -1).applyQuaternion(quat);                        // the way the exhaust leaves
   const span = simDt / n;
+  const r0 = Math.min(15, Math.max(2.6, gs / 60, 0.5 * (width || 0)));
+  const thin = 1 - THREE.MathUtils.smoothstep(alt, 36, 52);
   for (let c = 0; c < n; c++) {
     const tau = (c + Math.random()) * span;                       // see spawnPlume: one frame is not one instant
     /* Born at the flame's tip, in a narrow range: spread along the flame's last 40 % the column began
@@ -134,8 +143,9 @@ function spawnTrail(set, pos, quat, vel, throttle, simDt, alt, reach) {
     const kick = 0.014 + 0.008 * Math.random();
     _svv.set(wx + _ax.x * kick + (Math.random() - .5) * 0.004, _ax.y * kick + (Math.random() - .5) * 0.004,
              wz + _ax.z * kick + (Math.random() - .5) * 0.004);
-    spawnParticle(_sp, _svv, (6 + 3 * Math.random()) * (0.35 + 0.65 * Math.min(1, rhoN * 6)), TRAIL_COLOUR,
-      2.6 + 0.9 * Math.random(), SM_TRAIL);          // thin at the flame, swelling as it mixes (js/exhaust-sim.js)
+    const life = (6 + 3 * Math.random()) * (0.35 + 0.65 * Math.min(1, rhoN * 6)) * (0.12 + 0.88 * thin);
+    const i = spawnParticle(_sp, _svv, life, TRAIL_COLOUR, r0 * (0.85 + 0.3 * Math.random()), SM_TRAIL);   // swells as it mixes (js/exhaust-sim.js)
+    pAge[i] = tau; pLife[i] = Math.max(0.05, life - tau);
   }
 }
 const TRAIL_COLOUR = [0.80, 0.78, 0.74];
@@ -297,7 +307,10 @@ export function ejectaEvents(gx, gy, gz, nx, ny, nz, rx, ry, rz) {
          more than vmax ≤ 0.59 km/s inside any plausible burn height (128 km/sqrt… beyond the
          game's own ceiling), and min() keeps the cap explicit for whoever scales vmax next. */
       const vv = Math.min(1.5, vmax * (0.14 + 0.86 * u * u * u));   // steep cubic: median 0.25·vmax
-      /* Elevation 2°…30°, cubic-dense at the flat end (median 5.5°, p90 21°). The previous law
+      /* Elevation 1°…12°, cubic-dense at the flat end (median 2.4°). It was 2°…30°, and the top
+         parcels of that law (65 m/s at 29°) rode 350 m arcs — in a frame from 160 m that is dust
+         hanging in the sky over the vehicle, which is billowing by another name. At 12° the same
+         parcel tops out at 56 m. History of that older law, kept for its reasons: (the law before it
          (10° + 58°·r²) drew a MEDIAN of 24.5° — with the cubic speed law that put the common
          parcel on an apex of tens of metres and the fast ones (v·sinβ = 27 m/s at 68°) on
          1.4 km arcs: the 6 m capture frame showed the field as cream bokeh drifting at CAMERA
@@ -305,7 +318,7 @@ export function ejectaEvents(gx, gy, gz, nx, ny, nz, rx, ry, rz) {
          gathered closer. Apollo's dust was a low radial sheet hugging the ground — apex is
          v²sin²β/2g_moon with g = 1.62, and 30° cubic caps the median apex at ~1 m with the
          top parcel (65 m/s @ 29°) at ~350 m, 1.7 km out, where it reads as distance, not fog. */
-      const beta = (2 + 28 * Math.pow(Math.random(), 3)) * Math.PI / 180;
+      const beta = (1 + 11 * Math.pow(Math.random(), 3)) * Math.PI / 180;
       const cb = Math.cos(beta), sb = Math.sin(beta);
       /* birth scatter inside the footprint, denser toward the axis (r ∝ √u over the disc):
          near-engine density comes from where parcels are BORN now, not from a uniform point
@@ -321,7 +334,7 @@ export function ejectaEvents(gx, gy, gz, nx, ny, nz, rx, ry, rz) {
       /* 0.5-2.2× size spread about the 3 m base (median 1.1×): uniform discs were half of why the
          sheet read as lens bokeh — bokeh is uniform by definition. */
       const sm = 0.5 + 1.7 * Math.pow(Math.random(), 1.5);
-      spawnParticle(_sp, _svv, 1.6 + Math.random() * 1.4, SPRAY_COLOUR, 3 * sm, SM_SPRAY);
+      spawnParticle(_sp, _svv, 1.6 + Math.random() * 1.4, SPRAY_COLOUR, 2.2 * sm, SM_SPRAY);
     }
   }
 
