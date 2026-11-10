@@ -261,7 +261,7 @@ let gLoad = 0, gOver = 0;
 export const getG = () => gLoad;
 /* Swing arms: 0 across the stack, 1 swung clear. They start to move at ignition and take
    ARM_TIME; until they are most of the way round they are solid (js/colliders.js). */
-let armSwing = 0;
+let armSwing = 0, strandTick = 0;
 /* Mission time at which the hold-down let go. The pitch program runs on time SINCE then: waiting
    on the pad is how the launch window is moved, and a program on the mission clock tipped a
    late launch into the swing arms half a second after ignition. */
@@ -347,8 +347,13 @@ export function separateStage() {
   const lat = new THREE.Vector3(1, 0, 0).applyQuaternion(S.q);
   vehicleOps.addDebris({ mesh, vel: S.v.clone().addScaledVector(lat, 0.03).addScaledVector(PAD_UP, -0.005),
     angVel: new THREE.Vector3(Math.random() * 0.6, Math.random() * 0.6, Math.random() * 0.6), age: 0, trail: 1 });
-  for (let k = 0; k < 26; k++) vehicleOps.spawnParticle(worldPos,
-    S.v.clone().addScaledVector(lat, 0.02 + Math.random() * 0.05).add(new THREE.Vector3().randomDirection().multiplyScalar(0.015)), 0.6 + Math.random() * 0.5, [1, .8, .4], 10 + Math.random() * 8, 0);
+  /* The burst is a fireball only where there is air to burn in and to hold it together. In vacuum
+     the same 26 parcels at 10-18 m hung as large glowing soft discs round the stage (playtest, 683 km):
+     there it is a few small, brief flashes and the sparks below. */
+  const thin = airDensity(Math.max(0, S.pos.length() - RE)) < 0.004 || overMoon();
+  for (let k = 0, n = thin ? 7 : 26; k < n; k++) vehicleOps.spawnParticle(worldPos,
+    S.v.clone().addScaledVector(lat, 0.02 + Math.random() * 0.05).add(new THREE.Vector3().randomDirection().multiplyScalar(0.015)),
+    thin ? 0.25 + Math.random() * 0.2 : 0.6 + Math.random() * 0.5, [1, .8, .4], thin ? 2.5 + Math.random() * 2 : 10 + Math.random() * 8, 0);
   /* The 26 soft puffs alone read as "a single small soft white ellipse, no debris or spark"
      (review2/14). A real separation event also throws hot hardware: 9 spark parcels — smoke = 0
      so they draw additive like the explosion's sparks, 2 m at birth, 1.4–2.0 s — spread radially
@@ -745,10 +750,28 @@ export function orbitalElements(rVec, v, mu, R_body) {
   return { pe, ap, a, e, escape: E >= 0 };
 }
 
+/* A flight with nothing left to burn and nowhere it will ever come down is over; it used to coast
+   on for ever with no card. Decided only once the engines are truly out of propellant, and only
+   for paths that stay up: a closed orbit clear of the air (or of the Moon's ground), or an escape. */
+function stranded(dom, r) {
+  for (const st of stages) if (!st.separated && st.fuel > 0) return;
+  const el = dom === 'moon' ? orbitalElements(_md.subVectors(S.pos, _moon), navVel(_nv), MU_M, RM) : orbitalElements(S.pos, S.v, MU_E, RE);
+  const body = dom === 'moon' ? 'the Moon' : 'the Earth';
+  if (!el.escape && el.pe > (dom === 'moon' ? 2 : 130) && (dom === 'moon' || el.ap < MOON_DIST * 0.8)) {
+    state = 'lost';
+    hooks.addLog(`STRANDED — NO PROPELLANT, ORBITING ${body.toUpperCase()} ${Math.round(el.pe)} × ${Math.round(el.ap)} km`, 'bad');
+    hooks.showEndOverlay('STRANDED IN ORBIT', `No propellant is left, and this orbit (${Math.round(el.pe)} × ${Math.round(el.ap)} km round ${body}) never comes down. ${dom === 'moon' ? 'Keep enough for the landing burn: the stage readout shows the delta-v you have left.' : 'To come home a path has to dip into the air: leave periapsis under 60 km before the tank runs dry.'}`, 'RETRY');
+  } else if (dom === 'earth' && el.escape && r > MOON_DIST * 1.3) {
+    state = 'lost';
+    hooks.addLog('LOST — LEAVING THE EARTH WITH NO PROPELLANT', 'bad');
+    hooks.showEndOverlay('LOST IN SPACE', 'The vehicle is past the Moon on an escape path with empty tanks. The translunar burn only needs an apoapsis AT the Moon: cut the engine when the NEXT line says you are on course.', 'RETRY');
+  }
+}
 function checkMissionEvents() {
   moonPos(simTime, _moon);
   const r = S.pos.length(), rM = S.pos.distanceTo(_moon);
   const dom = rM < SOI_M ? 'moon' : 'earth';
+  if ((strandTick += 1) % 50 === 0) { stranded(dom, r); if (state !== 'flying') return; }
   if (dom === 'earth') {
     const el = orbitalElements(S.pos, S.v, MU_E, RE);
     if (!tliLogged && (el.ap >= MOON_DIST - SOI_M || el.escape)) { tliLogged = true; hooks.addLog('TRANSLUNAR INJECTION ACHIEVED — COAST TO THE MOON', 'good'); }

@@ -494,6 +494,6 @@ export function updateNavball() {
   const heading = Math.atan2(nose.dot(info.east), nose.dot(info.north)) * 57.2958;
   const set = (id, v) => { const el = document.getElementById(id); if (el) el.textContent = v; };
   set('nPitch', `${pitch >= 0 ? '+' : ''}${pitch.toFixed(0)}°`);
-  set('nHeading', `${((heading + 360) % 360).toFixed(0)}°`);
+  set('nHeading', Math.abs(pitch) > 86 ? '—' : `${((heading + 360) % 360).toFixed(0)}°`);   // straight up or down has no heading: it read 209° on the pad
   set('nBurn', isBurning() ? 'burning' : 'idle');
 }
