@@ -199,7 +199,11 @@ function mission(phase, { trace = false, capture = true, stopAtPeri = false } = 
       P.setTargetThrottle(0);
       if (P.S.v.dot(P.S.pos) / rE < 0) apPass = apPass || P.getSimTime();
       if (apPass && altE < PARK_AP + 60 && fuel > 0) {
-        ev.tliIgn = { t: +P.getSimTime().toFixed(0), vInert: +P.S.v.length().toFixed(4) };
+        /* lead: how far the Moon is ahead of the ship along the orbit at ignition, rad — the number
+           js/hud.js's "translunar burn in mm:ss" cue counts down to (TLI_LEAD in js/constants.js). */
+        C.moonPos(P.getSimTime(), moon);
+        const lead = ((angOf(moon) - angOf(P.S.pos)) % (2 * Math.PI) + 2 * Math.PI) % (2 * Math.PI);
+        ev.tliIgn = { t: +P.getSimTime().toFixed(0), vInert: +P.S.v.length().toFixed(4), lead: +lead.toFixed(4), altE: +altE.toFixed(0) };
         P.setSas(true, false); P.setTargetThrottle(1); mode = 'tli';
       } else if (P.getSimTime() > 40000) mode = 'dry';
     } else if (mode === 'tli') {

@@ -64,7 +64,9 @@ function needsSeed() {
   if (seed.t < 0) return true;
   if (getEngineOn() && getThrottle() > 0.02) return true;    // thrust invalidates the prediction
   if (getSimTime() > bestT) return true;                     // the encounter it predicted has passed
-  if (performance.now() - lastStart > 20000) return true;    // belt and braces
+  /* (A 20 s 'belt and braces' re-seed used to sit here. A coast does not change its own answer, and
+     the restart republished 'best so far' ranges on a loop — 92,570 → 170,146 → 139,093 → … — and at
+     under ~43 fps never let a scan finish at all.) */
   return false;
 }
 

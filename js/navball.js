@@ -27,6 +27,7 @@ export function initNavball(ballCanvas, orbCanvas) {
 
 const _iq = new THREE.Quaternion();
 const Z = new THREE.Vector3(0, 0, 1);
+const POLE = new THREE.Vector3(0, 1, 0);
 const toBody = v => v.clone().applyQuaternion(_iq.copy(S.q).invert());
 
 /* a world direction becomes a point on the unit sphere in the rocket frame; the
@@ -98,7 +99,7 @@ function horizonArc(u, steps = 64) {
 
 function localFrame(r) {
   const up = r.clone().normalize();
-  const north = Z.clone().addScaledVector(up, -Z.dot(up));
+  const north = POLE.clone().addScaledVector(up, -POLE.dot(up));   // the spin axis is +Y; this was +Z, and HDG read 214° for a true 110°
   if (north.lengthSq() < 1e-9) north.set(1, 0, 0);
   north.normalize();
   const east = north.clone().cross(up).normalize();

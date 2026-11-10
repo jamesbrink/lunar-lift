@@ -1,9 +1,10 @@
 import * as THREE from 'three';
-import { RE, RM, MU_E, MU_M, SOI_M, MOON_DIST, PAD_UP, PAD_POS, WARPS, SPECS, CAPSULE_MASS, LAND_SAFE, SAFE_EARTH, moonPos } from './constants.js';
+import { RE, RM, MU_E, MU_M, SOI_M, MOON_DIST, PAD_UP, PAD_POS, WARPS, SPECS, CAPSULE_MASS, LAND_SAFE, SAFE_EARTH, TLI_LEAD, MOON_RATE, MOON_U, MOON_V, moonPos } from './constants.js';
 import { stages } from './saturn.js';
 import { S, getState, getSimTime, getEngineOn, getThrottle, getWarpIndex, getSasOn, getSasRetro, getDistFlown, getMaxQ, getTrail, activeStage, orbitalElements, getControlAuthority, groundVel, bodyUp, navVel, surfaceAlt, aeroState, getAeroLoad, getRcsAssist, getHold, getStrain, getChute, getHeat, getCooking, isCapsule, HEAT_SHIELD, CHUTE, totalMass, landing, LOAD_LIMIT_STACK, LOAD_LIMIT_CSM } from './physics.js';
 import { getCamMode, getMapFocus } from './camera.js';
 import { CORRIDOR } from './targeting.js';
+import { coarseAim } from './mapview.js';
 import { drawn } from './predictor.js';
 import * as WORLD from './world.js';
 import { initNavball, updateNavball } from './navball.js';
@@ -97,7 +98,7 @@ export function endOverlay(title, body, btn) {
    state the readouts show — nothing here is scripted to a clock, so it is right for any flight. */
 const K = k => `<kbd>${k}</kbd>`;
 function nextStep({ state, engineOn, live, i, dry, altE, alt, nearMoon, el, radial, speed }) {
-  if (state === 'pad') return engineOn ? ['Engines building thrust — hold on', 'ok']
+  if (state === 'pad') return engineOn ? ['Liftoff — climb straight, the tower is right beside you', 'ok']
     : [`${K('SPACE')} ignite · then ${K('P')} lets SAS fly the ascent`];
   if (state !== 'flying') return [''];
   if (i < 0 && !nearMoon) {                       // the command module alone: coming home
@@ -108,7 +109,7 @@ function nextStep({ state, engineOn, live, i, dry, altE, alt, nearMoon, el, radi
     if (altE > 120) return el.pe > 60 ? [`Capsule only. To come home: retrograde burn is gone — you need a path that meets the air (periapsis ${Math.round(el.pe)} km)`, 'warn']
       : [`Re-entry ahead — heat shield first: ${K('V')} ${K('P')} retrograde before the air; ${K('G')} is for later`];
     if (ch === 1) return q < CHUTE.mains.tear * 0.8 && altE < 6 ? [`${K('G')} MAIN PARACHUTES — now`, 'ok']
-      : [`Drogues out — mains (${K('G')}) once under ${CHUTE.mains.tear / 1000} kPa: now ${(q / 1000).toFixed(1)}`];
+      : [`Drogues out — mains (${K('G')}) below 6 km and under ${CHUTE.mains.tear / 1000} kPa: now ${altE.toFixed(1)} km, ${(q / 1000).toFixed(1)} kPa`];
     if (q < CHUTE.drogue.tear * 0.8 && altE < 12 && radial < 0) return [`${K('G')} DROGUE CHUTES — now`, 'ok'];
     return getHeat() > HEAT_SHIELD ? [`Entry — heat shield is taking it. Ride it out; drogues under ${CHUTE.drogue.tear / 1000} kPa (now ${(q / 1000).toFixed(0)})`, 'warn']
       : [`Falling — drogues (${K('G')}) once under ${CHUTE.drogue.tear / 1000} kPa and below 12 km: now ${(q / 1000).toFixed(1)} kPa`];
@@ -131,22 +132,26 @@ function nextStep({ state, engineOn, live, i, dry, altE, alt, nearMoon, el, radi
       if (margin < Math.max(2, speed * 20)) return [`Brake in ${Math.max(0, margin / Math.max(vs / 1000, 1e-4)).toFixed(0)} s — retrograde ${K('V')} ${K('P')}, then ${K('⇧')}`, 'warn'];
       return [`Falling: ${alt.toFixed(alt < 10 ? 1 : 0)} km up, needs ${stop.toFixed(1)} km to stop — coast, stay retrograde`];
     }
+    /* Burning with far more room than the stop needs is how a tank is emptied 900 km up: say so. */
+    if (live && (vs <= 0 || alt > 2.5 * stop + 5)) return [`Periapsis is below the surface — cut the engine (${K('SPACE')}) and coast down; brake when this line says BRAKE NOW`, 'warn'];
     if (alt > 2) return [`Braking — ${Math.round(speed * 1000)} m/s to lose, ${stop.toFixed(1)} km needed of ${alt.toFixed(1)} km`, stop > alt ? 'bad' : 'ok'];
     return vs > LAND_SAFE * 1000 ? [`BRAKE — ${vs.toFixed(0)} m/s down, touch under ${LAND_SAFE * 1000} m/s`, 'bad']
       : [`Good descent: ${vs.toFixed(0)} m/s — keep it under ${LAND_SAFE * 1000} m/s and upright`, 'ok'];
   }
+  if (altE < 120 && el.ap < 140 && !live) return [`Engine is off and you are not in orbit — ${K('SPACE')} to relight`, 'bad'];
+  if (altE < 120 && el.ap < 140 && getSasOn() && getSasRetro()) return [`SAS is aiming RETROGRADE — ${K('V')} to point it prograde`, 'warn'];
   if (altE < 120 && el.ap < 140) return getSasOn() ? ['SAS is flying the gravity turn — watch apoapsis climb', 'ok']
     : [`${K('P')} SAS flies the gravity turn — or pitch east by hand with ${K('D')}`];
   if (el.escape || el.ap > MOON_DIST * 0.9) {
-    if (!isFinite(aim.altKm)) return [`Translunar — ${K('M')} map; computing your lunar aim…`];
+    if (!isFinite(aim.altKm)) { const c = coarseAim(); return isFinite(c) && c < 2e5 ? [`${live ? 'Burning' : 'Translunar'} — rough lunar pass ${c < 0 ? 'IMPACT' : Math.round(c).toLocaleString() + ' km'} (want ${CORRIDOR.lo}–${CORRIDOR.hi}); exact figure when the engine is off`, c >= CORRIDOR.lo && c <= CORRIDOR.hi ? 'ok' : 'warn'] : [`Translunar — ${K('M')} map; computing your lunar aim…`]; }
     if (aim.altKm < 0) return ['Lunar aim is an IMPACT — trim with a short retrograde burn', 'bad'];
     return aim.corridor ? [`On course: ${Math.round(aim.altKm)} km lunar pass — warp with ${K(']')} and coast`, 'ok']
       : [`Lunar pass ${Math.round(aim.altKm).toLocaleString()} km — want ${CORRIDOR.lo}–${CORRIDOR.hi}: trim pro/retrograde`, 'warn'];
   }
   if (el.pe < 140) return live ? [`Keep burning prograde until periapsis clears 150 km (now ${el.pe < 0 ? 'below ground' : Math.round(el.pe) + ' km'})`]
     : [`Not in orbit yet — burn prograde (${K('P')} + ${K('⇧')}) near apoapsis to raise periapsis`, 'warn'];
-  return live ? [`Translunar burn — hold prograde until apoapsis reaches the Moon (${Math.round(el.ap).toLocaleString()} km)`]
-    : [`Parking orbit ✓ — at periapsis, burn prograde (${K('P')} + ${K('⇧')}) to reach the Moon · ${K('M')} map`, 'ok'];
+  return live ? (el.ap < 2000 && tliWait() > 240 && tliWait() < 2400 ? [`In orbit ✓ — cut the engine (${K('SPACE')}): the Moon is not in position yet`, 'warn'] : [`Translunar burn — hold prograde until apoapsis reaches the Moon (${Math.round(el.ap).toLocaleString()} km)`])
+    : tliCue();
 }
 
 /* Debrief: a landing is graded on what a pilot controls. Touchdown speed and tilt are the skill,
@@ -164,6 +169,25 @@ function debrief() {
     + `<div class="score">${score.toLocaleString()} <small>${line}</small></div>`
     + `<div class="marks">${speed.toFixed(1)} m/s · ${tilt.toFixed(0)}° tilt · ${fuel.toFixed(1)} t left</div>`
     + `<div class="marks dim">${stars < 3 ? (speed > 4 ? '★★★ needs 4 m/s or softer' : '★★★ needs 8° or straighter') : 'Now do it with more propellant left.'}</div></div>`;
+}
+
+/* Seconds until the Moon leads the ship by TLI_LEAD along the orbit — when to light the translunar
+   burn. The lead closes at the ship's angular rate less the Moon's. */
+function tliWait() {
+  const ang = v => Math.atan2(v.dot(MOON_V), v.dot(MOON_U));
+  const moon = moonPos(getSimTime(), new THREE.Vector3());
+  const r2 = S.pos.lengthSq(), w = new THREE.Vector3().crossVectors(S.pos, S.v).length() / r2 - MOON_RATE;
+  const lead = ((ang(moon) - ang(S.pos) - TLI_LEAD) % (2 * Math.PI) + 2 * Math.PI) % (2 * Math.PI);
+  return w > 0 ? lead / w : Infinity;
+}
+function tliCue() {
+  const s = tliWait();
+  if (!isFinite(s)) return [`Parking orbit ✓ — burn prograde (${K('P')} + ${K('⇧')}) to reach the Moon`, 'ok'];
+  /* The window is a moment, and the burn is long: 'now' is the last minute before it and the first after. */
+  const period = 2 * Math.PI / (new THREE.Vector3().crossVectors(S.pos, S.v).length() / S.pos.lengthSq() - MOON_RATE);
+  if (s < 45 || s > period - 30) return [`TRANSLUNAR BURN NOW — ${K('P')} prograde, ${K('⇧')} full throttle, until apoapsis reaches the Moon`, 'ok'];
+  const m = Math.floor(s / 60), sec = Math.floor(s % 60);
+  return [`Parking orbit ✓ — translunar burn in ${m}:${String(sec).padStart(2, '0')} (${K('P')} prograde, then ${K('⇧')}) · warp with ${K(']')}`, s < 120 ? 'warn' : ''];
 }
 
 let hudTick = 0;
@@ -244,7 +268,7 @@ export function updateHUD(dt) {
   if (!isFinite(aim.altKm)) { aimEl.textContent = aim.status === 'na' ? '—' : 'scanning…'; aimEl.className = aim.status === 'na' ? '' : 'run'; }
   else if (aim.altKm < 0) { aimEl.textContent = 'IMPACT in ' + fmtMET(aim.tMet - getSimTime()); aimEl.className = 'impact'; }
   else {
-    aimEl.textContent = Math.round(aim.altKm).toLocaleString() + ' km in ' + fmtMET(aim.tMet - getSimTime());
+    aimEl.textContent = Math.round(aim.altKm).toLocaleString() + ' km · ' + fmtMET(aim.tMet - getSimTime());
     aimEl.className = (aim.corridor ? 'ok' : 'bad') + (aim.status === 'running' ? ' run' : '');
   }
   $('oSas').textContent = getSasOn() ? 'ON' : 'OFF'; $('mSas').classList.toggle('on', getSasOn());

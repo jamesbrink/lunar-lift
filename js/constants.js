@@ -95,6 +95,11 @@ export const WARP_ONE = WARPS.indexOf(1);
    tools/mission-sim.mjs mis-aims the translunar injection by tens of thousands of km. */
 export const TURN = { t0: 55, ramp: 190, max: 1.15 };
 
+/* Translunar ignition cue: how far the Moon leads the ship along the orbit (rad) when the certified
+   flight lights its 817 s injection burn at 245 km — measured by tools/mission-sim.mjs (ev.tliIgn).
+   A cue, not a solution: it puts a hand-flown burn in the right half-hour, and the lunar-aim readout
+   and a trim burn do the rest. */
+export const TLI_LEAD = 2.7742;
 export const LAND_SAFE = 0.032;          // km/s — 32 m/s touchdown limit
 export const SAFE_EARTH = 0.012;         // km/s — 12 m/s: a splashdown under parachutes (three good mains give ~8)
 

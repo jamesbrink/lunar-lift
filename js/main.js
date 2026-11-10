@@ -1,9 +1,9 @@
 import * as THREE from 'three';
-import { RE, RM, WARPS, DTPHYS, PAD_POS, moonPos } from './constants.js';
+import { RE, RM, WARPS, DTPHYS, PAD_POS, SPECS, moonPos } from './constants.js';
 import { initWorld, spinBodies, syncTime, updateSky, updateSunShadow, setWeatherVisible, groundHeight, fineGroundHeight, moonGroundHeight } from './world.js';
 import { stages, lesGroup } from './saturn.js';
 import { initVehicle, spawnParticle, addDebris, detachStage, setVisible, updateParticles, updateDebris, updateBurnVisuals, clearDebris, resetStages, plumeLive } from './vehicle.js';
-import { S, keys, initPhysics, getState, getSimTime, setSimTime, getEngineOn, getThrottle, getWarpIndex, setWarpIndex, setTargetThrottle, getSasOn, setSas, cycleWarp, toggleSas, toggleSasRetro, activeStage, fwd, isBurning, accelAt, physStep, toggleIgnite, separateStage, separateLES, addDistFlown, pushTrail, resetSim, markTeleported, airDensity, groundVel, omega, getControlAuthority, toggleRcsAssist, toggleHold, deployChute, getArmSwing, aeroState, getAeroLoad, stability } from './physics.js';
+import { S, keys, initPhysics, getState, getSimTime, setSimTime, getEngineOn, getThrottle, getWarpIndex, setWarpIndex, setTargetThrottle, getSasOn, setSas, cycleWarp, toggleSas, toggleSasRetro, activeStage, fwd, isBurning, accelAt, physStep, toggleIgnite, separateStage, separateLES, addDistFlown, pushTrail, resetSim, markTeleported, airDensity, groundVel, omega, getControlAuthority, toggleRcsAssist, toggleHold, deployChute, getArmSwing, guardWarp, aeroState, getAeroLoad, stability } from './physics.js';
 import { camera, initCamera, cycleCamera, updateCamera, resetCameraView, setCamMode, setCamDist, setCamView, resizeCamera, setMap, isMap, cycleMapFocus } from './camera.js';
 import { initMapView, updateMapView } from './mapview.js';
 import { updateChutes } from './chutes.js';
@@ -87,11 +87,13 @@ addEventListener('keydown', e => {
   if (!audioArmed) { audioArmed = true; audioInit(); }          // browsers gate sound on a user gesture
   const mode = getState();
   if (mode === 'won' || mode === 'lost') {
-    if (k === 'enter' || k === ' ') resetMission();
+    if (k === 'enter' || k === ' ' || k === 'r') resetMission();
     return;
   }
+  if (k === '?' || k === '/') { document.getElementById('helpCard').classList.toggle('on'); return; }
+  if (k === 'escape' && document.getElementById('helpCard').classList.contains('on')) { document.getElementById('helpCard').classList.remove('on'); return; }
   if (k === ' ') toggleIgnite();
-  else if (k === 'x') separateStage();
+  else if (k === 'x') dropStage();
   else if (k === 'p') toggleSas();
   else if (k === 'v') toggleSasRetro();
   else if (k === 't') toggleRcsAssist();
@@ -108,6 +110,19 @@ addEventListener('keydown', e => {
 addEventListener('keyup', e => { keys[e.key.toLowerCase()] = false; });
 addEventListener('blur', () => { for (const k in keys) keys[k] = false; });
 
+/* X drops a stage for good, and one slip of a finger used to throw away a burning S-1 with 74 % of
+   its propellant. A stage that still holds more than 5 % wants X twice within two seconds. */
+let xArmed = 0;
+function dropStage() {
+  const i = activeStage();
+  if (getState() === 'flying' && i >= 0 && stages[i].fuel / SPECS[i].fuel > 0.05 && performance.now() - xArmed > 2000) {
+    xArmed = performance.now();
+    addLog(`${Math.round(stages[i].fuel / SPECS[i].fuel * 100)}% PROPELLANT STILL IN THIS STAGE — X AGAIN TO DROP IT ANYWAY`, 'warn');
+    return;
+  }
+  xArmed = 0; separateStage();
+}
+
 /* ---------------- main loop ---------------- */
 let last = performance.now(), prevPos = PAD_POS.clone();
 let predTick = 0, trailTick = 0;
@@ -121,6 +136,7 @@ function frame() {
 
   /* Paused (warp 0): nothing advances — not the physics, the planets, the exhaust or the debris —
      but the camera, the map and the HUD stay live, so a pause is for looking around. */
+  guardWarp();
   const paused = WARPS[getWarpIndex()] === 0;
   if (!paused && (getState() === 'pad' || getState() === 'flying')) {
     const simDt = dtReal * WARPS[getWarpIndex()];

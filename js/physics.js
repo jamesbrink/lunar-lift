@@ -66,7 +66,29 @@ export const addDistFlown = d => { distFlown += d; };
 export const getTrail = () => trail;
 export const pushTrail = p => { trail.push(p.clone()); if (trail.length > 400) trail.shift(); };
 
+/* How fast time may run here. Warp through thick air, a burn close to the ground or the last
+   kilometres over the Moon is how a flight ends in two real seconds; out in the open it is free.
+   Returns the highest allowed entry of WARPS. */
+export function warpCap() {
+  if (state !== 'flying' && state !== 'pad') return 1;
+  moonPos(simTime, _moon);
+  const altE = S.pos.length() - RE, altM = S.pos.distanceTo(_moon) - RM;
+  if (altE < 70) return 4;                                   // in the air
+  if (altM < 15) return 4; if (altM < 150) return 32;        // low over the Moon
+  if (altE < 140) return 16;
+  return 1000;
+}
+/* Called every frame: time drops back when the place demands it, and at the Moon's doorstep. */
+let wasNearMoon = false;
+export function guardWarp() {
+  const cap = warpCap();
+  moonPos(simTime, _moon);
+  const near = S.pos.distanceTo(_moon) < SOI_M;
+  if (near !== wasNearMoon) { wasNearMoon = near; if (WARPS[warpIdx] > 1 && state === 'flying') { warpIdx = WARP_ONE; hooks.addLog(near ? 'TIME WARP OFF — ENTERING THE MOON\'S SPHERE OF INFLUENCE' : 'TIME WARP OFF — LEAVING THE MOON', 'warn'); } }
+  if (WARPS[warpIdx] > cap) { while (WARPS[warpIdx] > cap) warpIdx--; hooks.addLog(`TIME WARP LIMITED TO ×${WARPS[warpIdx]} HERE`, 'warn'); }
+}
 export function cycleWarp(delta) {
+  if (delta > 0 && WARPS[Math.min(WARPS.length - 1, warpIdx + 1)] > warpCap()) { hooks.addLog(`TIME WARP LIMITED TO ×${WARPS[warpIdx]} HERE — CLIMB OUT OF THE AIR FIRST`, 'warn'); return; }
   if (delta > 0) warpIdx = Math.min(WARPS.length - 1, warpIdx + 1);
   else warpIdx = Math.max(0, warpIdx - 1);
   hooks.addLog(WARPS[warpIdx] === 0 ? 'PAUSED — ] TO RESUME' : WARPS[warpIdx] < 1 ? `SLOW MOTION ×${WARPS[warpIdx]}` : `TIME WARP ×${WARPS[warpIdx]}`);
@@ -249,7 +271,7 @@ export const getHeat = () => heat;                         // the proxy, live
 export const getCooking = () => cooking / HEAT_TIME;       // 0 fine … 1 gone
 export const isCapsule = () => activeStage() < 0;
 export function deployChute() {
-  if (state !== 'flying') return;
+  if (state !== 'flying') { if (state === 'pad') hooks.addLog('PARACHUTES ARE FOR COMING HOME', 'warn'); return; }
   if (!isCapsule()) { hooks.addLog('PARACHUTES ARE ON THE COMMAND MODULE — DROP THE CSM FIRST (X)', 'warn'); return; }
   if (chute < 0) { hooks.addLog('PARACHUTES ARE GONE', 'bad'); return; }
   if (chute >= 2) return;
@@ -276,6 +298,8 @@ export function toggleIgnite() {
   if (i < 0) { hooks.addLog('NO ENGINE LEFT — ALL STAGES SEPARATED', 'bad'); return; }
   if (stages[i].fuel <= 0) { hooks.addLog(`STAGE ${i + 1} DRY — PRESS X TO SEPARATE IT`, 'warn'); return; }
   if (i === 0 && engineOn) { hooks.addLog('SOLID BOOSTER BURNS AT FULL THROTTLE TO DEPLETION', 'warn'); return; }
+  /* Lit but throttled to nothing (CTRL held to 0): SPACE means 'go', not 'off'. */
+  if (engineOn && throttle < 0.02 && targetThrottle < 0.02) { targetThrottle = 1; return; }
   engineOn = !engineOn;
   if (engineOn) { targetThrottle = 1; throttle = Math.max(throttle, i === 0 ? 1 : 0.6); audio.engine(true); }
   else { targetThrottle = 0; throttle = 0; hooks.addLog('ENGINE SHUT DOWN'); }   // or the throttle setting relights it next step
@@ -307,7 +331,7 @@ export function separateLES() {
 }
 
 export function separateStage() {
-  if (state !== 'flying') return;
+  if (state !== 'flying') { if (state === 'pad') hooks.addLog('NOTHING TO DROP ON THE PAD — SPACE TO IGNITE', 'warn'); return; }
   const i = activeStage();
   if (i < 0) return;
   const st = stages[i];
@@ -630,7 +654,7 @@ function impact(onMoon) {
     hooks.addLog(`TOUCHDOWN — ${disp.toFixed(1)} m/s. THE MOON IS OURS.`, 'good');
     audio.win();
     hooks.showEndOverlay('TOUCHDOWN ON THE MOON',
-      `The CSM rests on the lunar surface at <b>${disp.toFixed(1)} m/s</b> after a ${fmtDuration(simTime)} mission, all three stages spent along the way. ${disp < 5 ? 'A textbook landing.' : disp < 15 ? 'Firm, but she stands.' : 'Close to the limit — brake earlier next time.'}`,
+      `The CSM rests on the lunar surface at <b>${disp.toFixed(1)} m/s</b> after a ${fmtDuration(simTime)} mission. ${disp < 5 ? 'A textbook landing.' : disp < 15 ? 'Firm, but she stands.' : 'Close to the limit — brake earlier next time.'}`,
       'FLY AGAIN');
     return;
   }
@@ -638,7 +662,7 @@ function impact(onMoon) {
   if (onMoon) {
     state = 'lost';
     hooks.addLog(`HARD IMPACT ON THE MOON AT ${disp.toFixed(0)} m/s — MISSION LOST`, 'bad');
-    hooks.showEndOverlay('MOON IMPACT', `The ${activeStage() === 2 ? 'CSM' : 'vehicle'} struck the lunar surface at ${disp.toFixed(0)} m/s. Land softer than 32 m/s — start the braking burn early, at the edge of the dashed sphere.`, 'RETRY');
+    hooks.showEndOverlay('MOON IMPACT', `The ${activeStage() === 2 ? 'CSM' : 'vehicle'} struck the lunar surface at ${disp.toFixed(0)} m/s. Land softer than 32 m/s: stay retrograde (V + P), coast down, and light the engine when the NEXT line calls BRAKE NOW — not before, and not after.`, 'RETRY');
   } else {
     if (speed <= SAFE_EARTH && i < 0) {
       state = 'won'; vehicleOps.setVisible(true);
@@ -652,6 +676,7 @@ function impact(onMoon) {
       hooks.addLog(`IMPACT WITH EARTH AT ${disp.toFixed(0)} m/s — MISSION LOST`, 'bad');
       hooks.showEndOverlay(disp > 1000 ? 'RE-ENTRY DISASTER' : 'HARD LANDING', i < 0
         ? `The capsule hit at ${disp.toFixed(0)} m/s. Drogues (G) once the air has slowed you under ${CHUTE.drogue.tear / 1000} kPa, mains (G again) under ${CHUTE.mains.tear / 1000} kPa — down at under ${SAFE_EARTH * 1000} m/s.`
+        : !stages[0].separated ? `The stack came down at ${disp.toFixed(0)} m/s. Keep it pointing up until it has speed: SAS (P) holds the vertical off the pad.`
         : `The vehicle hit the ground at ${disp.toFixed(0)} m/s. Only the command module comes home: drop the rest (X) and open the parachutes (G).`, 'RETRY');
     }
   }
@@ -728,10 +753,7 @@ function checkMissionEvents() {
     loiLogged = true; hooks.addLog('LUNAR SPHERE OF INFLUENCE — PREPARE RETROGRADE BRAKING (V, then P, then ignite)', 'good');
   }
   if (!loggedMaxQ && maxQ > 30000 && activeStage() === 0) { loggedMaxQ = true; hooks.addLog('MAX-Q — EASE THE THROTTLE IF YOU LIKE THE PAINT'); }
-  if (!turnHintLogged && r - RE > 120) {
-    turnHintLogged = true;
-    hooks.addLog('NOW PITCH TOWARD THE MOON (MAP) — OR PRESS P FOR PROGRADE SAS', 'good');
-  }
+  turnHintLogged = true;      // the NEXT line carries this now; the old toast told a pilot on SAS to pitch at the Moon
 }
 
 /* ---------------- mission reset (sim side) ---------------- */
@@ -744,7 +766,7 @@ export function resetSim() {
   engineOn = false; throttle = targetThrottle = 0;
   sasOn = false; sasRetro = false; simTime = 0; warpIdx = WARP_ONE; maxQ = 0;
   tliLogged = loiLogged = loggedMaxQ = turnHintLogged = false; distFlown = 0; trail = [];
-  flightStarted = false; state = 'pad'; omega.set(0, 0, 0); I0 = null; holdOn = false; armSwing = 0; tRelease = null; aeroState.q = aeroState.mach = aeroState.aoa = aeroState.nBody = aeroState.nFin = 0; gLoad = 0; gOver = 0; chute = 0; chuteOpen = 0; heat = 0; cooking = 0; rcsAssist = true; aeroLoad = 0; strain = 0;
+  flightStarted = false; state = 'pad'; omega.set(0, 0, 0); I0 = null; holdOn = false; armSwing = 0; wasNearMoon = false; tRelease = null; aeroState.q = aeroState.mach = aeroState.aoa = aeroState.nBody = aeroState.nFin = 0; gLoad = 0; gOver = 0; chute = 0; chuteOpen = 0; heat = 0; cooking = 0; rcsAssist = true; aeroLoad = 0; strain = 0;
 }
 
 /* teleport() starts the flight directly, bypassing the liftoff guard */

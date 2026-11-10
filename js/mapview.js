@@ -96,15 +96,19 @@ export function initMapView(scene) {
   scene.add(group);
 }
 
+/* Closest lunar pass of the engine-off coast from here, km above the surface (Infinity: none). */
+export const coarseAim = () => meet.r - RM;
 const _m = new THREE.Vector3();
 export function updateMapView(on, dt = 0.016) {
   group.visible = on;
+  /* The coast runs whether or not the map is up: its closest lunar pass is the HUD's coarse aim
+     while the engine is burning and the exact prediction (js/targeting.js) is not available. */
+  tick += dt;
+  if (tick > 0.5) { tick = 0; if (getState() === 'flying') coast(); else { path.clear(); meet.r = Infinity; } }
   if (!on) return;
   moonPos(getSimTime(), _m);
   shipMark.position.copy(S.pos);
   moonTag.position.copy(_m); soiRing.position.copy(_m);
-  tick += dt;
-  if (tick > 0.5) { tick = 0; if (getState() === 'flying') coast(); else path.clear(); }
   /* The Moon's place at closest approach, when the path actually goes there and it is not now. */
   const show = getState() === 'flying' && meet.r < SOI_M * 2 && meet.moon.distanceTo(_m) > 4 * RM;
   meetTag.visible = meetRing.visible = show;
