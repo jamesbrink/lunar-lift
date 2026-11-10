@@ -128,6 +128,8 @@ float sfRidge( float n ) { return 1.0 - abs( 2.0 * n - 1.0 ); }
 `;
 
 const VERT_PARS = /* glsl */`
+uniform vec3 sfCentre;
+uniform vec3 sfOff;
 uniform vec3 sfAnchor;
 uniform vec3 sfSun;
 attribute vec2 sfUv;
@@ -166,6 +168,10 @@ export function surface(key) {
   const set = (local) => {
     const U = {
       sfAnchor: { value: new THREE.Vector3() },
+      /* A patch's vertices are stored from its own centre (js/terrain.js): sfCentre puts the planet
+         back for the things that need a direction or a height, and sfOff = centre − anchor, taken
+         in doubles here, is all the lattices ever see. Both are zero for the globe. */
+      sfCentre: { value: new THREE.Vector3() }, sfOff: { value: new THREE.Vector3() },
       sfCellI: { value: new Int32Array(24) },
       sfCellF: { value: new Float32Array(24) },
       sfSun: { value: new THREE.Vector3(1, 0, 0) },
@@ -235,6 +241,7 @@ export function anchorPatch(key, cx, cy, cz) {
   const S = surface(key), U = S.patch, cells = CELLS[key];
   const a = [Math.round(cx / ANCHOR_STEP) * ANCHOR_STEP, Math.round(cy / ANCHOR_STEP) * ANCHOR_STEP, Math.round(cz / ANCHOR_STEP) * ANCHOR_STEP];
   U.sfAnchor.value.set(a[0], a[1], a[2]);
+  U.sfCentre.value.set(cx, cy, cz); U.sfOff.value.set(cx - a[0], cy - a[1], cz - a[2]);
   for (let k = 0; k < 8; k++) for (let c = 0; c < 3; c++) {
     const q = a[c] / cells[k], i = Math.floor(q);
     U.sfCellI.value[k * 3 + c] = i; U.sfCellF.value[k * 3 + c] = q - i;
@@ -263,7 +270,7 @@ export function surfaceInject(sh, key, which) {
   for (const k in U) sh.uniforms[k] = U[k];
   const list = B.vtx[which];
   const def = (which === 'patch' ? '#define SF_PATCH\n' : '') + '#define SF_VTX ' + list.length + '\n';
-  let coarse = '\n  vec3 sfLp = vSfL - normalize( position ) * vSfH;\n  vSfA = vec4( 0.5 ); vSfB = vec4( 0.5 );';
+  let coarse = '\n  vec3 sfLp = vSfL - normalize( position + sfCentre ) * vSfH;\n  vSfA = vec4( 0.5 ); vSfB = vec4( 0.5 );';
   list.forEach(([cell, seed], k) => {
     coarse += `\n  vSf${k < 2 ? 'A' : 'B'}.${k % 2 ? 'zw' : 'xy'} = ${B.fn}( sfLp / ${cell.toFixed(1)} + sfCellF[${k}], sfCellI[${k}], ${seed}u );`;
   });
@@ -272,7 +279,7 @@ export function surfaceInject(sh, key, which) {
      constant per triangle (measured: sawtooth shading over the Alps from 12 km), so the patch
      differences each octave's ridge toward the sun in the vertex stage instead. */
   if (which === 'patch' && B.slope) {
-    coarse += '\n  vec3 sfDn = normalize( position );\n  vec3 sfSt = sfSun - sfDn * dot( sfSun, sfDn );\n  sfSt /= max( length( sfSt ), 0.05 );\n  vSfS = vec3( 0.0 );';
+    coarse += '\n  vec3 sfDn = normalize( position + sfCentre );\n  vec3 sfSt = sfSun - sfDn * dot( sfSun, sfDn );\n  sfSt /= max( length( sfSt ), 0.05 );\n  vSfS = vec3( 0.0 );';
     B.slope.forEach(([k, ch, comp]) => {
       const [cell, seed] = list[k];
       coarse += `\n  vSfS.${comp} = ( ( 1.0 - abs( 2.0 * ${B.fn}( ( sfLp + sfSt * ${(cell * 0.02).toFixed(4)} ) / ${cell.toFixed(1)} + sfCellF[${k}], sfCellI[${k}], ${seed}u ).${ch} - 1.0 ) ) - ( 1.0 - abs( 2.0 * vSf${k < 2 ? 'A' : 'B'}.${k % 2 ? (ch === 'x' ? 'z' : 'w') : ch} - 1.0 ) ) ) * 50.0;`;
@@ -281,7 +288,7 @@ export function surfaceInject(sh, key, which) {
   sh.vertexShader = sh.vertexShader
     .replace('#include <common>', '#include <common>\n' + def + VERT_PARS + NOISE)
     .replace('#include <begin_vertex>',
-      '#include <begin_vertex>\n  vSfL = position - sfAnchor;\n  vSfH = length( position ) - ' + B.R.toFixed(1) + ';\n  vSfUv = sfUv;' + coarse);
+      '#include <begin_vertex>\n  vSfL = position + sfOff;\n  vSfH = length( position + sfCentre ) - ' + B.R.toFixed(1) + ';\n  vSfUv = sfUv;' + coarse);
   sh.fragmentShader = sh.fragmentShader
     .replace('#include <common>', '#include <common>\n' + def + '#define SF_R ' + B.R.toFixed(1) + '\n' + B.pal + '\n' + NOISE + COMMON + B.glsl)
     .replace('#include <map_fragment>', '#include <map_fragment>\n  diffuseColor.rgb = sfColour();');

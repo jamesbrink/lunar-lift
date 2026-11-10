@@ -147,7 +147,7 @@ function decal(r, z0, z1, az, width, map) {
 {
   const g = stages[1].meshes;
   g.add(cyl(3.58, 3.50, 1.5, -10.3, black, SEG, true));       // thrust structure −11.05 .. −9.55, inside the interstage while stacked
-  g.add(cyl(3.57, 3.57, 17.0, -1.5, white, SEG, true));       // tanks −10.0 .. +7.0
+  g.add(cyl(3.57, 3.57, 16.85, -1.425, white, SEG, true));    // tanks −9.85 .. +7.0: clear of the S-1 tank's top (−9.9), same radius
   panels(g, 3.57, 3.4, 6.5, 0, 45);                           // forward roll pattern
   g.add(cyl(3.62, 3.62, 0.3, -7.4, black));                   // aft frame
   const tunnel = cyl(0.2, 0.2, 13.4, -1.0, white, 8); tunnel.position.x = 3.6; g.add(tunnel);

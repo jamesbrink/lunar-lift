@@ -169,7 +169,7 @@ function frame() {
   if (getState() === 'flying') updatePredictor(camera); else clearPredictor();
   updateHUD(dtReal);
   /* The sky belongs to where the EYE is: on the map that is space, whatever air the ship is in. */
-  setWeatherVisible(!isMap());
+  setWeatherVisible(!isMap() && !window.__noWeather);   // __noWeather: tools/flicker-test.mjs isolates the weather
   updateSky(isMap() ? camera.position : S.pos, camera.position);
   updateSunShadow(S.pos);
   updateMapView(isMap(), dtReal);

@@ -131,6 +131,15 @@ function rebuild(p) {
   let cu = Math.atan2(_g.z, -_g.x) / (2 * Math.PI);
   if (cu < 0) cu += 1;
   anchorPatch(p.key, _g.x * R, _g.y * R, _g.z * R);
+  /* Vertices are written from the patch's own centre, and the mesh stands at that centre. Written
+     from the planet's centre they were 6,371 km numbers in float32 — a 0.49 m grid — multiplied by
+     a model-view matrix with a 6,371 km translation: the cancellation error moved the whole ground
+     up and down by half a metre from frame to frame as the planet turned, and the grass came through
+     the launch site's slabs (0.63 m proud) a panel at a time. From the centre the same vertex is a
+     number of metres and exact. */
+  const cx = _g.x * R, cy = _g.y * R, cz = _g.z * R;
+  p.cx = cx; p.cy = cy; p.cz = cz;
+  p.mesh.position.set(cx, cy, cz);
 
   const pos = p.mesh.geometry.attributes.position.array;
   const uvA = p.mesh.geometry.attributes.sfUv.array;
@@ -156,7 +165,7 @@ function rebuild(p) {
       if (earth) h += fineRelief(p.coast, u, v) * (1 - sstep(FINE_FROM, FINE_TO, r)) + ringLift(r, 0.02);
       else h += ringLift(r, 0.3);                      // the lunar globe chords its relief by up to ~240 m
       if (!Number.isFinite(h)) h = 0;
-      pos[k] = vx * (R + h); pos[k + 1] = vy * (R + h); pos[k + 2] = vz * (R + h);
+      pos[k] = vx * (R + h) - cx; pos[k + 1] = vy * (R + h) - cy; pos[k + 2] = vz * (R + h) - cz;
     }
   }
   gridNormals(p);
@@ -186,9 +195,10 @@ function gridNormals(p) {
       let nx = ty * bz - tz * by, ny = tz * bx - tx * bz, nz = tx * by - ty * bx;
       const l = 1 / Math.sqrt(nx * nx + ny * ny + nz * nz);
       nx *= l; ny *= l; nz *= l;
-      // orient outward (the position IS a direction)
-      if (nx * pos[i0] + ny * pos[i0 + 1] + nz * pos[i0 + 2] < 0) { nx = -nx; ny = -ny; nz = -nz; }
-      if (!(nx === nx)) { const pl = 1 / Math.hypot(pos[i0], pos[i0 + 1], pos[i0 + 2]); nx = pos[i0] * pl; ny = pos[i0 + 1] * pl; nz = pos[i0 + 2] * pl; }
+      // orient outward: the vertex from the planet's centre is the direction
+      const ox = pos[i0] + p.cx, oy = pos[i0 + 1] + p.cy, oz = pos[i0 + 2] + p.cz;
+      if (nx * ox + ny * oy + nz * oz < 0) { nx = -nx; ny = -ny; nz = -nz; }
+      if (!(nx === nx)) { const pl = 1 / Math.hypot(ox, oy, oz); nx = ox * pl; ny = oy * pl; nz = oz * pl; }
       nrm[i0] = nx; nrm[i0 + 1] = ny; nrm[i0 + 2] = nz;
     }
   }
@@ -206,8 +216,8 @@ export function patchAudit(p) {
   const P = at.position.array, N = at.normal.array;
   let worst = 1;
   for (let i = 0; i < P.length; i += 3) {
-    const l = Math.hypot(P[i], P[i + 1], P[i + 2]);
-    const d = (P[i] * N[i] + P[i + 1] * N[i + 1] + P[i + 2] * N[i + 2]) / l;
+    const x = P[i] + (p.cx || 0), y = P[i + 1] + (p.cy || 0), z = P[i + 2] + (p.cz || 0), l = Math.hypot(x, y, z);
+    const d = (x * N[i] + y * N[i + 1] + z * N[i + 2]) / l;
     if (d < worst) worst = d;
   }
   out.maxTiltDeg = +(Math.acos(Math.min(1, worst)) * 180 / Math.PI).toFixed(2);
