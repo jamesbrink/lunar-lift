@@ -46,7 +46,8 @@ const P = await import('../js/physics.js');
 const { stages } = await import('../js/saturn.js');
 const C = await import('../js/constants.js');
 
-const WHICH = process.argv[2] === undefined ? 'game'
+/* The stack is the first argument; omitted (no arguments, or flags only) it is 'game'. */
+const WHICH = process.argv[2] === undefined || process.argv[2].startsWith('--') ? 'game'
   : ['game', 'landed', 'nova', 'retro'].includes(process.argv[2]) ? process.argv[2]
     : (console.error(`unknown stack '${process.argv[2]}' — game | landed | nova | retro`), process.exit(2));
 const PHASE_ARG = Number((process.argv.find(a => a.startsWith('--phase=')) || '').split('=')[1]);

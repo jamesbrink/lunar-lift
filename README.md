@@ -312,7 +312,7 @@ them exits non-zero:
 | `tools/clip-test.mjs` | the camera gets under the terrain or inside the hull anywhere in its sweep |
 | `tools/trail-offset.mjs` | the smoke column stands off the flame at any warp |
 | `tools/orbit-line.mjs` | the ribbon's apoapsis is not the state vector's, engine lit or cut |
-| `tools/debris-orbit.mjs` | a dropped stage leaves the atmosphere on a ballistic arc instead of an orbit |
+| `tools/debris-orbit.mjs` | a stage dropped in a 300 km orbit is gone, below 250 km, or over 200 km from the ship after most of a revolution |
 | `tools/flicker-test.mjs` | a view in which nothing should change has changing pixels, or two meshes share a plane |
 
 The last six drive a real Chromium on a real GPU against a dev server `check.mjs` starts on its

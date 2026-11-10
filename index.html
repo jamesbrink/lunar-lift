@@ -123,7 +123,14 @@ setTimeout(function () {
   document.getElementById('bigBtn').style.display = 'none';
   document.getElementById('lookBtn').style.display = 'none';   // there is nothing to look around
   var t = setInterval(function () {
-    if (window.game) { o.classList.add('hidden'); clearInterval(t); }
+    if (window.game) {
+      /* hide the card and give the buttons back: endOverlay only sets their text, so the end card
+         would otherwise come up with no FLY AGAIN and no LOOK AROUND */
+      o.classList.add('hidden');
+      document.getElementById('bigBtn').style.display = '';
+      document.getElementById('lookBtn').style.display = '';
+      clearInterval(t);
+    }
     else if (window.__fatal) clearInterval(t);
   }, 1000);
 }, 10000);

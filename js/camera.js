@@ -346,7 +346,7 @@ export function updateCamera(dt, paused = false) {
   const mode = mapOn ? 'map' : camModes[camMode];
   /* Arrow keys look around, - and = zoom: the same numbers the mouse writes. */
   const kx = (keys['arrowleft'] ? 1 : 0) - (keys['arrowright'] ? 1 : 0), ky = (keys['arrowup'] ? 1 : 0) - (keys['arrowdown'] ? 1 : 0);
-  const kz = (keys['-'] || keys['_'] ? 1 : 0) - (keys['='] || keys['+'] ? 1 : 0);
+  const kz = (keys['-'] ? 1 : 0) - (keys['='] ? 1 : 0);   // js/main.js normKey folds '_' and '+' into these
   if (kx || ky || kz) {
     wantYaw += kx * 1.6 * dt;
     wantPitch = THREE.MathUtils.clamp(wantPitch + ky * 1.2 * dt, -1.3, 1.3);

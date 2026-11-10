@@ -155,7 +155,7 @@ addEventListener('keydown', e => {
   else if (k === 'r') resetMission();
   else if (k === 'escape' || k === 'pause') { setWarpIndex(WARPS[getWarpIndex()] === 0 ? WARPS.indexOf(1) : 0); addLog(WARPS[getWarpIndex()] === 0 ? 'PAUSED — ESC TO RESUME' : 'RESUMED'); }
 });
-addEventListener('keyup', e => { const k = normKey(e); keys[k] = false; if (k === 'shift') keys['}'] = keys['{'] = false; });
+addEventListener('keyup', e => { const k = normKey(e); keys[k] = false; });   // normKey: keydown and keyup share one name, so nothing is left to clear on SHIFT
 addEventListener('blur', () => { for (const k in keys) keys[k] = false; });
 
 /* X drops a stage for good, and one slip of a finger used to throw away a burning S-1 with 74 % of

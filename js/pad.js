@@ -325,7 +325,7 @@ export function buildPad(glowMap) {
      920 m: a flat grey field with nothing in it, because a vertex-coloured mesh whose spacing is
      25 m at best cannot hold a road. So the site is geometry — slabs half a metre proud of the
      terrain (which is flat to ±0.22 u within 700 u of the pad, measured) with their undersides
-     below it — and the terrain under them is grass again (js/toonmap.js, padAuthored).
+     below it — and the terrain under them is grass again (js/padsite.js padAuthored, painted by js/earthpaint.js).
      Tops, none shared: hardstand 0.45, flame trench 0.55, crawlerway 0.40, road 0.36. */
   const octagon = (r, h) => { const o = new THREE.CylinderGeometry(r, r, h, 8); o.rotateY(Math.PI / 8); return o; };
   B.add(octagon(170, 1.6), hard, false, 0, 0, -0.35, Math.PI / 2);                 // the hardstand, 475 m across
