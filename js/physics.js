@@ -440,7 +440,7 @@ export function physStep(dt) {
        wall and a bare CSM is not. */
     aeroLoad = (aeroState.nBody + aeroState.nFin) * 1000 / mass / 9.81;   // lateral g
     const limit = i === 2 || i < 0 ? LOAD_LIMIT_CSM : LOAD_LIMIT_STACK;
-    if (aeroLoad > limit && state === 'flying') return breakup();
+    if (state === 'flying' && overstressed(aeroLoad, limit, dt)) return breakup();
   } else aeroLoad = 0;
 
   omega.x = THREE.MathUtils.clamp(omega.x, -MAX_RATE_PY, MAX_RATE_PY);
@@ -506,6 +506,22 @@ function impact(onMoon) {
     }
   }
 }
+/* Structural failure policy: does this step's side load break the airframe?
+   load, limit in g; dt in s (always <= DTPHYS). `strain` is yours to use as memory between steps
+   and is zeroed on reset. Called every step while q > 0.5 Pa.
+
+   TODO(james): this is the placeholder — the instant the load crosses the limit, the stack is gone.
+   Alternatives worth weighing: a grace period (fail only after N seconds over the limit, so a
+   gust-like spike is survivable and the HUD's red side-load readout becomes a warning you can act
+   on), or accumulated damage (strain grows with (load/limit − 1)·dt and heals slowly, failing at a
+   threshold — forgiving of brief excursions, unforgiving of sustained ones). Whatever you choose,
+   re-run: node tools/mission-sim.mjs game --phase=4.9198031 (nominal peak is 0.024 g — it must
+   never trip) and the breakup table in docs/reference/atmosphere.md. */
+let strain = 0;
+function overstressed(load, limit, dt) {
+  return load > limit;
+}
+
 function breakup() {
   explode(); state = 'lost';
   hooks.addLog(`AERODYNAMIC BREAKUP — ${aeroLoad.toFixed(1)} g SIDE LOAD AT MACH ${aeroState.mach.toFixed(1)}`, 'bad');
@@ -562,7 +578,7 @@ export function resetSim() {
   engineOn = false; throttle = targetThrottle = 0;
   sasOn = false; sasRetro = false; simTime = 0; warpIdx = 0; maxQ = 0;
   tliLogged = loiLogged = loggedMaxQ = turnHintLogged = false; distFlown = 0; trail = [];
-  flightStarted = false; state = 'pad'; omega.set(0, 0, 0); I0 = null; rcsAssist = true; aeroLoad = 0;
+  flightStarted = false; state = 'pad'; omega.set(0, 0, 0); I0 = null; rcsAssist = true; aeroLoad = 0; strain = 0;
 }
 
 /* teleport() starts the flight directly, bypassing the liftoff guard */
