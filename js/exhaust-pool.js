@@ -74,9 +74,9 @@ export const moonP = new THREE.Vector3(), moonV = new THREE.Vector3();
 export const SOI2 = SOI_M * SOI_M;
 
 /* Every silent failure class the exhaust has had, counted by name so "the exhaust looks wrong" arrives
-   with a cause: missing terrain field, non-finite parcel state, NaN heights, a bell index nobody
+   with a cause: non-finite parcel state, NaN heights, a bell index nobody
    built, live parcels about to draw at zero size. */
-export const plumeDebug = { causeField: 0, causeNaN: 0, causeHeight: 0, causeBell: 0, zeroSize: 0 };
+export const plumeDebug = { causeNaN: 0, causeHeight: 0, causeBell: 0, zeroSize: 0 };
 
 /* Generic particle — the contract js/physics.js calls for staging puffs and the explosion. Same pool,
    same gravity, same colliders (debris sparks bounce off the pad too), but it keeps the exact colour

@@ -92,8 +92,7 @@ export function emitExhaust(idx, pos, quat, vel, throttle, since, reach) {
 }
 const _gd = new THREE.Vector3();
 function groundAlt(pos) {
-  const fn = WORLD.fineGroundHeight || WORLD.groundHeight;
-  const v = typeof fn === 'function' ? fn(_gd.copy(pos)) : 0;
+  const v = WORLD.fineGroundHeight(_gd.copy(pos));
   return v === v ? v : 0;
 }
 /* Engine off: a relight after a coast must not bank a second of backlog. */

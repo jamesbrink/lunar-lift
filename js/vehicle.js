@@ -128,8 +128,7 @@ export function updateDebris(simDt, accelAt) {
     if (rE < RE + 3) down = rE <= RE + reliefE(d.mesh.position);
     else if (rE > 300000) {
       _dm.copy(d.mesh.position).sub(moonPos(getSimTime(), _dmo));
-      const fn = WORLD.moonGroundHeight;
-      down = _dm.length() <= RM + (typeof fn === 'function' ? fn(_dm.clone()) || 0 : 0);
+      down = _dm.length() <= RM + (WORLD.moonGroundHeight(_dm.clone()) || 0);
     }
     if (down) {
       for (let k = 0; k < 14; k++) {
@@ -144,8 +143,7 @@ const TRAIL_COLOUR = [0.82, 0.83, 0.86];
 const IMPACT_COLOUR = [0.80, 0.76, 0.68];
 const _dm = new THREE.Vector3(), _dmo = new THREE.Vector3();
 function reliefE(p) {
-  const fn = WORLD.fineGroundHeight || WORLD.groundHeight;
-  const v = typeof fn === 'function' ? fn(_dm.copy(p)) : 0;
+  const v = WORLD.fineGroundHeight(_dm.copy(p));
   return v === v ? v : 0;
 }
 const SEAM_COLOUR = [0.32, 0.33, 0.36];   // staging-seam smoke: dark grey against the flash

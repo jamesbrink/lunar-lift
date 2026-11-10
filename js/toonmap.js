@@ -74,7 +74,6 @@ const coasts = new Map();                  // key → Promise<{w,h,km}>      sig
 const canvases = new Map();                // key → Promise<HTMLCanvasElement>
 const datas = new Map();                   // key → Promise<{w,h,bytes,…}>  the fields js/surface.js draws from
 const painted = new Map();                 // key → canvas, once landed (paintedCanvas)
-const pixelsOf = new Map();                // key → Promise<ImageData>     raw authored pixels
 
 function registerCanvas(key, job) {
   if (canvases.has(key)) return;
@@ -91,15 +90,6 @@ export function coastField() { return coasts.get('earth') || null; }
 
 /* The shader's data fields (rows south first), null before the paint is requested. */
 export function surfaceData(key) { return datas.get(key) || null; }
-
-/* Raw ImageData of the painted map, extracted once per body. */
-export function canvasData(key) {
-  if (!pixelsOf.has(key)) {
-    pixelsOf.set(key, canvases.get(key).then((cv) =>
-      cv.getContext('2d', { willReadFrequently: true }).getImageData(0, 0, cv.width, cv.height)));
-  }
-  return pixelsOf.get(key);
-}
 
 /* ---- far level: displace the mesh itself ---- */
 

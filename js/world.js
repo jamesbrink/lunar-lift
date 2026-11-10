@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import {
-  RE, RM, MOON_RATE, EARTH_SPIN, PAD_UP, PAD_EAST, PAD_SCALE, PAD_POS, SKY_DAY, SKY_NULL, moonPos
+  RE, RM, MOON_RATE, EARTH_SPIN, PAD_UP, PAD_EAST, PAD_POS, SKY_DAY, SKY_NULL, moonPos
 } from './constants.js';
 import { startPlanetPaint, glowTex, flareTex } from './textures.js';
 import { toon, RAMP_EARTH, RAMP_MOON } from './toon.js';
@@ -572,21 +572,18 @@ export function planetCanvas(which) { return paintedCanvas(which); }
    canvas and the sphere share stays the map's business. */
 export function bodySpin(which) { return which === 'moon' ? (moon ? moon.rotation.y : 0) : (earth ? earth.rotation.y : 0); }
 
-/* The bodies are placed from world.js's own clock, which `spinBodies` advances by the same simDt the
-   integrator gets. Anything that jumps the mission clock instead of flying through the intervening
-   time — the debug `teleport(pos, vel, t)`, `ff()`, a reset — would otherwise leave the Moon hanging
-   where the old time put it: the physics would pull toward one place while the picture showed
-   another, which is exactly what a screenshot or a test would then read wrong. So the angles are
-   recomputed from the absolute time rather than nudged, and a state is fully determined by
-   (pos, vel, t). */
+/* The bodies are placed from the mission time main.js hands in each frame (the DRAWN instant), never
+   advanced by a step of their own. Anything that jumps the clock instead of flying through the
+   intervening time — the debug `teleport(pos, vel, t)`, `ff()`, a reset — then cannot leave the
+   Moon hanging where the old time put it, with the physics pulling toward one place while the
+   picture shows another: the angles are recomputed from the absolute time, and a state is fully
+   determined by (pos, vel, t). */
 export function syncTime(t) {
-  /* Non-finite time must not reach the rotations: `spin = EARTH_SPIN * NaN` and
-     moon.rotation.y = NaN latch PERMANENTLY (spinBodies then only accumulates NaN), and every
-     consumer that multiplies through the angle — js/navball.js's drawOrbit blit chief among
-     them — starts throwing inside main.js's swallowed frame catch. Observed as the round-3
-     'empty black orbit sub-map' that no finite-state math could reproduce. A bad t re-bases
-     to 0 (the angle recomputation's own origin); valid t is untouched — frames for finite
-     time are bit-identical to before. js/navball.js also keeps its own NaN-immunity layer. */
+  /* Non-finite time must not reach the rotations: `spin = EARTH_SPIN * NaN` puts NaN in
+     earth.rotation.y and moon.rotation.y, and every consumer that multiplies through the angle —
+     js/navball.js's drawOrbit blit chief among them — starts throwing inside main.js's frame
+     catch. Observed as an empty black orbit sub-map that no finite-state math could reproduce.
+     A bad t re-bases to 0; valid t is untouched. js/navball.js also keeps its own NaN guard. */
   const ts = Number.isFinite(t) ? t : 0;
   simT = ts;
   spin = EARTH_SPIN * ts;
@@ -594,27 +591,7 @@ export function syncTime(t) {
   moon.rotation.y = MOON_RATE * ts;
   moonPos(simT, moon.position);
   /* Weather drift is a function of absolute time, like the angles above: a teleport or a reset that
-     re-based simT without re-based the drift would leave the clouds where the old clock put them. */
-  if (cloudMesh) updateWeather(cloudMesh, simT, spin, SUN_DIR);
-}
-
-/* the planet and its weather turn; the cloud decks drift a little faster than the ground (real
-   superrotation), at rates of the same order as EARTH_SPIN, never orders of magnitude faster */
-export function spinBodies(simDt) {
-  /* A non-finite step is SKIPPED, not accumulated (see syncTime): += 0 keeps every angle at its
-     last good value, so one poisoned frame cannot destroy the spin clock forever. Finite simDt
-     runs the identical arithmetic, in the same order, as before. */
-  const dt = Number.isFinite(simDt) ? simDt : 0;
-  simT += dt;
-  spin += EARTH_SPIN * dt;
-  earth.rotation.y = spin;
-  moon.rotation.y += MOON_RATE * dt;
-  moonPos(simT, moon.position);
-  /* The shell never rotates — its mesh is fixed so its shader can work straight in world space —
-     and the weather moves through uv drift: the lattices ride the ground's spin plus a wind, the
-     upper lattice faster than the lower, so cells grow and dissolve as they slide past each other
-     instead of just translating. Rates are of the same order as EARTH_SPIN (real superrotation),
-     never orders of magnitude faster. */
+     re-based simT without re-basing the drift would leave the clouds where the old clock put them. */
   if (cloudMesh) updateWeather(cloudMesh, simT, spin, SUN_DIR);
 }
 
@@ -692,5 +669,4 @@ export function updateSky(pos, camPos) {
   for (const s of stars) { s.material.opacity = dark; s.visible = dark > 0.01; }
 }
 
-export function getSkyMix() { return _skyMix; }
 

@@ -1,18 +1,13 @@
 import * as THREE from 'three';
-import { RE, RM, MU_E, MU_M, SOI_M, MOON_DIST, PAD_UP, PAD_POS, WARPS, SPECS, CAPSULE_MASS, LAND_SAFE, SAFE_EARTH, TLI_LEAD, MOON_RATE, MOON_U, MOON_V, moonPos } from './constants.js';
+import { RE, RM, MU_E, MU_M, SOI_M, MOON_DIST, WARPS, SPECS, CAPSULE_MASS, LAND_SAFE, SAFE_EARTH, TLI_LEAD, MOON_RATE, MOON_U, MOON_V, moonPos } from './constants.js';
 import { stages } from './saturn.js';
-import { S, getState, getSimTime, getEngineOn, getThrottle, getWarpIndex, getSasOn, getSasRetro, getDistFlown, getMaxQ, getTrail, activeStage, orbitalElements, getControlAuthority, groundVel, bodyUp, navVel, surfaceAlt, aeroState, getAeroLoad, getRcsAssist, getHold, getStrain, getChute, getHeat, getCooking, isCapsule, HEAT_SHIELD, CHUTE, totalMass, landing, LOAD_LIMIT_STACK, LOAD_LIMIT_CSM } from './physics.js';
+import { S, getState, getSimTime, getEngineOn, getThrottle, getWarpIndex, getSasOn, getSasRetro, getDistFlown, getMaxQ, activeStage, orbitalElements, groundVel, bodyUp, navVel, surfaceAlt, aeroState, getAeroLoad, getRcsAssist, getHold, getStrain, getChute, getHeat, getCooking, isCapsule, HEAT_SHIELD, CHUTE, totalMass, landing, LOAD_LIMIT_STACK, LOAD_LIMIT_CSM } from './physics.js';
 import { getCamMode, getMapFocus } from './camera.js';
-import { CORRIDOR } from './targeting.js';
 import { coarseAim } from './mapview.js';
-import { drawn } from './predictor.js';
-import * as WORLD from './world.js';
 import { initNavball, updateNavball } from './navball.js';
-import { aim } from './targeting.js';
+import { aim, CORRIDOR } from './targeting.js';
 
 const $ = id => document.getElementById(id);
-
-let mm = null, mg = null;
 
 /* Toast state machine. The old path was one 9 s `logfade` per element: 70→100 % of the keyframes
    is opacity 1→0, so every toast sat visible-but-mid-alpha for 2.7 s (measured: 10 of 40
@@ -235,8 +230,6 @@ export function updateHUD(dt) {
   }
   const i = activeStage();
   const live = engineOn && throttle > .01 && i >= 0 && stages[i].fuel > 0;
-  // accel and the duplicated throttle bar left the telemetry card (KSP-simplified HUD); the
-  // centre-bottom throttle widget below is the one readout for that number now.
   $('thrBig').innerHTML = `${Math.round(throttle * 100)}<span>%</span>`;
   $('thrGauge').firstElementChild.style.height = `${throttle * 100}%`;
   $('thrGauge').classList.toggle('live', live);
@@ -283,8 +276,6 @@ export function updateHUD(dt) {
   $('mChuteV').textContent = ch < 0 ? 'TORN' : ch === 0 ? 'STOWED' : ch === 1 ? 'DROGUE' : 'MAINS';
   $('mChute').classList.toggle('on', ch > 0); $('mChute').classList.toggle('alert', ch < 0);
   $('mStage').classList.toggle('alert', dry && state === 'flying');
-  const auth = getControlAuthority().py;
-  $('oCtrl').textContent = '×' + (auth > 9.95 ? '9.9' : auth.toFixed(1));
 
   /* Delta-v left in each stage: the rocket equation over what that stage still holds, carrying
      everything stacked above it. Vacuum Isp, so the first stage reads a little generous. */
@@ -309,15 +300,12 @@ export function updateHUD(dt) {
   else if (i >= 0 && stages[i].fuel / SPECS[i].fuel < .2) hint.textContent = `${SPECS[i].name} propellant low`;
   else hint.textContent = '';
 
-  $('desc').style.display = 'none';      // the descent call-out lives in the guide line now
-  /* 'pad' state persists through the first ~10 s of the pillar burn (it flips when the tower
-     clears), so the state alone re-printed "PRESS SPACE TO IGNITE" under a rocket at 100 % —
-     caught in the round-6 blast frame. The hint is for an engine that has not been lit. */
+  /* 'pad' state persists through the first seconds of the burn (it flips when the tower clears),
+     so nextStep keys its ignite hint on the engine, not on the state alone. */
   const g = nextStep({ state, engineOn, live, i, dry, altE, alt, nearMoon, el, radial, speed: rel.length() });
   $('guideText').innerHTML = g[0]; $('guide').className = 'hud onmap ' + (g[1] || '');
   $('guide').style.display = state === 'won' || state === 'lost' ? 'none' : 'flex';
 
-  // trajectory warning already handled in predict()
   updateNavball();
 }
 
@@ -328,7 +316,6 @@ export function toggleMapView() {
   addLog(on ? 'MAP — drag to rotate · wheel to zoom · F changes focus' : 'FLIGHT VIEW');
   return on;
 }
-export function drawMap() {}
 
 export function initHUD({ resetMission }) {
   buildStagePips();

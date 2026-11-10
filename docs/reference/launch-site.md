@@ -99,7 +99,7 @@ cycle. Measured over 30 days from 2026-11-08 (astronomy-engine, `tools/…` note
 [moon.md](moon.md)): the Moon crosses the game's equatorial-plane target **every ~12.5
 days** (observed at +11.29 d and +23.83 d). A game day is a mission of ~6 days (ascent,
 73–120 h coast, lunar phase), so roughly every other day is a feasible launch date.
-The game exposes this as the free parameter `MOON_PHASE0` (`getMoonPhase`/`setMoonPhase`)
+The game exposes this as the free parameter `MOON_PHASE0` (`setMoonPhase`)
 rather than as a calendar: the mission clock starts at ignition, and the Moon's phase at
 ignition is what determines whether intercept is cheap or impossible.
 
@@ -109,6 +109,6 @@ ignition is what determines whether intercept is cheap or impossible.
 | --- | --- | --- |
 | vehicle visual scale `VS` | 0.0014 km per build unit | 75 units → 105 m tall |
 | Saturn V + LES actual height | 110.6 m | published figure, ~5 % taller than the game's stack |
-| `RHALF` | 37 × VS ≈ 51.8 m | height of the vehicle centre above the pad surface (places `PAD_POS`); contact itself is `surfaceAlt()`, see [orbital-mechanics.md](orbital-mechanics.md) |
+| `PAD_POS` offset | 4 × PAD_SCALE + 37 × VS ≈ 57.4 m | the state point on the pad: deck top 4 u above the datum, vehicle centre 37 u above that; contact itself is `surfaceAlt()`, see [orbital-mechanics.md](orbital-mechanics.md) |
 | pad stand height | 4 × VS ≈ 5.6 m | the crawler/pedestal, not the 136 m LUT — the vehicle is welded at its own scale |
 | pad tangential speed | `SPIN_AXIS × PAD_POS · EARTH_SPIN` | `PAD_ANGULAR` |

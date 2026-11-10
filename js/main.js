@@ -1,9 +1,9 @@
 import * as THREE from 'three';
 import { RE, RM, WARPS, DTPHYS, PAD_POS, SPECS, moonPos } from './constants.js';
-import { initWorld, spinBodies, syncTime, updateSky, updateSunShadow, setWeatherVisible, getSpin, groundHeight, fineGroundHeight, moonGroundHeight } from './world.js';
+import { initWorld, syncTime, updateSky, updateSunShadow, setWeatherVisible, getSpin, groundHeight, fineGroundHeight, moonGroundHeight } from './world.js';
 import { stages, lesGroup } from './saturn.js';
 import { initVehicle, spawnParticle, addDebris, detachStage, setVisible, updateParticles, updateDebris, updateBurnVisuals, clearDebris, resetStages, plumeLive } from './vehicle.js';
-import { S, keys, initPhysics, getState, getSimTime, setSimTime, getEngineOn, getThrottle, getWarpIndex, setWarpIndex, setTargetThrottle, getTargetThrottle, getSasOn, setSas, cycleWarp, toggleSas, toggleSasRetro, activeStage, fwd, isBurning, accelAt, physStep, toggleIgnite, separateStage, separateLES, addDistFlown, pushTrail, resetSim, markTeleported, airDensity, groundVel, omega, getControlAuthority, toggleRcsAssist, toggleHold, deployChute, getArmSwing, guardWarp, aeroState, getAeroLoad, stability } from './physics.js';
+import { S, keys, initPhysics, getState, getSimTime, setSimTime, getEngineOn, getThrottle, getWarpIndex, setWarpIndex, setTargetThrottle, getTargetThrottle, getSasOn, setSas, cycleWarp, toggleSas, toggleSasRetro, activeStage, isBurning, accelAt, physStep, toggleIgnite, separateStage, separateLES, addDistFlown, resetSim, markTeleported, airDensity, groundVel, omega, getControlAuthority, toggleRcsAssist, toggleHold, deployChute, getArmSwing, guardWarp, aeroState, getAeroLoad, stability } from './physics.js';
 import { camera, initCamera, cycleCamera, updateCamera, resetCameraView, setCamMode, setCamDist, setCamView, resizeCamera, setMap, isMap, cycleMapFocus } from './camera.js';
 import { initMapView, updateMapView } from './mapview.js';
 import { updateChutes } from './chutes.js';
@@ -92,7 +92,6 @@ let audioArmed = false;
 initWorld(scene);
 initVehicle(scene);
 initPhysics({
-  scene,
   stages,
   hooks: { addLog, showEndOverlay: endOverlay },
   relief: { earth: fineGroundHeight, moon: moonGroundHeight },   // the functions the drawn patches are built from
@@ -157,7 +156,7 @@ function dropStage() {
 
 /* ---------------- main loop ---------------- */
 let last = performance.now(), prevPos = PAD_POS.clone();
-let predTick = 0, trailTick = 0;
+let predTick = 0;
 /* Between frames S holds the DRAWN state — the last two physics steps blended — and the mission
    clock reads the drawn instant, so everything that renders (camera, vehicle, HUD, Moon, weather)
    agrees with everything else. T is the true state; toTrue() puts it back before physics runs
@@ -217,10 +216,8 @@ function frame() {
     const tDraw = getSimTime(), stepped = Math.max(0, Math.min(tDraw - lastDraw, simDt + DTPHYS)); lastDraw = tDraw;
     syncTime(tDraw);
 
-    if (getState() === 'flying') { trailTick += dtReal; if (trailTick > 0.5) { trailTick = 0; pushTrail(S.pos); } }
-
     // visuals follow physics
-    updateBurnVisuals({ pos: S.pos, quat: S.q, vel: S.v, throttle: getThrottle(), activeIdx: activeStage(), burn: isBurning(), fwd, omega });
+    updateBurnVisuals({ pos: S.pos, quat: S.q, vel: S.v, throttle: getThrottle(), activeIdx: activeStage(), burn: isBurning(), omega });
     updateDebris(stepped, accelAt);
     {
       const rho = airDensity(Math.max(0, S.pos.length() - RE)) / airDensity(0), sp = groundVel(_gv).length();

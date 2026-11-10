@@ -7,7 +7,7 @@ import { frameDir } from './origin.js';
 const _sunF = new THREE.Vector3();
 import { LAYER_FX, RES_SCALE } from './halfres.js';
 import { NP, pPos, pR, pLife, pAge, pInv, pHeat, pMode, pSmoke, pMoon, pPal, pColB, alive, nAlive, ship, plumeDebug, isSmoke,
-  SM_SEAM, SM_SPRAY, SM_FLASH, SM_TRAIL, SM_STEAM } from './exhaust-pool.js';
+  SM_SEAM, SM_SPRAY, SM_FLASH, SM_TRAIL } from './exhaust-pool.js';
 
 /* The parcels on screen: drawn puffs, not blurred sprites.
 

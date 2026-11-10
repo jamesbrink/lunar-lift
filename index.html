@@ -15,7 +15,6 @@
 <div id="guide" class="hud onmap" aria-live="polite"><span id="guideTag">NEXT</span><span id="guideText"></span></div>
 <div id="log" class="hud onmap" aria-live="polite"></div>
 <div id="warn" class="hud flightonly" role="alert"></div>
-<div id="desc" class="hud flightonly"></div>
 
 <!-- Top left: where am I and how fast. The air row appears only while there is air. -->
 <div id="tel" class="hud panel onmap">
@@ -63,7 +62,6 @@
     <canvas id="navball"></canvas>
     <div id="navRead"><span>HDG <b id="nHeading">—</b></span><span>PITCH <b id="nPitch">—</b></span></div>
     <div id="engState">ENGINE OFF</div>
-    <b id="nBurn" hidden>idle</b>
   </div>
   <div id="modes" class="panel">
     <button id="mSas" data-key="p"><kbd>P</kbd><span>SAS</span><b id="oSas">OFF</b></button>
@@ -84,7 +82,6 @@
   <button data-key="]"><kbd>]</kbd><span>FASTER</span><b id="vWarp">REAL TIME</b></button>
   <button id="helpBtn"><kbd>?</kbd><span>KEYS</span></button>
 </div>
-<span id="oCtrl" hidden></span>
 
 <div id="helpCard" class="panel">
   <div class="cols">

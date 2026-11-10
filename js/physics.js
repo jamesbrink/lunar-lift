@@ -24,16 +24,14 @@ let engineOn = false, throttle = 0, targetThrottle = 0;
 let sasOn = false, sasRetro = false, simTime = 0, warpIdx = WARP_ONE;
 let maxQ = 0, loggedStageOut = [false, false, false], flightStarted = false;
 let tliLogged = false, loiLogged = false;
-let turnHintLogged = false, loggedMaxQ = false;
+let loggedMaxQ = false;
 const UP_REF = new THREE.Vector3(0, 0, 1);
 export const S = { pos: PAD_POS.clone(), v: PAD_ANGULAR.clone(), q: new THREE.Quaternion().setFromUnitVectors(UP_REF, PAD_UP) };
 export const keys = Object.create(null);
 /* true flight controls: body-frame angular velocity driven by commanded torque        */
 export const omega = new THREE.Vector3();
 let I0 = null;                       // fully loaded reference inertia, recomputed each mission
-let trail = [];
 let distFlown = 0;
-let sasHoldTime = 0;
 let rcsAssist = true, aeroLoad = 0;
 /* What the touchdown was, for the debrief: m/s, degrees from vertical, tonnes left, seconds. */
 export const landing = { speed: 0, tilt: 0, fuel: 0, time: 0, home: false, flyby: false };
@@ -45,7 +43,6 @@ export const getRcsAssist = () => rcsAssist;
 export function toggleRcsAssist() { rcsAssist = !rcsAssist; hooks.addLog(`RCS STABILITY ASSIST ${rcsAssist ? 'ON' : 'OFF — ROTATION IS NOW UNDAMPED'}`); }
 
 export const getState = () => state;
-export const setState = v => { state = v; };
 export const getEngineOn = () => engineOn;
 export const getThrottle = () => throttle;
 export const getTargetThrottle = () => targetThrottle;
@@ -63,8 +60,6 @@ export const setSas = (on, retro = false) => { sasOn = on; sasRetro = retro; if 
 export const getMaxQ = () => maxQ;
 export const getDistFlown = () => distFlown;
 export const addDistFlown = d => { distFlown += d; };
-export const getTrail = () => trail;
-export const pushTrail = p => { trail.push(p.clone()); if (trail.length > 400) trail.shift(); };
 
 /* How fast time may run here. Warp through thick air, a burn close to the ground or the last
    kilometres over the Moon is how a flight ends in two real seconds; out in the open it is free.
@@ -261,7 +256,6 @@ export const CHUTE = { drogue: { area: 30, tear: 20000, mach: 1.5 }, mains: { ar
    in too steep and the air stops you faster than people can take; too shallow and you skip out. */
 export const G_LIMIT = 16, G_TIME = 2;
 let gLoad = 0, gOver = 0;
-export const getG = () => gLoad;
 /* Swing arms: 0 across the stack, 1 swung clear. They start to move at ignition and take
    ARM_TIME; until they are most of the way round they are solid (js/colliders.js). */
 let armSwing = 0, strandTick = 0;
@@ -319,7 +313,6 @@ export function toggleIgnite() {
    and the tower is ~0.14% of the stack, so moving it would perturb the certified mission for nothing. */
 export const LES_ALT = 90;                                      // km, Apollo 11 jettison is near 95 km
 let lesSeparated = false;
-export const isLESGone = () => lesSeparated;
 
 export function separateLES() {
   if (state !== 'flying' || lesSeparated || !stages[0].separated || !vehicleOps.les) return;
@@ -510,7 +503,6 @@ export function physStep(dt) {
   omega.x += pitchIn * 0.12 * ratio * dt;                          // commanded angular acceleration
   omega.y += yawIn * 0.12 * ratio * dt;
   omega.z += rollIn * 0.25 * ratioR * dt;
-  if (manual && sasOn) sasHoldTime = 0;                            // hands-on overrides SAS briefly
 
   if (chute > 0 && aeroState.q > 5) {                              // the canopy hauls the apex round to trail
     const vs = surfaceVel(_nv);
@@ -520,7 +512,6 @@ export function physStep(dt) {
   if (holdOn && manual) holdQ.copy(S.q);
   if (holdOn && !manual && !hung) servo(holdQ, ratio, dt);
   if (sasOn && !manual && !hung) {                                          // SAS: rate servo toward the reference
-    sasHoldTime = Math.min(6, sasHoldTime + dt);
     /* Below a few km the ground-relative velocity is a few m/s and is dominated by the
        attitude error itself, so chasing "prograde" is a self-reinforcing loop: the nose
        tips, the velocity tips with it, SAS chases it further. Real launch vehicles hold
@@ -782,7 +773,6 @@ function checkMissionEvents() {
     loiLogged = true; hooks.addLog('LUNAR SPHERE OF INFLUENCE — PREPARE RETROGRADE BRAKING (V, then P, then ignite)', 'good');
   }
   if (!loggedMaxQ && maxQ > 30000 && activeStage() === 0) { loggedMaxQ = true; hooks.addLog('MAX-Q — EASE THE THROTTLE IF YOU LIKE THE PAINT'); }
-  turnHintLogged = true;      // the NEXT line carries this now; the old toast told a pilot on SAS to pitch at the Moon
 }
 
 /* ---------------- mission reset (sim side) ---------------- */
@@ -791,11 +781,25 @@ export function resetSim() {
     st.separated = false; st.fuel = SPECS[idx].fuel; loggedStageOut[idx] = false;
   });
   lesSeparated = false;
+  // state vector and clock
   S.pos.copy(PAD_POS); S.v.copy(PAD_ANGULAR); S.q.setFromUnitVectors(UP_REF, PAD_UP);
+  omega.set(0, 0, 0);
+  simTime = 0; warpIdx = WARP_ONE; wasNearMoon = false;
+  state = 'pad'; flightStarted = false; tRelease = null; armSwing = 0;
+  // engine and controls
   engineOn = false; throttle = targetThrottle = 0;
-  sasOn = false; sasRetro = false; simTime = 0; warpIdx = WARP_ONE; maxQ = 0;
-  tliLogged = loiLogged = loggedMaxQ = turnHintLogged = false; distFlown = 0; trail = [];
-  flightStarted = false; state = 'pad'; omega.set(0, 0, 0); I0 = null; holdOn = false; armSwing = 0; wasNearMoon = false; tRelease = null; aeroState.q = aeroState.mach = aeroState.aoa = aeroState.nBody = aeroState.nFin = 0; gLoad = 0; gOver = 0; chute = 0; chuteOpen = 0; heat = 0; cooking = 0; rcsAssist = true; aeroLoad = 0; strain = 0;
+  sasOn = false; sasRetro = false; holdOn = false; rcsAssist = true;
+  I0 = null;
+  // mission log latches and the debrief's counters
+  tliLogged = loiLogged = loggedMaxQ = false;
+  maxQ = 0; distFlown = 0;
+  // air: the readout, the loads and the strain they have built up
+  aeroState.q = aeroState.mach = aeroState.aoa = aeroState.nBody = aeroState.nFin = 0;
+  aeroLoad = 0; strain = 0;
+  gLoad = 0; gOver = 0;
+  // entry: parachutes and heat
+  chute = 0; chuteOpen = 0;
+  heat = 0; cooking = 0;
 }
 
 /* teleport() starts the flight directly, bypassing the liftoff guard */

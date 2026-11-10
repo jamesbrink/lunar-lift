@@ -72,15 +72,12 @@ const TRENCH = 9 * PAD_SCALE;                            // trench floor depth b
 const PAD_BERM = 40 * PAD_SCALE;                         // berm crest ≈ PAD_BERM/4 ≈ 14 m, smoothstep-free s·t cap
 const ALT40_R2 = (RE + 40) * (RE + 40);  // r² gate for "below 40 km": the ascent-rope regime
 
-/* Relief wiring. What world.js actually exports is body-aware: groundHeight / fineGroundHeight for
-   Earth (fine = coarse + near-level detail, shoreline-weighted, pad flattening already baked in)
-   and moonGroundHeight for the Moon — no fine getter there because the Moon has no near level; its
-   coarse field IS its terrain. All return km above the reference sphere, which is exactly the unit
-   this collider adds, and all return 0 while the field is unbuilt or when the direction misses.
-   Lookup stays runtime-typed on purpose: a renamed export must never take the game down the way a
-   missing named import just did to terrain.js, and every silent fallback increments plumeDebug —
-   so "the exhaust looks wrong" arrives with a named cause instead of a mystery. The per-parcel
-   last-good cache (pTh) is the boot-order guard: before the fields exist a 0 is honest (the mesh
+/* Relief wiring. js/world.js's lookups are body-aware: fineGroundHeight for Earth (coarse relief
+   plus the near-level detail the patch is built from) and moonGroundHeight for the Moon, whose
+   relief grid is its drawn ground. Both return km above the reference sphere, which is exactly the
+   unit this collider adds, and 0 while the field is unbuilt or when the direction misses. A
+   non-finite answer is counted in plumeDebug.causeHeight, so "the exhaust looks wrong" arrives
+   with a named cause. The per-parcel last-good cache (pTh) is the boot-order guard: before the fields exist a 0 is honest (the mesh
    is a smooth sphere at that moment), but once a parcel has sampled real relief a later 0 never
    drops it through a mountain — worst case a puff collides slightly early, conservative beats
    swallowed. Lunar relief runs −1.45..+2.0 km: without this, highland burns spray dust up to 2 km
@@ -93,9 +90,7 @@ function reliefAt(dx, dy, dz, moon, i) {
      on the pad). Relief does not change over the few metres a parcel moves in a substep, so a parcel
      past its first tenth of a second re-reads it one substep in four, staggered by slot. */
   if (pAge[i] > 0.1 && ((tick + i) & 3)) return pTh[i];
-  const fn = moon ? WORLD.moonGroundHeight
-    : (typeof WORLD.fineGroundHeight === 'function' ? WORLD.fineGroundHeight : WORLD.groundHeight);
-  if (typeof fn !== 'function') { plumeDebug.causeField++; return pTh[i]; }
+  const fn = moon ? WORLD.moonGroundHeight : WORLD.fineGroundHeight;
   _tdir.set(dx, dy, dz);                                  // uvAlong normalizes; NaN dirs miss → 0
   const v = fn(_tdir);
   if (!(v === v)) { plumeDebug.causeHeight++; return pTh[i]; }

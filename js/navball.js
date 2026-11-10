@@ -340,7 +340,7 @@ function drawOrbit(nearMoon, centre, vel, el, ecc) {
      of which draw escaped the old same-radius clip.
      NaN/exception hardening (round-3 'empty black sub-map', both Earth and Moon sessions): the
      spin comes off the live scene graph, and world.js latches a NaN into earth/moon rotation.y
-     permanently if syncTime/spinBodies ever sees a non-finite time — from there lon → cu → NaN
+     permanently if syncTime ever sees a non-finite time — from there lon → cu → NaN
      and drawImage THROWS (as does any non-finite arg, or a zero-pixel source canvas), which
      main.js's frame catch swallows once and leaves the cleared canvas showing its CSS
      background forever. So: non-finite spin reads as spin 0; a non-finite crop window skips
@@ -495,5 +495,4 @@ export function updateNavball() {
   const set = (id, v) => { const el = document.getElementById(id); if (el) el.textContent = v; };
   set('nPitch', `${pitch >= 0 ? '+' : ''}${pitch.toFixed(0)}°`);
   set('nHeading', Math.abs(pitch) > 86 ? '—' : `${((heading + 360) % 360).toFixed(0)}°`);   // straight up or down has no heading: it read 209° on the pad
-  set('nBurn', isBurning() ? 'burning' : 'idle');
 }

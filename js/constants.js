@@ -54,7 +54,6 @@ export const MOON_V = new THREE.Vector3().crossVectors(MOON_PLANE_N, MOON_U).nor
    Waiting on the pad and warping advances the Moon, so any other start time can still reach one. */
 export const MOON_PHASE0 = 4.9187044;                      // rad — 281.82° along the lunar orbit
 let moonPhase = MOON_PHASE0;
-export const getMoonPhase = () => moonPhase;
 export function setMoonPhase(p) { moonPhase = p; }
 
 export function moonPos(t, out = new THREE.Vector3()) {
@@ -71,7 +70,8 @@ export function moonVel(t, out = new THREE.Vector3()) {
 
 export const VS = 0.0014;                 // vehicle visual scale: 75 build units → ~105 m, Saturn-V sized
 export const PAD_SCALE = VS;
-export const RHALF = 37 * VS;             // vehicle centre above the pad surface (~ half its height); contact is physics.js surfaceAlt()
+/* The state point on the pad: the deck top is 4 u above the datum and the vehicle's centre 37 u above
+   that (about half its height). Contact is js/physics.js surfaceAlt(), not this. */
 export const PAD_POS = PAD_UP.clone().multiplyScalar(RE + 4 * PAD_SCALE + 37 * VS);
 export const PAD_ANGULAR = new THREE.Vector3().crossVectors(SPIN_AXIS, PAD_POS).multiplyScalar(EARTH_SPIN); // pad's inertial velocity
 

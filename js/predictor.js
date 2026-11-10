@@ -1,6 +1,6 @@
 import * as THREE from 'three';
-import { RE, RM, SOI_M, VS, CD_AREA, SPECS, moonPos } from './constants.js';
-import { S, getSimTime, getEngineOn, getThrottle, activeStage, totalMass, fwd, gravityAt, airDensity, surfaceAlt, tailStation, getChute, coastDrag } from './physics.js';
+import { RE, RM, SOI_M, VS, SPECS, moonPos } from './constants.js';
+import { S, getSimTime, getEngineOn, getThrottle, activeStage, totalMass, fwd, gravityAt, surfaceAlt, tailStation, getChute, coastDrag } from './physics.js';
 import { stages } from './saturn.js';
 import { ribbon } from './ribbon.js';
 
@@ -38,10 +38,6 @@ const MINT = [0.36, 0.95, 0.62], RED = [1, 0.22, 0.18];
 const rel = new Float64Array(PRED_MAX * 3), tt = new Float64Array(PRED_MAX);
 const path = { n: 0, frame: 'earth', impact: null, closed: false, ap: -1, pe: -1, apAlt: 0, peAlt: 0 };
 let cursor = 1;
-
-/* What is on screen this frame, in world km, for the orbital map (js/hud.js): the ship, then every
-   point still ahead of it. Float32 is fine there — the map is thousands of km per pixel. */
-export const drawn = { pos: new Float32Array((PRED_MAX + 1) * 3), n: 0, impact: false };
 
 const line = ribbon({ widthPx: 2.2, glowWidthPx: 9, vertexColors: true, capacity: CAP, opacity: 1, glowOpacity: 0.55 });
 export const predLine = new THREE.Group();
@@ -88,7 +84,7 @@ export function initPredictor(deps) {
 }
 
 export function clearPredictor() {
-  path.n = 0; path.impact = null; drawn.n = 0; drawn.impact = false;
+  path.n = 0; path.impact = null;
   line.clear();
   if (apMark) apMark.visible = peMark.visible = false;
   impactWarn = ''; setWarn(null);
@@ -152,7 +148,6 @@ export function predict() {
     const dt = THREE.MathUtils.clamp(Math.min(alt, v.length() * 40, 3000) * 0.006, 0.2, 20);
     const mass = totalMass();
     gravityAt(p, _g, t);
-    const altE = p.length() - RE;
     coastDrag(_g, p, v, mass);            // the same nose-on, air-relative drag targeting uses (js/physics.js)
     if (sp && fuel > 0) {
       fuel = Math.max(0, fuel - sp.thrust * throttle / (sp.isp * 9.81) * dt);
@@ -211,10 +206,10 @@ export function predict() {
 /* Draw the stored path from where the ship is this frame. */
 export function updatePredictor(camera) {
   const n = path.n;
-  if (n < 2) { line.clear(); drawn.n = 0; if (apMark) apMark.visible = peMark.visible = false; return; }
+  if (n < 2) { line.clear(); if (apMark) apMark.visible = peMark.visible = false; return; }
   const sim = getSimTime();
   while (cursor < n && tt[cursor] <= sim) cursor++;
-  if (cursor >= n) { line.clear(); drawn.n = 0; apMark.visible = peMark.visible = false; return; }
+  if (cursor >= n) { line.clear(); apMark.visible = peMark.visible = false; return; }
 
   if (path.frame === 'moon') moonPos(sim, _base); else _base.set(0, 0, 0);
   predLine.position.copy(S.pos);                // vertices are offsets from the ship: see the header
@@ -264,13 +259,4 @@ export function updatePredictor(camera) {
     mark.userData.label(alt);
   };
   place(apMark, path.ap, path.apAlt); place(peMark, path.pe, path.peAlt);
-
-  // the map's copy: the ship, then everything ahead of it, in world km
-  const w = drawn.pos;
-  w[0] = S.pos.x; w[1] = S.pos.y; w[2] = S.pos.z;
-  let k = 1;
-  for (let q = cursor; q < n; q++, k++) {
-    w[k * 3] = rel[q * 3] + _base.x; w[k * 3 + 1] = rel[q * 3 + 1] + _base.y; w[k * 3 + 2] = rel[q * 3 + 2] + _base.z;
-  }
-  drawn.n = k; drawn.impact = !!path.impact;
 }

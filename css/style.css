@@ -1,16 +1,11 @@
   :root{
     --fg:#e8ecf4; --muted:#9aa4b5; --panel:rgba(10,14,22,.72); --panel-border:rgba(140,160,190,.22);
     --accent:#6fd3ff; --ok:#5ddc9a; --warn:#ffb45c; --err:#ff6a5c; --mono:ui-monospace,"SF Mono",Menlo,Consolas,monospace;
-    /* Centre-screen text (#warn/#desc/#igniteHint/#throttle/#clock) has no panel behind it —
-       it sits directly on the render, including near-white regolith (the review frames sampled
-       #d8d8d8). WCAG ratio (L1+0.05)/(L2+0.05) with sRGB-linearised L against that ground was
-       1.18:1 for --accent, 1.20 --fg, 1.21 --ok, 1.23 --warn, 1.76 --muted, 1.97 --err —
-       the "0 % nearly invisible / FLAMEOUT pale grey-on-white" of the report. The --ob-* set
-       keeps every hue but holds its luminance below 0.0552, the ceiling for 7:1 vs #d8d8d8
-       (measured: fg 11.51, ok 7.09, accent 7.03, err 7.02, muted 7.01, warn 7.01).
-       Night-side readability of the dark fills is carried by --ob-halo: the 1px dark layer
-       reinforces the glyph edge over bright regolith, the white layers draw the contour over
-       space (core-vs-halo #f4f8ff-on-#0a1017 17.9:1). Panels keep the old bright palette. */
+    /* The --ob-* inks are for text on the light plates in the middle of the screen (#clock, #guide,
+       #warn): every hue of the panel palette, with luminance held below 0.0552 — the ceiling for
+       7:1 against a #d8d8d8 ground (measured: fg 11.51, ok 7.09, accent 7.03, err 7.02, muted 7.01,
+       warn 7.01). --ob-halo draws the glyph's contour where a plate does not cover. Panels keep
+       the bright palette. */
     --ob-fg:#16202e; --ob-muted:#384355; --ob-accent:#074764;
     --ob-ok:#074c2c; --ob-warn:#603a00; --ob-err:#84160a;
     --ob-halo:0 0 1px rgba(5,9,15,.95),0 0 3px rgba(244,248,255,.85),0 0 10px rgba(244,248,255,.45);
@@ -25,17 +20,13 @@
   .panel h3{font-size:10px;letter-spacing:.14em;color:var(--muted);text-transform:uppercase;margin-bottom:6px}
   .kv{display:grid;grid-template-columns:1fr auto;gap:2px 14px;font-family:var(--mono);font-size:13px}
   .kv b{font-weight:600;color:var(--fg)} .kv span{color:var(--muted)}
-  /* flight computer lives inside #mapview only, so it positions against the overlay */
   /* predicted closest lunar approach: green inside the flown corridor, amber outside it,
      dim while the forward propagation is still running, red for a surface intersection */
   #oAim.ok{color:var(--ok)} #oAim.bad{color:var(--warn)} #oAim.run{color:var(--muted)} #oAim.impact{color:var(--err)}
-  /* M overlay: the orbital map replaces the flight screen. .onmap readouts (MET, alt, vel, log)
-     ride above it; #overlay (win/lose, z10) stays the topmost layer. */
-  #mapview{position:fixed;inset:0;z-index:6;background:#05070d;pointer-events:none}
-  body:not(.map) #mapview{display:none}
-  #mapCanvas{position:absolute;inset:0;width:100%;height:100%;display:block}
+  /* M: the map is the same scene from the map camera. .onmap readouts (clock, guide, flight, orbit,
+     log) stay; .flightonly ones step aside; #overlay (win/lose, z10) stays the topmost layer. */
   .hud.onmap{z-index:8}
-  /* !important because warn/desc/igniteHint are shown by inline style in updateHUD/setWarn */
+  /* !important because #warn is shown by inline style in setWarn */
   body.map .flightonly{display:none !important}
   #clock{left:50%;top:6px;transform:translateX(-50%);font-family:var(--mono);font-size:12px;
     color:var(--ob-muted);letter-spacing:.08em;white-space:nowrap;text-shadow:var(--ob-halo)}
@@ -56,31 +47,12 @@
   @keyframes logfadeout{0%{opacity:1}100%{opacity:0}}
   #warn{left:50%;top:164px;transform:translateX(-50%);font-family:var(--mono);font-size:15px;color:var(--ob-err);
     text-shadow:var(--ob-halo);display:none;letter-spacing:.06em}
-  /* DESCENT gets its own vertical slot, clear of #thrBig at every window height. The throttle
-     column is a fixed bottom-anchored box: offset 78 + engState 16 (11px×1.45) + gauge 20
-     (10px box + 6/4 margins) + thrBig 43.5 (30px×1.45) ≈ 158 px above the bottom edge. The
-     review frames caught DESCENT running straight through the numeral (the strip used to sit
-     at 120 px — inside the 114..158 band the numeral occupies); even 172 left less than the
-     strip's own 22px height of clearance. 192 = stack top + one full line of margin, and
-     because every offset is bottom-anchored the gap is the same at any window height. Raising
-     the strip instead of moving the numeral: one number, zero DOM churn. */
-  #desc{left:50%;bottom:236px;transform:translateX(-50%);font-family:var(--mono);font-size:15px;display:none;text-align:center;
-    color:var(--ob-fg);text-shadow:var(--ob-halo)}
-  /* Round-6: the centre banners carry their OWN background now. Review 5 measured the shipped
-     --ob-* inks against bright regolith directly — the IMPACT red hit 2.08:1 and the DESCENT
-     green 2.79:1, nowhere near the ≥7:1 the palette claims — because ink-only legibility depends
-     on whatever surface scrolls behind the text. A near-white plate (α .9 over regolith ≈ 0.95
-     relative luminance) takes every --ob-* token to ≥9:1 by construction: --ob-err L .054 → 9.7:1,
-     --ob-ok L .054 → 9.6:1, --ob-fg L .013 → 11:1. The dark ink stays (the on-bright palette is
-     the shipped language); the plate just stops the terrain voting on the contrast. Same pill
-     geometry as the toast lines so the centre screen reads as one furniture family. */
-  /* Round 8: the MET strip and the throttle stack join the same family. Review 8 measured both
-     in dark ink over the black sky of the vacuum frames (MET grey-on-black, "MAIN ENGINE 295 KN"
-     teal-on-sea and the 0 % numeral on black) — the halo only holds the ink up on BRIGHT terrain,
-     it cannot invent contrast on night. The plate makes them legible on any background. Padding
-     grows OUTWARD: #clock top 10→6 and #throttle bottom 78→72 with 4/6 px padding put the text
-     exactly where it was measured before (DESCENT clearance at 192 px unchanged). */
-  #warn,#desc{background:rgba(240,244,250,.9);border:1px solid rgba(16,24,36,.28);
+  /* The centre banners carry their own background. Ink alone depends on whatever surface scrolls
+     behind the text: measured against bright regolith the red was 2.08:1, and over the black sky of
+     the vacuum frames the dark inks vanished. A near-white plate (alpha .9 over regolith is about
+     0.95 relative luminance) takes every --ob-* token to 9:1 or better by construction. Same pill
+     geometry as the toast lines, so the centre of the screen reads as one family. */
+  #warn{background:rgba(240,244,250,.9);border:1px solid rgba(16,24,36,.28);
     border-radius:7px;padding:5px 12px}
   #clock{background:rgba(240,244,250,.9);border:1px solid rgba(16,24,36,.28);
     border-radius:7px;padding:4px 12px}
@@ -91,8 +63,8 @@
      opacity .38 multiplied the 11px --muted (#9aa4b5) down to an effective
      rgb(0.38·154+0.62·8, 0.38·164+0.62·11, 0.38·181+0.62·18) ≈ rgb(64,69,80) over the ~rgb(8,11,18)
      panel — 2.1:1 contrast, the reviewer's "near-invisible dark-on-dark"
-     for depleted stages (15-ejecta). Strike-through plus the dead pip still read as spent.
-     Round 3 still called .55 marginal: composited over rgb(8,11,18) it is rgb(131,135,142) =
+     for depleted stages. Strike-through plus the dead pip still read as spent.
+     .55 was marginal: composited over rgb(8,11,18) it is rgb(131,135,142) =
      5.45:1 (AA, but thin at 11px). .72 composites to rgb(169,173,181) = 8.75:1 — WCAG AAA,
      and the row is unmistakably legible while the strike + dead pip carry the "spent" meaning. */
   .stageRow.gone{text-decoration:line-through}
