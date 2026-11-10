@@ -72,15 +72,40 @@ export function warpCap() {
   const altE = S.pos.length() - RE, altM = S.pos.distanceTo(_moon) - RM;
   /* Standing on the pad with the engines cold, time is free: warp through the day and the night
      and launch when the Moon is where you want it. */
-  if (state === 'pad' && !engineOn && !keys['shift'] && targetThrottle < 0.05) return 10000;            // a day in 8.6 s: the hold-down step is an exact rotation at any size
+  if (state === 'pad' && !engineOn && !keys['shift'] && targetThrottle < 0.05) { capWhy = 'ON THE PAD'; return 10000; }            // a day in 8.6 s: the hold-down step is an exact rotation at any size
   if (altE < 70) { capWhy = chute === 2 && chuteOpen >= 1 ? 'UNDER PARACHUTES' : 'IN THE AIR'; return chute === 2 && chuteOpen >= 1 ? 16 : 4; }
   if (altM < 15) { capWhy = 'THIS LOW OVER THE MOON'; return 4; }
   if (altM < 50) { capWhy = 'THIS LOW OVER THE MOON'; return 32; }
   if (altM < 400) { capWhy = 'IN LOW LUNAR ORBIT'; return 128; }
   if (altE < 140) { capWhy = 'THIS LOW OVER THE EARTH'; return 16; }
   if (isBurning()) { capWhy = 'WITH THE ENGINE BURNING'; return 8; }
-  capWhy = 'THE FASTEST THERE IS IN FLIGHT';
-  return 1000;                                               // flight tops out here: 0.1 s steps, at most 600 a frame
+  /* Out in the open the only limit is what a frame can step: a coasting step costs 0.41 us
+     (measured in the browser on the translunar coast), so x100000 is 16,667 steps and ~7 ms a
+     frame. Closer in, an orbit is over too quickly to be flown at that rate. */
+  if (altE < 2000) { capWhy = 'IN LOW EARTH ORBIT'; return 1000; }
+  if (altM < 5000 || altE < 30000) { capWhy = 'THIS CLOSE TO A WORLD'; return 10000; }
+  capWhy = 'THE FASTEST THERE IS';
+  return 100000;
+}
+/* Seconds of mission time that can pass before the place changes what warp is allowed: a lower
+   estimate of the time to the Moon's sphere of influence (or out of it), to 400 km over the Moon, and
+   to the top of the Earth's air, each as distance over present closing speed. js/main.js spends at most a
+   quarter of it per frame, so a x100000 coast eases itself down as it arrives instead of stepping
+   ten thousand kilometres past the door in one frame. Infinity when nothing is near. */
+export function warpHorizon() {
+  if (state !== 'flying') return Infinity;
+  moonPos(simTime, _moon); moonVel(simTime, _mv);
+  const rM = S.pos.distanceTo(_moon), rE = S.pos.length(), altE = rE - RE, altM = rM - RM;
+  /* closing speed on each body: the radial rate, plus 3 % of the speed so a circular orbit (radial
+     rate zero, and it is going nowhere) is not read as an hour from everything */
+  _mv.sub(S.v);
+  const vM = Math.abs(_mv.dot(_md.copy(_moon).sub(S.pos)) / rM) + 0.03 * _mv.length() + 1e-3;
+  const vE = Math.abs(S.v.dot(S.pos) / rE) + 0.03 * S.v.length() + 1e-3;
+  let h = Infinity;
+  h = Math.min(h, Math.abs(rM - SOI_M) / vM);
+  if (rM < SOI_M) { for (const a of [5000, 400, 50, 15]) if (altM > a) { h = Math.min(h, (altM - a) / vM); break; } }
+  else for (const a of [30000, 2000, 140, 70]) if (altE > a) { h = Math.min(h, (altE - a) / vE); break; }
+  return h;
 }
 /* Called every frame: time drops back when the place demands it, and at the Moon's doorstep. */
 let wasNearMoon = false;
@@ -342,8 +367,11 @@ export function separateStage() {
   vehicleOps.detachStage(mesh, S.pos, S.q);
   const worldPos = S.pos.clone();
   const lat = new THREE.Vector3(1, 0, 0).applyQuaternion(S.q);
-  vehicleOps.addDebris({ mesh, vel: S.v.clone().addScaledVector(lat, 0.03).addScaledVector(PAD_UP, -0.005),
-    angVel: new THREE.Vector3(Math.random() * 0.6, Math.random() * 0.6, Math.random() * 0.6), age: 0, trail: 1 });
+  /* It leaves 3 m/s astern and 1.5 m/s to one side, as a spent stage pushed off by its retro
+     motors does, and tumbles slowly: from there it is on its own orbit (js/vehicle.js updateDebris).
+     It used to be thrown 30 m/s sideways and 5 m/s along the PAD's up vector, wherever that pointed. */
+  vehicleOps.addDebris({ mesh, vel: S.v.clone().addScaledVector(fwd(), -0.003).addScaledVector(lat, 0.0015), mass: SPECS[i].dry,
+    angVel: new THREE.Vector3(Math.random() * 0.12, Math.random() * 0.12, Math.random() * 0.12), age: 0, trail: 1 });
   /* The burst is a fireball only where there is air to burn in and to hold it together. In vacuum
      the same 26 parcels at 10-18 m hung as large glowing soft discs round the stage (playtest, 683 km):
      there it is a few small, brief flashes and the sparks below. */

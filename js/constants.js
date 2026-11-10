@@ -92,7 +92,7 @@ export const ATMO_H = 8.5, RHO0 = 1.225, CD_AREA = 28;   // kg/m³, m²
    a frame takes, never their size, and the picture between two steps is interpolated. The one
    exception is a cold vehicle held down on the pad, where a step is an exact rotation with the
    planet at any size: there the frame is a single step, which is what makes x10000 affordable. */
-export const DTPHYS = 0.1, WARPS = [0, 0.25, 1, 2, 4, 8, 16, 32, 64, 128, 256, 512, 1000, 10000];   // x10000 is for the pad only: physics.js warpCap
+export const DTPHYS = 0.1, WARPS = [0, 0.25, 1, 2, 4, 8, 16, 32, 64, 128, 256, 512, 1000, 10000, 100000];   // the top two are for the pad and for open space: physics.js warpCap
 export const WARP_ONE = WARPS.indexOf(1);
 
 /* SAS pitch program. A real launch vehicle does not chase "prograde" off the pad: it

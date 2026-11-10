@@ -196,8 +196,18 @@ export function updateDebris(simDt, accelAt) {
         d.mesh.position.add(ship.pos).sub(d.ref).addScaledVector(d.vel, -simDt);
       d.ref = null;
     }
-    const a = accelAt(d.mesh.position, d.vel, 8, null);
-    d.vel.addScaledVector(a, simDt); d.mesh.position.addScaledVector(d.vel, simDt);
+    /* A dropped stage is a body in the same gravity and the same air as the ship, stepped the same
+       way (v += a dt, then p += v dt, forces at the step's own time) at the ship's own 0.1 s, however
+       much mission time the frame covers (the step is part of the trajectory: AGENTS.md). It used to take ONE
+       step of the whole frame — 16 s at x1000 — and was deleted after 400 s, so a stage left in
+       orbit sank out of it and vanished (reported from play). */
+    {
+      const n = Math.max(1, Math.min(4000, Math.round(simDt / DTPHYS))), dt = simDt / n, t0 = getSimTime() - simDt;
+      for (let k = 1; k <= n; k++) {
+        const a = accelAt(d.mesh.position, d.vel, d.mass || 8, null, t0 + k * dt);
+        d.vel.addScaledVector(a, dt); d.mesh.position.addScaledVector(d.vel, dt);
+      }
+    }
     d.mesh.rotation.x += d.angVel.x * simDt; d.mesh.rotation.y += d.angVel.y * simDt;
     if (d.trail) {
       const fall = Math.hypot(d.vel.x, d.vel.y, d.vel.z);
@@ -239,7 +249,8 @@ export function updateDebris(simDt, accelAt) {
         spawn(d.mesh.position, _trailVel, 2.5 + Math.random() * 2, IMPACT_COLOUR, 5 + Math.random() * 6, SM_SMOKE);
       }
     }
-    if (down || d.age > 400 || rE > 60000 && rE < 300000) { scene.remove(d.mesh); debris.splice(i, 1); }
+    /* It lives until it comes down, or is too far from the ship to be a pixel (5,000 km). */
+    if (down || d.mesh.position.distanceToSquared(S.pos) > 25e6) { scene.remove(d.mesh); debris.splice(i, 1); }
   }
 }
 const TRAIL_COLOUR = [0.82, 0.83, 0.86];

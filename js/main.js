@@ -3,7 +3,7 @@ import { RE, RM, WARPS, DTPHYS, PAD_POS, SPECS, moonPos } from './constants.js';
 import { initWorld, syncTime, updateSky, updateSunShadow, setWeatherVisible, getSpin, groundHeight, fineGroundHeight, moonGroundHeight } from './world.js';
 import { stages, lesGroup } from './saturn.js';
 import { initVehicle, spawnParticle, addDebris, detachStage, setVisible, updateParticles, updateDebris, updateBurnVisuals, clearDebris, resetStages, plumeLive } from './vehicle.js';
-import { S, keys, initPhysics, getState, getSimTime, setSimTime, getEngineOn, getThrottle, getWarpIndex, setWarpIndex, setTargetThrottle, getTargetThrottle, getSasOn, setSas, cycleWarp, toggleSas, toggleSasRetro, activeStage, isBurning, accelAt, physStep, toggleIgnite, separateStage, separateLES, addDistFlown, resetSim, markTeleported, airDensity, groundVel, omega, getControlAuthority, toggleRcsAssist, toggleHold, deployChute, getArmSwing, guardWarp, setCutoffGuard, aeroState, getAeroLoad, stability } from './physics.js';
+import { S, keys, initPhysics, getState, getSimTime, setSimTime, getEngineOn, getThrottle, getWarpIndex, setWarpIndex, setTargetThrottle, getTargetThrottle, getSasOn, setSas, cycleWarp, warpHorizon, toggleSas, toggleSasRetro, activeStage, isBurning, accelAt, physStep, toggleIgnite, separateStage, separateLES, addDistFlown, resetSim, markTeleported, airDensity, groundVel, omega, getControlAuthority, toggleRcsAssist, toggleHold, deployChute, getArmSwing, guardWarp, setCutoffGuard, aeroState, getAeroLoad, stability } from './physics.js';
 import { camera, initCamera, cycleCamera, updateCamera, resetCameraView, setCamMode, setCamDist, setCamView, resizeCamera, setMap, isMap, cycleMapFocus } from './camera.js';
 import { initMapView, updateMapView } from './mapview.js';
 import { updateChutes } from './chutes.js';
@@ -202,13 +202,15 @@ function frame() {
        1/60 s at x1 — and an independent review flew the certified window that way with the tool's
        own autopilot: Moon impact at 2,559 m/s instead of a 346 km pass.) What is DRAWN is the
        state blended between the last two steps (see show()), or a 10 Hz physics would stutter.
-       At most 600 steps a frame; a frame too slow for the warp falls behind it.
+       At most 20,000 steps a frame; a frame too slow for the warp falls behind it.
        One exception: standing on the pad with the engines cold and the throttle shut, a step is
        an exact rotation with the planet at any size, so the frame is one step and x10000 is free. */
     const idle = getState() === 'pad' && !getEngineOn() && !keys['shift'] && getTargetThrottle() < 0.05;
     if (idle) { physStep(simDt); bank = 0; prevValid = false; }
     else {
-      bank = Math.min(bank + simDt, 600 * DTPHYS);
+      /* at most a quarter of the way to the next place that changes the allowed warp (never less than
+         real time), and at most 20,000 steps: ~8 ms of a frame at 0.41 us a coasting step */
+      bank = Math.min(bank + Math.min(simDt, Math.max(dtReal, 0.25 * warpHorizon())), 20000 * DTPHYS);
       while (bank >= DTPHYS && (getState() === 'pad' || getState() === 'flying')) {
         P0.pos.copy(S.pos); P0.v.copy(S.v); P0.q.copy(S.q); prevValid = true;
         physStep(DTPHYS); bank -= DTPHYS;
