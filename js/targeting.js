@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import * as C from './constants.js';
+import { ATMO_TOP } from './aero.js';
 import { S, getState, getSimTime, getEngineOn, getThrottle, gravityAt, orbitalElements, coastDrag } from './physics.js';
 
 /* Will the trajectory you are on meet the Moon, and how close?
@@ -31,7 +32,7 @@ export const aim = { status: 'na', altKm: NaN, tMet: NaN, corridor: false, steps
    notes was exactly that term). It costs about a millisecond, so it runs four times a second, with
    the engine lit or not: while burning, the figure is the pass you would get by cutting now. */
 const p = new THREE.Vector3(), u = new THREE.Vector3(), a = new THREE.Vector3(), moon = new THREE.Vector3(), _q = new THREE.Vector3(), _m = new THREE.Vector3();
-const AIR_R = C.RE + 420;
+const AIR_R = C.RE + ATMO_TOP;
 export function lunarPass(pos, vel, t0, out) {
   p.copy(pos); u.copy(vel);
   let t = t0, best = Infinity, bestT = t0, hit = false;

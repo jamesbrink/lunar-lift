@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { SPECS, VS } from './constants.js';
+import { TAIL_Z } from './stations.js';
 import { toon, outline, PALETTE, RAMP_HARD } from './toon.js';
 
 /* The Saturn V as drawn hardware: three stage groups and the launch escape system. Nothing here moves
@@ -11,7 +12,8 @@ import { toon, outline, PALETTE, RAMP_HARD } from './toon.js';
    Ø3.9 m service module. The axis is +z, the state point is z = 0, the F-1 exits are at z = −42 and
    the escape tower's tip at +37.6. Three numbers are contracts with other modules and must not
    drift: each stage's `tailZ` (the exit plane js/vehicle.js emits exhaust from, and which
-   js/camera.js frames by), the engine positions on their bolt circles (BELL_SETS in js/exhaust-emit.js
+   js/camera.js frames by — taken from js/stations.js, where every station and radius another
+   module depends on is written once), the engine positions on their bolt circles (BELL_SETS in js/exhaust-emit.js
    restates them for the particle field), and the overall span (pad clearance in js/constants.js).
 
    The look is a cel drawing of the real paint scheme rather than a white tube with stripes: black
@@ -139,7 +141,7 @@ function decal(r, z0, z1, az, width, map) {
     b.quaternion.setFromAxisAngle(new THREE.Vector3(-Math.sin(a), Math.cos(a), 0), -0.1).multiply(new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1, 0, 0), Math.PI / 2));
     g.add(b);
   }
-  stages[0].tailZ = -42;
+  stages[0].tailZ = TAIL_Z[0];
   stages[0].engines = [[0, 0], ...[0, 1, 2, 3].map(i => { const a = i * Math.PI / 2 + Math.PI / 4; return [Math.cos(a) * 2.35, Math.sin(a) * 2.35]; })];
 }
 
@@ -164,7 +166,7 @@ function decal(r, z0, z1, az, width, map) {
     b.position.x = Math.cos(a) * 1.44; b.position.y = Math.sin(a) * 1.44;
     g.add(b); engines.push([b.position.x, b.position.y]);
   }
-  stages[1].tailZ = -11.8;
+  stages[1].tailZ = TAIL_Z[1];
   stages[1].engines = engines;
 }
 
@@ -231,7 +233,7 @@ function decal(r, z0, z1, az, width, map) {
     capsuleGroup.add(cyl(0.38, 0.50, 0.30, 28.43, silver, 24, true));
     capsuleGroup.add(cyl(0.20, 0.26, 0.16, 28.66, black, 16));   // docking tunnel rim (under the escape tower until it leaves)
   }
-  stages[2].tailZ = 6.8;
+  stages[2].tailZ = TAIL_Z[2];
   stages[2].engines = [[0, 0]];
 }
 

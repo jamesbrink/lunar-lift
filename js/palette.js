@@ -17,8 +17,8 @@ export const C = {
   concrete: [168, 166, 156],    // LC-39 apron (near level only)
 };
 
-/* Daylight regolith, not printer paper (the fact sheet's Bond albedo is 0.11). Measured 2026-11-09
-   round 5 against the round-4 commit: under the day ramp the shipped palette (canvas mean 0.836
+/* Daylight regolith, not printer paper (the fact sheet's Bond albedo is 0.11). Measured 2026-11-09:
+   under the day ramp the shipped palette (canvas mean 0.836
    sRGB) rendered the near bake at mean 0.834 with 34.2 % of samples above 0.90 and 65.7 % inside
    the top three sixteenths of the histogram — a blown-out white sheet with no headroom left for a
    crater rim to step ABOVE its own ground, so at 9 km the pockmarks were invisible and

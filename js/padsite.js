@@ -65,7 +65,7 @@ const _tp = { x: 0, y: 0, a: 0 };
 function lineX(k, yKm) {
   // authored NNE trend (tan 20° drift) plus a 150 km-scale wobble so the shore CURVES: the old
   // 3.2 km/90 km wobble was too small to bend a coast seen across the whole island, and five
-  // ruler-straight parallel bands 5 km apart is exactly the painted-stripe look round 5 rejected
+  // ruler-straight parallel bands 5 km apart is exactly the painted-stripe look that was rejected
   return SHORE_LINES[k] + 0.34 * yKm
     + (noise((yKm + 50 * k) / 150, 0.5, 4, 400 + k) - 0.5) * 7.5;
 }
@@ -104,18 +104,18 @@ export function padAuthored(u, v, near = 0) {
        spacing (25 m under the vehicle) so its edge survives sampling. A crawlerway was tried and
        deleted: 560 m wide against a cap whose spacing widens to >1 km, it aliased into dashes —
        the exact "faster than the mesh" failure this file's rules already name. */
-    /* Round 6b (user: "the whole planet should be ONE continuous beautiful planet"): the 1.5 km
+    /* (The brief: "the whole planet should be ONE continuous beautiful planet"): the 1.5 km
        chamfered plate with its 0.11 km dark stroke was a grey slab that dominated every pad view
        — from 1 km back the perspective turned it into a parallelogram bigger than the horizon.
        The real LC-39 pad area is a circle a few hundred metres across, and there is NO dark
        stroke any more. */
     const rr = Math.hypot(_tp.x, _tp.y);
-    /* Round 6b, second pass — the first version of this ramp (smoothS over 0.30–1.25 km at 0.9)
+    /* Second pass — the first version of this ramp (smoothS over 0.30–1.25 km at 0.9)
        was measured in a fresh pad-wide frame and it was STILL a slab: smoothS(0.30,1.25,0.6) = 0.24
        leaves the mix 68 % concrete at 600 m, so the grey field ran nearly a kilometre and the
        rounded-square silhouette read as a plate from 1.1 km back. Concrete core 360 m, ramp to
        zero by 920 m, peak 0.85: 500 m sits at ~half tone, 700 m at ~a tenth. The chamfered-square
-       core from review3 is gone — square corners at 440–560 m were what made the silhouette read
+       core is gone — square corners at 440–560 m were what made the silhouette read
        as geometry; with a real gradient there is no iso-contour left to alias into octagon teeth. */
     /* The complex itself is geometry now (js/pad.js: hardstand, crawlerway, perimeter road), which
        can hold an edge the patch's vertices cannot. What is left for the ground colour is the wear

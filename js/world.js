@@ -20,16 +20,16 @@ const SUN_ANG = 0.009;             // rad: the real sun is 0.53° wide, so the f
 const STAR_R = 2000000;            // km — the starfield sits well outside the moon's orbit
 const SKY_R = 20000;               // km — the sky dome rides the camera; small vs the moon at 384 400
 const SHADOW_MAX = 48;             // km half-extent of the vehicle-tracking shadow box
-const SHADOW_MIN = 3;              // km — 4096² over ±3 km is 1.46 m/texel: the pad zoom the user screenshotted showed ~10 m blob steps at the old ±6 km
+const SHADOW_MIN = 3;              // km — 4096² over ±3 km is 1.46 m/texel; at ±6 km the pad's shadows stepped in ~10 m blobs
 const ATMO_SHELL = 1.01;          // atmosphere glow shell: RE * 1.01
 
 /* Sun bearing, fixed in inertial space: ~37° above the pad's horizon at MET 0, off to the east, so
    the pad, the rocket and the towers are lit at liftoff and the planet turns under the light. */
 const PAD_NORTH = new THREE.Vector3().crossVectors(PAD_UP, PAD_EAST).normalize();
 const SUN_ELEV = 0.645;                                    // rad, 37 deg
-/* Exported for the orbital map (js/hud.js): the night side on the map's Earth disc has to sit where
-   this light actually is, and the sun bearing is inertial and constant, so the map can treat it as
-   truth exactly like the renderer does. */
+/* Exported for the orbit plot (js/navball.js): the night side on its body disc has to sit where
+   this light actually is, and the sun bearing is inertial and constant, so the plot can treat it
+   as truth exactly like the renderer does. */
 export const SUN_DIR = PAD_UP.clone().multiplyScalar(Math.sin(SUN_ELEV))
   .addScaledVector(PAD_EAST, Math.cos(SUN_ELEV) * 0.85)
   .addScaledVector(PAD_NORTH, Math.cos(SUN_ELEV) * 0.4).normalize();
@@ -44,12 +44,9 @@ const _sunF = new THREE.Vector3(), _camF = new THREE.Vector3(), Y_UP = new THREE
    into the pad lenses at all hours. The lamps themselves (housing, truss) stay year-round. */
 const padLamps = [];
 
-/* Ground cloud shade is marched, not projected: js/clouds.js injects an optical-depth integral
-   along the sun ray through the 4-11 km band into the globe and the near patch, so the darkening on
-   the ground is the same column of weather the sky shows. What used to live here was a 512x256
-   composite of the deck alphas — 78 km per texel, which could only ever produce slab-sided wedges
-   across the pad. The old near-scale shade cap (32 km, re-centred under the vehicle) is gone with
-   the caps it belonged to: it was a square, and squares are what the zoom-out view showed. */
+/* Ground cloud shade is not a shadow-map caster: js/clouds.js injects a lookup of its own weather
+   field along the sun ray into the globe and the near patch (cloudShadeInject), so the darkening
+   on the ground is the same weather the sky shows. */
 /* Height grids (km, body-local uv) resolved from the paint jobs — the camera colliders read these;
    null until the painting lands, and every reader below degrades to the bare sphere meanwhile. */
 let earthField = null, moonField = null, shore = null;
@@ -62,7 +59,8 @@ const _uvw = { u: 0, v: 0 };
 let _skyMix = 1;
 
 /* builds everything that is not the vehicle: sun with a vehicle-tracking shadow camera, bodies,
-   cloud decks, atmosphere shell, starfield and the launch pad welded to the rotating planet. */
+   the weather shell, atmosphere shell, sky dome, starfield and the launch pad welded to the
+   rotating planet. */
 export function initWorld(target) {
   scene = target;
   /* One shared aerial-perspective state for both ground surfaces; js/haze.js explains why they
@@ -75,12 +73,12 @@ export function initWorld(target) {
      fill is deliberately blue: the shadow side of a cel-shaded object is a colour, not black. ---- */
   sun = new THREE.DirectionalLight(0xfff6e8, 1.0);
   sun.castShadow = true;
-  sun.shadow.mapSize.set(4096, 4096);   // 1.5 m at the ±6 km pad box; PCF then has texels to work with
+  sun.shadow.mapSize.set(4096, 4096);   // 1.46 m/texel at the ±3 km pad box (SHADOW_MIN); PCF then has texels to work with
   setShadowBox(SHADOW_MAX);
-  /* Bias, in NORMALISED depth × the camera's 300 km range: the old −0.0005 was 1.5 km of
-     along-light shadow smear, and normalBias 0.12 km slid every mast shadow a full 120 m along
-     the ground — together they drew the fat wedges mis-called texel staircase. 10 m each at a
-     2048² map over a ±6 km ground box (~6 m/texel) is texel-exact: towers read as thin lines. */
+  /* Bias, in NORMALISED depth × the camera's 300 km range: −0.00003 is 9 m along the light, and
+     normalBias is 0.01 km. Larger values smear: −0.0005 was 1.5 km of along-light shadow, and a
+     normalBias of 0.12 km slid every mast shadow a full 120 m along the ground — together they
+     drew fat wedges that were mis-called a texel staircase. */
   sun.shadow.bias = -0.00003;
   sun.shadow.normalBias = 0.01;
   sunTarget = new THREE.Object3D();
@@ -95,12 +93,12 @@ export function initWorld(target) {
   const glowMap = glowTex();
   const flareMap = flareTex();
 
-  /* ---- earth: the painted map under a three-band ramp. 384×192 segments (74 305 vertices) and
+  /* ---- earth: the drawn surface under the cel ramp (RAMP_EARTH). 384×192 segments (74 305 vertices) and
      displaced by the land height field from js/toonmap.js — oceans stay the perfect sphere,
      continents get a limb, and the launch pad sits on ground that is exactly zero for 90 km
      around it, so it can never float or sink. No normal map: docs/reference/cartoon-art-direction
      .md retires per-pixel surface detail — the scale needed to sell 20 km-per-texel slope through
-     a three-band ramp (26!) stippled the ground at the grazing angles a pad camera lives at. The
+     the ramp (26!) stippled the ground at the grazing angles a pad camera lives at. The
      map's flat colour shapes are the surface; relief survives only as horizon silhouette. The
      small navy emissive is a floor for the night side and the grazing limb, where the shadow
      band alone left the sea black. ---- */
@@ -134,7 +132,7 @@ export function initWorld(target) {
      discs are gone — with real authored coastline under it, the complex sits on Merritt Island. */
   earthPatch = makePatch(earth);
   attachEarthPatch(earthPatch);
-  /* The patch is what the eye actually resolves at the pad, so it gets the same marched shade as
+  /* The patch is what the eye actually resolves at the pad, so it gets the same cloud shade as
      the globe it sits on; without it the ground under a cloud would be lit while the planet around
      it is not. */
   earthPatch.mesh.material.onBeforeCompile = (sh) => {
@@ -143,31 +141,12 @@ export function initWorld(target) {
     surfaceInject(sh, 'earth', 'patch');
   };
 
-  /* ---- the weather shell: 4 km to 11 km, one mesh, the whole planet.
-
-     It replaces three things at once — the 2 km cumulus deck, the 9 km cirrus deck, and the two
-     tangent-plane caps (220 km and 32 km) that re-centred under the vehicle. The caps were the bug
-     the user could see from 100 km up: a 45x45 grid in a plane has a square silhouette, and both
-     of them sat inside it. A sphere has no silhouette to leak; every pixel of this one is
-     translucent, so density comes from the length of the sight line through the band rather than
-     from an alpha threshold that minification can only average.
-
-     Why the march instead of a stacked alpha: opacity = 1 − exp(−τ) over the analytic chord gives a
-     base and a top for free (grazing rays accrue 7 km of cloud, overhead rays only what is actually
-     there), which is why the horizon reads as a dense deck and the zenith as sky. It also means
-     nothing here depends on texel size: the old decks' ceiling was 39 km per texel, and no change
-     to them could ever put a cumulus over the pad. The cell lattice tiles at 160 km per repeat
-     (0.3125 km per texel), so the same mesh carries zonal systems and individual towers.
-
-     DoubleSide is not decoration: the camera lives on BOTH sides of this layer — inside it at the
-     pad, outside it in orbit. A FrontSide shell seen from its own interior shows only the far wall,
-     which the planet occludes from the ground, so a single-sided deck is structurally invisible as
-     overhead sky from the surface.
-
-     It does not cast into the sun's shadow map: at 4-11 km a low sun drags its silhouette hundreds
-     of kilometres across the surface, and through the ±48 km vehicle-tracking box those streaks clip
-     into hard grey slabs that read as architecture. Ground shade is marched instead (see
-     cloudShadeInject below), from the same field, so it holds a puff's shape at every distance. */
+  /* ---- the weather shell: one mesh round the whole planet, built and drawn by js/clouds.js (its
+     header is the truth about how). Two things here depend on it: it does not cast into the sun's
+     shadow map — a low sun would drag its silhouette hundreds of kilometres through the ±48 km
+     vehicle-tracking box as hard grey slabs — so the ground shade is the same field looked up
+     along the sun ray (cloudShadeInject, above); and it replaced flat cloud decks and
+     vehicle-following caps, whose square silhouettes showed from 100 km up. ---- */
   weather = makeWeather();
   cloudMesh = makeCloudShell(weather);
   scene.add(cloudMesh);
@@ -264,10 +243,10 @@ export function initWorld(target) {
       varying vec3 vP;
       #include <logdepthbuf_pars_fragment>
       void main() {
-        /* logdepthbuf_fragment is a STATEMENT — it belongs inside main. It sat outside for
-           rounds of rounds: the sky dome silently failed to compile ("Shader Error 0 ...
-           'gl_FragDepth' syntax error" in the page console, unnoticed because a missing dome
-           looks like space), which is why daytime views had no sky wash. */
+        /* logdepthbuf_fragment is a STATEMENT — it belongs inside main. Outside it, the sky
+           dome silently fails to compile ("Shader Error 0 ... 'gl_FragDepth' syntax error" in
+           the page console, unnoticed because a missing dome looks like space) and daytime
+           views have no sky wash. */
         #include <logdepthbuf_fragment>
         vec3 dir = normalize(vP - camAbs);
         float up = dot(dir, normalize(camAbs));      // elevation above the local horizon
@@ -302,8 +281,8 @@ export function initWorld(target) {
   moon.material.onBeforeCompile = (sh) => surfaceInject(sh, 'moon', 'globe');
   moon.material.fog = false;      // ground haze must not eat the moon or the stars
   moon.position.copy(_moon);
-  /* Round 6: the Moon no longer CASTS shadow. With castShadow on, the relief-displaced sphere and
-     the +4 m patch are both caster and receiver inside the ±48 km vehicle box, and at the 23 m
+  /* The Moon does not CAST shadow. With castShadow on, the relief-displaced sphere and
+     the near patch are both caster and receiver inside the ±48 km vehicle box, and at the 23 m
      shadow texel (4096² over ±48 km) plus a 28° sun, every lit surface inside the box compared as
      self-shadowed: measured 2026-11-09 at site (−0.536,−0.841,−0.065) t=2980800 — the whole
      near field rendered dark navy (the RAMP_MOON 0.16–0.26 band over grey regolith) inside the
@@ -327,7 +306,7 @@ export function initWorld(target) {
      land as the same 2 px dot — "TV static". Three layers, one per size class, share the fade
      clock in updateSky; only their radii differ. */
   {
-    /* The point sprite is a painted 32×32 radial falloff, not the default square. Review 5 flagged
+    /* The point sprite is a painted 32×32 radial falloff, not the default square. A review flagged
        "a few star sprites render as hard squares" — the 2 px and 3 px layers at 600 km, where a
        6 px square with hard edges reads as a glitch and not a star. The falloff (α 1 → 0 at r 15,
        linear-ish with a soft knee) keeps the core near-solid so faint stars do not lose half their
@@ -411,8 +390,8 @@ function setShadowBox(extent) {
   sc.updateProjectionMatrix();
 }
 
-/* the shadow box tracks the vehicle: tight enough that pad structures resolve at 4096² (~3 m/texel
-   grounded), growing only as fast as the far detail actually needs it, and never past ±48 km —
+/* the shadow box tracks the vehicle: ±3 km on the ground, where 4096² is 1.46 m/texel and pad
+   structures resolve, growing only as fast as the far detail actually needs it, and never past ±48 km —
    cloud weather does NOT come through this box (js/clouds.js supplies it), so it no longer has to be huge
    to hold cloud silhouettes, and hardware shadows no longer have to be coarse to fit weather in. */
 function updateShadowBox(pos) {
@@ -432,18 +411,19 @@ function updateShadowBox(pos) {
   if (stepped !== shadowExtent) setShadowBox(stepped);
 }
 
-/* The launch complex's local-to-world matrix (build units, z up, the vehicle's axis on the origin),
-   for anything that has to reason in the pad's own frame — the camera's colliders do. It rides the
-   planet's spin, which a frame built from the constant PAD_UP does not. */
 const _eyeUp = new THREE.Vector3(), _sf = new THREE.Vector3(), _sx = new THREE.Vector3(), _sy = new THREE.Vector3(), _sp = new THREE.Vector3();
 let shadowExtent = 3, snapTexel = 0;
 const snapC = new THREE.Vector3(), _sd = new THREE.Vector3();
 const _padAbs = new THREE.Matrix4();
-export function padMatrix() { return pad ? absolute(pad.matrixWorld, _padAbs) : null; }   // planet-centred: see js/origin.js
+/* The launch complex's local-to-world matrix (build units, z up, the vehicle's axis on the origin),
+   for anything that has to reason in the pad's own frame — the camera's colliders do. It rides the
+   planet's spin, which a frame built from the constant PAD_UP does not. Planet-centred and
+   inertial: the drawn matrixWorld is eye-relative and Earth-fixed (js/origin.js). */
+export function padMatrix() { return pad ? absolute(pad.matrixWorld, _padAbs) : null; }
 
 /* main.js calls this every frame: the shadow frustum travels with the vehicle, so the same sun
-   shades the pad at liftoff and the lander on the moon. The near terrain patch travels with it
-   too — one distance test per frame, a rebuild only after 12 km of ground travel, no allocation. */
+   shades the pad at liftoff and the lander on the moon. The near terrain patches are re-centred
+   from here too (updateReliefPatches; js/terrain.js decides when a rebuild is due). */
 export function updateSunShadow(pos) {
   updateShadowBox(pos);
   /* The shadow map's texel grid is pinned to the GROUND. The box follows the vehicle, and following
@@ -562,14 +542,14 @@ export function fineGroundHeight(dir) {
 // The Moon has no fine getter: its near patch is the relief grid itself, so moonGroundHeight IS
 // the drawn ground.
 
-/* The painted canvases, for the orbital map screen (js/hud.js): the same authored pixels the
-   planets wear, so the map can blit real coastline instead of a flat blue disc, and never kicks
-   off a second paint. null while painting is still in flight. */
+/* The painted canvases, for the orbit plot (js/navball.js): the same authored pixels the paint job
+   produced, so the plot can blit real coastline instead of a flat blue disc, and never kicks off a
+   second paint. null while painting is still in flight. */
 export function planetCanvas(which) { return paintedCanvas(which); }
 
-/* The spin the map has to account for: which is just the angle the meshes are actually at — the
-   map converts its own longitude through this, and the equirect u = (lon+180)/360 mapping the
-   canvas and the sphere share stays the map's business. */
+/* The spin the orbit plot has to account for: the angle the meshes are actually at. The plot
+   converts its own longitude through this; the equirect u = (lon+180)/360 mapping the canvas and
+   the sphere share stays the plot's business. */
 export function bodySpin(which) { return which === 'moon' ? (moon ? moon.rotation.y : 0) : (earth ? earth.rotation.y : 0); }
 
 /* The bodies are placed from the mission time main.js hands in each frame (the DRAWN instant), never

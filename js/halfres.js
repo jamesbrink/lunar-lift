@@ -1,34 +1,33 @@
 import * as THREE from 'three';
 
-/* The half-resolution passes: everything translucent and fill-rate-bound is drawn into targets a
-   quarter the pixels of the screen and laid back over the frame.
+/* The half-resolution passes: layers that are soft by nature and bound by fill rate are drawn into
+   targets a quarter the pixels of the screen and brought back over the frame.
 
-   Why, measured with EXT_disjoint_timer_query on an Apple M4 Max at 2160 × 1250: the marched
-   weather shell cost 6.7 ms of a 13.4 ms idle frame, and at full throttle on the pad the exhaust's
-   overlapping sprites cost 16 ms of a 31.6 ms frame — neither is detail the eye resolves at full
-   resolution, both are soft by nature, and both scale with pixels covered.
+   Why, measured with EXT_disjoint_timer_query on an Apple M4 Max at 2160 × 1250 when the pass was
+   introduced: the weather shell (then a ray march) cost 6.7 ms of a 13.4 ms idle frame, and at full
+   throttle on the pad the exhaust's overlapping sprites cost 16 ms of a 31.6 ms frame — neither is
+   detail the eye resolves at full resolution, and both scale with pixels covered.
 
    Two layers, because they are hidden by things in two different ways.
 
-   SKY (the weather). Marched with no depth test at all, then put on screen by drawing the shell's
-   own geometry in the main pass with a shader that just looks the result up by screen position.
-   That geometry is depth-tested at FULL resolution, so the rocket, the tower and the planet cut
-   the clouds along their true edges. An earlier version tested the weather against a low-resolution
-   depth prepass and composited it with a quad: every silhouette then carried a fringe one
-   low-resolution texel wide, bright cloud bleeding onto the hull's outline.
+   SKY (the weather). Drawn into a target with no depth buffer at all, then put on screen by the
+   shell's own geometry in the main pass, with a material (js/clouds.js) that looks the result up
+   by screen position. That geometry is depth-tested at FULL resolution, so the rocket, the tower
+   and the planet cut the clouds along their true edges. An earlier version tested the weather
+   against a low-resolution depth prepass and composited it with a quad: every silhouette then
+   carried a fringe one low-resolution texel wide, bright cloud bleeding onto the hull's outline.
+   What the weather writes into the target, and how it is cut back to a sharp edge, is
+   js/clouds.js's business; nothing here filters it.
 
    FX (the exhaust). Smoke is in front of the hardware as often as behind it, so it does need a
    depth buffer of its own: the target's is filled first from the opaque meshes (LAYER_OCC) with
    colour writes off. Its silhouettes are therefore only half-resolution — on smoke, which has no
    edge of its own to compare against. The pass is skipped outright when no parcel is alive, which
-   is most of the mission.
-
-   Both come back through a 3×3 tent. The march jitters and the exhaust dithers its cel bands; at
-   half resolution that grain is two pixels wide, and the tent is what removes it. */
+   is most of the mission. It comes back through the quad below, a 3×3 tent. */
 export const LAYER_FX = 2, LAYER_OCC = 3, LAYER_SKY = 4;
 export const RES_SCALE = 0.5;
 
-/* Shared with js/clouds.js's composite material: the marched weather, its texel, the screen size. */
+/* Shared with js/clouds.js's composite material: the weather target, its texel, the screen size. */
 export const sky = { skyMap: { value: null }, skyTexel: { value: new THREE.Vector2() }, skyScreen: { value: new THREE.Vector2(1, 1) } };
 
 const depthOnly = new THREE.MeshBasicMaterial({ colorWrite: false });
@@ -51,7 +50,7 @@ const quad = new THREE.Mesh(new THREE.PlaneGeometry(2, 2), new THREE.ShaderMater
   blendSrc: THREE.OneFactor, blendDst: THREE.OneMinusSrcAlphaFactor,
 }));
 quad.frustumCulled = false;
-quad.renderOrder = 2;          // over the sky, the weather and the hardware; under the ribbon and flares
+quad.renderOrder = 2;          // the FX composite: over the sky, the weather and the hardware; under the ribbon and flares
 
 let skyTarget = null, fxTarget = null, fxLive = () => true;
 const _size = new THREE.Vector2(), _clear = new THREE.Color(), layer0 = new THREE.Layers();

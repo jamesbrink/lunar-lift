@@ -61,7 +61,7 @@ export function cleanMask(mask, w, h, passes = 3) {
 
 /* Binary open→close on the 4-neighbourhood, `rounds` erode/dilate steps each. Majority voting
    shaves single-texel noise but leaves a full staircase intact wherever the true boundary runs
-   diagonally for several texels — the treads survive, which is exactly the coast defect review 5
+   diagonally for several texels — the treads survive, which is exactly the coast defect a review
    measured (13 steps ≥ 20 px per 10-row scan on the NE-facing shore at 160 km) and the same rule
    that rounds the Moon's mare outlines. Opening (erode, erode, dilate, dilate) shaves convex
    corners and one-texel spurs; the closing fills concave nicks and single-texel straits of
@@ -69,7 +69,7 @@ export function cleanMask(mask, w, h, passes = 3) {
    coasts are not shaved at the map border. Area moves only at corners: measured on the shipped
    Earth canvas, land share 36.9 % before and after (moon mare 3.27 % before → 3.27 %).
 
-   Bit-packed (round 8, measured): the per-texel closure version spent most of the 5.8 s the 4×
+   Bit-packed (measured): the per-texel closure version spent most of the 5.8 s the 4×
    moon repaint took — 32 passes × 8.4 M texels × 5 clamped neighbour lookups through closures. A
    row of the mask is a bit vector now: the 4-neighbourhood is two shifts on the word array
    (longitude wraps through the circular word order, latitude clamps via duplicated border rows)

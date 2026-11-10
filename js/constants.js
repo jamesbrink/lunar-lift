@@ -78,8 +78,12 @@ export const PAD_ANGULAR = new THREE.Vector3().crossVectors(SPIN_AXIS, PAD_POS).
 /* atmosphere: exponential density with an 8.5 km scale height. CD_AREA is the full stack's drag
    area nose-on below Mach 0.8; js/aero.js builds the Mach rise, angle of attack and lift on it. */
 export const ATMO_H = 8.5, RHO0 = 1.225, CD_AREA = 28;   // kg/m³, m²
-/* Time warp steps. 0 is paused and 0.25 is slow motion; WARP_ONE is where a mission starts. Warp
-   multiplies the NUMBER of 0.1 s substeps, never their size; below x1 the substep is shorter. */
+/* Time warp steps. 0 is paused and 0.25 is slow motion; WARP_ONE is where a mission starts.
+   DTPHYS is the one step the flight is integrated at. js/main.js banks frame time × warp and spends
+   it in whole DTPHYS steps (at most 600 a frame), so warp — x0.25 included — changes how MANY steps
+   a frame takes, never their size, and the picture between two steps is interpolated. The one
+   exception is a cold vehicle held down on the pad, where a step is an exact rotation with the
+   planet at any size: there the frame is a single step, which is what makes x10000 affordable. */
 export const DTPHYS = 0.1, WARPS = [0, 0.25, 1, 2, 4, 8, 16, 32, 64, 128, 256, 512, 1000, 10000];   // x10000 is for the pad only: physics.js warpCap
 export const WARP_ONE = WARPS.indexOf(1);
 
@@ -124,7 +128,7 @@ export const SKY_DAY = new THREE.Color(0x79b1de), SKY_NULL = new THREE.Color(0x0
        instead of trying to hover. Throttle granularity, not thrust level, is what limits a soft
        landing.
    The 2,400/700/400 t stack this replaced had 16,303 m/s of ideal budget (1.08x) and still failed:
-   it reached lunar orbit, then ran the tank dry on the descent and hit the surface at 1,235 m/s.
+   it reached lunar orbit, then ran the tank dry on the descent and hit the surface at 1,264 m/s.
    Margin on paper is not margin; the descent has to be flown. */
 export const SPECS = [
   { name: 'S-1 SATURN I', dry: 130, fuel: 1800, thrust: 46000, isp: 304 },

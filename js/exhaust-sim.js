@@ -4,6 +4,7 @@ import { RE, RM, MU_E, MU_M, EARTH_SPIN, PAD_SCALE, PAD_UP, VS, moonPos, moonVel
    airDensity is literally the function accelAt drags the vehicle with, so the smoke cannot disagree
    with the flight computer about where the air runs out. */
 import { airDensity, getSimTime } from './physics.js';
+import { ATMO_TOP } from './aero.js';
 import * as WORLD from './world.js';
 import { pPos, pVel, pR, pLife, pAge, pInv, pHeat, pMode, pSmoke, pMoon, pTh, pColB, alive, nAlive, killSlot, ship, moonP, moonV,
   plumeDebug, SM_SEAM, SM_SPRAY, SM_FLASH, SM_TRAIL, SM_STEAM } from './exhaust-pool.js';
@@ -130,7 +131,7 @@ function groundHit(vx, vy, vz, nx, ny, nz, frx, fry, frz, moon) {
        the pad. Air, the trench walls and the berm do not allow that: the flow arrives supersonic and
        leaves as a ground-hugging sheet at a fraction of the speed. The Moon bled almost nothing (0.8)
        and the spray left frame in one breath: a translucent gradient cone with no surface event at
-       all (review2/12, review2/15). 0.45 keeps a long Apollo-style throw but decelerates the dust
+       all. 0.45 keeps a long Apollo-style throw but decelerates the dust
        enough that it crawls, piles and reads as ground interaction. */
     const keep = moon ? 0.10 : 0.12;
     /* Lift is bounded: real deflectate rises by entrainment, not by keeping 16% of Mach-9
@@ -204,7 +205,7 @@ function stepParcel(i, h) {
            contact swell at 7 m is what the physics says, and it is also what the 9 m capture
            frame demanded: with the old ×1.25+0.2 walking to R_CAP, 450 live deflected parcels
            (parcelAudit) drifted between the descending vehicle and the chase camera as
-           camera-facing 16 m discs — the lens-bokeh field review 4 punished, back in a paler
+           camera-facing 16 m discs — the lens-bokeh field, back in a paler
            palette. At 7 m and the shorter vacuum life below the near-camera coverage per parcel
            falls by ~4.5x and the sheet reads as ground-hugging dust again. */
         pR[i] = Math.min(7, pR[i] * 1.25 + 0.2);
@@ -219,7 +220,7 @@ function stepParcel(i, h) {
     const alt = r - RE;
     const buoy = pMode[i] === 2 && (pSmoke[i] === SM_TRAIL || pSmoke[i] === SM_STEAM);
     let floats = false;
-    if (alt < 420) {
+    if (alt < ATMO_TOP) {
       const rho = airDensity(alt);
       if (rho > 0) {
         const ax = -EARTH_SPIN * pz, az = EARTH_SPIN * px;          // the atmosphere rides the spin
@@ -240,7 +241,7 @@ function stepParcel(i, h) {
           let bal = BAL0 * (pMode[i] === 2 ? 6 : 1) / (pR[i] * pR[i]);
           /* Ground-marked smoke drags like the air-full puff it has become; a 1/r² law alone lets
              it coast at hundreds of m/s for its whole life, which reads as shrapnel, not soot.
-             review3/04/06 extends the SAME floor to every mode-1 parcel: a fresh jet that keeps
+             The SAME floor extends to every mode-1 parcel: a fresh jet that keeps
              2.9 km/s for a second and a half (the old regime — entrainment grows pR, and bal is
              1/r², so growth made the parcels FLY) stretched the ascent trail into a 2 km cone of
              dots ~75 m apart, which no 1600-parcel pool can fill. A real F-1 column couples to
@@ -313,7 +314,7 @@ function stepParcel(i, h) {
              0.66, not 0.82: the hold sat ABOVE the incandescent band threshold (0.75), so every
              parcel resting in the trench drew band 0 at additive ≈ 1 and the order-free glow
              stacked into the blown-out white pillar the review measured punching up through the
-             pad (review2/03). Held below 0.75 it still reads as saturated flame orange, the
+             pad. Held below 0.75 it still reads as saturated flame orange, the
              20 ms band gate below turns resting parcels to cloud anyway, and the fire that
              remains visible is the young jet sheet plus the drawn cone. */
           if (h2 < TRP2) pHeat[i] = Math.max(pHeat[i], 0.66);
@@ -365,7 +366,7 @@ function stepParcel(i, h) {
        what the lunar surface event read as. Real exhaust in vacuum is faint — the visible event is
        the dust it lifts — so lunar parcels radiate away their incandescence faster than Earth parcels
        lose it to air.
-       review3/04/06 measured the bead problem again AFTER the birth-size fix: the merge into smoke
+       The bead problem was measured again AFTER the birth-size fix: the merge into smoke
        is what makes the column continuous, and parcels still took 0.62 s (Earth) / 0.46 s (Moon) to
        cool below the smoke threshold — at 2-3 km/s relative flow that is a 1.3-1.8 km streak of
        individual hot dots no sprite budget can fill (the drawn cone covers ~30 m). Cooling is now
@@ -374,7 +375,7 @@ function stepParcel(i, h) {
        behind the drawn cone, and by then the early-growth boost has carried the parcel to ~4 m,
        whose smoke silhouette is ~16 m — overlapping the 3.2 m neighbour spacing several times. */
     pHeat[i] -= h * (moon ? 3.4 : 2.4) * (pSmoke[i] ? 2.2 : 1);
-    /* Round-5 "ghost rocket": at MET+13 the tower region read as a second, intact vehicle wrapped
+    /* The "ghost rocket": at MET+13 the tower region read as a second, intact vehicle wrapped
        in engine fire — 278 live parcels (measured, node harness, real ascent t=13 s) were still
        above the smoke threshold, because base cooling 2.4/s needs 0.33 s to get a parcel under
        heat 0.22 and at 900/s that is a third-of-a-second tail of ember discs at every altitude
@@ -388,7 +389,7 @@ function stepParcel(i, h) {
        birth — the pad reads clear long before the 8 s the review asked for. */
     if (!moon) {
       const altE = Math.sqrt(px * px + py * py + pz * pz) - RE;
-      const rhoN = altE < 420 ? airDensity(altE) / RHO_SEA : 0;
+      const rhoN = altE < ATMO_TOP ? airDensity(altE) / RHO_SEA : 0;
       pHeat[i] -= h * (rhoN * (5.5 + 3 * Math.max(0, pAge[i] - 0.12)) + 4 * Math.max(0, pAge[i] - 0.15));
       if (pAge[i] > 0.45 && pHeat[i] > 0.22) pHeat[i] = 0.22;
       if (pAge[i] > 0.85) pLife[i] -= h * (pAge[i] - 0.85) * 2;
@@ -399,7 +400,7 @@ function stepParcel(i, h) {
     /* Non-deflected exhaust entrains too: at 0.35 m/s the ascent trail was a string of separate beads
        rather than a column. Lunar parcels stay thin — a vacuum rolls in no air.
        Earth's figure used to be a flat 1.2 and the trail still degenerated into a thin squiggly
-       thread at ~3 km (review2/04). Cause, measured through the two growth terms: the drag-diss swell
+       thread at ~3 km. Cause, measured through the two growth terms: the drag-diss swell
        in the atmosphere branch is `min(14, diss·0.016)·h` and `diss` is the slip SHED per step, so it
        collapses once the parcel flow has decelerated toward the vehicle — which is exactly what
        happens above a few km, where the 900/s emission still spaces parcels only 0.11 m apart at
@@ -409,7 +410,7 @@ function stepParcel(i, h) {
        1.4 m against a 21 m sprite diameter. */
     /* The first 0.45 s of a NON-deflected parcel's life grows at 2.6× the rate below. The
        sprite is band-quantised now (hard silhouette), so the old growth left measurable gaps
-       between consecutive silhouettes in the ascent column (review3/04: scattered dots at
+       between consecutive silhouettes in the ascent column (seen as scattered dots at
        222 m/s, 2.7 parcels/m); the boost closes them where the column is newest and hottest,
        then hands off to the certified steady rates — the bead-merge rule quoted above is a
        steady-state number and is untouched. Deflected (pSmoke) parcels deliberately skip the
@@ -417,7 +418,7 @@ function stepParcel(i, h) {
     const early = pAge[i] < 0.45 ? 2.6 : 1;
     pR[i] = Math.min(R_CAP, pR[i] + (pSmoke[i] ? (moon ? 5 : 10)
                                              : (moon ? 0.4 : (px * px + py * py + pz * pz < ALT40_R2 ? 1.9 : 1.2)) * early) * h);
-    /* review3/03: the blast read as one giant blurred tan dome because the deflectate inflated
+    /* The blast read as one giant blurred tan dome because the deflectate inflated
        to the 16 m ceiling within its first half-second — dome first, definition never. A young
        deflected parcel on Earth is now held at R_YOUNG for its first 0.5 s: the sheet climbing
        out of the trench stays a crisp column (its fire is the held trench heat + the drawn

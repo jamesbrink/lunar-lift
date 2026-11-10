@@ -30,7 +30,7 @@ export const RAMP_EARTH = ramp([0.34, 0.72, 1.0, 1.0]);
    ramp ([0.16 .26 .34 .62 1 1], steps at ±1/3 and ±2/3) put flat ground under the 28° skim-frame
    sun at dotNL = sin 28° = 0.469 INSIDE the top 1.0 band: a wall had to tilt 22° off flat to cross
    a step, and 3 km bowls with 300 m rims tilt ~11°, so every crater sat in one band and the whole
-   foreground read as smooth smoke (review 5, frame 12 "featureless smooth gradient"). The eighth-
+   foreground read as smooth smoke ("featureless smooth gradient"). The eighth-
    texel ramp steps every 0.25 dotNL ≈ 14° of tilt: sunward rims reach the 1.0 band, lee walls drop
    to 0.62, and bowls shade in silhouette. The terminator behaviour the six-texel ramp was built
    for survives untouched — dotNL = 0 is still exactly a step, with the 0.62 dusk strip on the lit

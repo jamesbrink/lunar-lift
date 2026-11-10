@@ -37,7 +37,7 @@ const smoothstep = (a, b, x) => { const t = THREE.MathUtils.clamp((x - a) / (b -
    at every distance. The old profile was a uniform disc to 0.72 r with a wide radially symmetric
    ring corona behind it (measured alpha 0.45 at r=0.8, identical along-axis and diagonal), and the
    DataTexture's default Nearest/no-mips filtering minified that smooth ramp into quantised streaks
-   — which is how one sun rendered as three things for review2: a soft glow ball at 05, a starburst
+   — which is how one sun rendered as three things in one review: a soft glow ball at 05, a starburst
    at 07, a single aliased dot at 08. Now: disc edge at r 0.42, which through the sprite scale
    (0.42·2.4·SUN_ANG = 1.008·SUN_ANG) is the real 0.53° sun, then four |cos 2θ|^28 spikes to r 0.96
    and NOTHING between them — the sky stays black off-axis at every zoom, so distance can only

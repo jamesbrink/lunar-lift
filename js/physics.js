@@ -1,6 +1,7 @@
 import * as THREE from 'three';
-import { airDensity, aeroForce, aeroState, ATMO_TOP, CN_BODY, machDrag, soundSpeed } from './aero.js';
+import { airDensity, airVel, aeroForce, aeroState, ATMO_TOP, CN_BODY, machDrag, soundSpeed } from './aero.js';
 import { padHit, ARM_TIME } from './colliders.js';
+import { U_M, TAIL_Z, CM_TAIL_Z, NOSE_Z, R_STACK, R_CSM_AERO, R_CM_BASE, GEOM, FIN_AREA, FIN_Z } from './stations.js';
 import { RE, MU_E, RM, MU_M, SOI_M, PAD_UP, PAD_POS, PAD_ANGULAR, VS, CD_AREA, WARPS, WARP_ONE, LAND_SAFE, SAFE_EARTH, SPECS, CAPSULE_MASS, EARTH_SPIN, SPIN_AXIS, PAD_EAST, MOON_DIST, TURN, moonPos, moonVel } from './constants.js';
 
 /* ---------------- injected dependencies (see initPhysics) ----------------
@@ -127,7 +128,7 @@ export function isBurning() { const i = activeStage(); return engineOn && thrott
 export { airDensity, aeroState };
 /* velocity relative to the rotating ground — what the telemetry and SAS actually care about */
 export function surfaceVel(out = new THREE.Vector3()) {
-  return out.copy(S.v).add(new THREE.Vector3(-EARTH_SPIN * S.pos.z, 0, EARTH_SPIN * S.pos.x));
+  return out.copy(S.v).sub(airVel(S.pos, _air));
 }
 /* Two velocity frames, because two bodies move under the vehicle.
    navVel    — what SAS and the prograde marker steer by: the inertial velocity near Earth (an
@@ -161,16 +162,15 @@ export function bodyUp(out = new THREE.Vector3()) {
    the ground" cannot be a test on S.pos: it used to be `r <= R + 37 u`, which lands a full stack
    on its engine bells and leaves a lone CSM — whose tail is 6.8 u ABOVE S.pos — hanging 61 m over
    the Moon at the moment it is judged to have touched down. Contact is the lowest attached point
-   meeting the terrain underneath. Stations are js/saturn.js's, in build units. */
-const TAIL_Z = [-42, -11.8, 6.8], CM_TAIL_Z = 26.0, NOSE_Z = 28.7;   // 26.0: the heat shield's face
-const _cu = new THREE.Vector3();
+   meeting the terrain underneath. Stations are js/stations.js's, in build units. */
+const _cu = new THREE.Vector3(), _air = new THREE.Vector3();
 export function tailStation() { const i = activeStage(); return i >= 0 ? TAIL_Z[i] : CM_TAIL_Z; }
 /* km from the lowest attached point down to the surface of the Moon (onMoon) or the Earth. */
 export function surfaceAlt(onMoon = overMoon()) {
   if (onMoon) { moonPos(simTime, _moon); _cu.subVectors(S.pos, _moon); } else _cu.copy(S.pos);
   const r = _cu.length(); _cu.multiplyScalar(1 / r);
   const c = _fw.copy(UP_REF).applyQuaternion(S.q).dot(_cu);          // cos of the tilt from vertical
-  const i = activeStage(), rad = i < 0 ? 1.33 : i === 2 ? 2.2 : 3.57;
+  const i = activeStage(), rad = i < 0 ? R_CM_BASE : i === 2 ? R_CSM_AERO : R_STACK;
   const low = (Math.min(tailStation() * c, NOSE_Z * c) - rad * Math.sqrt(Math.max(0, 1 - c * c))) * VS;   // lowest point of a tilted cylinder, km above S.pos
   const sphere = r - (onMoon ? RM : RE) + low;
   if (!relief || sphere > 30) return sphere;                         // no relief lookup while it cannot matter
@@ -178,17 +178,8 @@ export function surfaceAlt(onMoon = overMoon()) {
 }
 
 /* ---- mass and aerodynamic geometry of the hardware still attached ----
-   One table for both, in build units along the vehicle axis (1 u = 1.4 m; js/saturn.js draws the
-   same stations: S-1 tail at z −42, S-2 tail −11.8, CSM tail 6.8, apex 28.7). L and r are each
-   segment's length and radius, zc its middle. */
-const GEOM = [
-  { L: 30.2, r: 3.57, zc: -26.9 },   // S-1 booster: 42 m long, 10 m across
-  { L: 18.6, r: 3.57, zc: -2.5 },    // S-2 upper
-  { L: 15.9, r: 2.2,  zc: 14.75 },   // CSM service body + adapter
-  { L: 6,    r: 1.4,  zc: 25.7 },    // command module
-];
-const U_M = 1.4;                                       // metres per build unit
-const FIN_AREA = 20, FIN_Z = -38;                      // m² of effective fin planform per plane, and its station
+   GEOM (js/stations.js) is one table for both, in build units along the vehicle axis: each
+   segment's length L, radius r and middle zc, at the stations js/saturn.js draws. */
 const BLUNT_CA = 1.1;                                  // a capsule alone flies as a blunt body
 const CA_STACK = CD_AREA / (Math.PI * (GEOM[0].r * U_M) ** 2);   // so the full stack nose-on is CD_AREA
 function inertiaAxes() {
@@ -358,7 +349,7 @@ export function separateStage() {
     S.v.clone().addScaledVector(lat, 0.02 + Math.random() * 0.05).add(new THREE.Vector3().randomDirection().multiplyScalar(0.015)),
     thin ? 0.25 + Math.random() * 0.2 : 0.6 + Math.random() * 0.5, [1, .8, .4], thin ? 2.5 + Math.random() * 2 : 10 + Math.random() * 8, 0);
   /* The 26 soft puffs alone read as "a single small soft white ellipse, no debris or spark"
-     (review2/14). A real separation event also throws hot hardware: 9 spark parcels — smoke = 0
+     in review. A real separation event also throws hot hardware: 9 spark parcels — smoke = 0
      so they draw additive like the explosion's sparks, 2 m at birth, 1.4–2.0 s — spread radially
      in the separation PLANE (⊥ the stack axis: `lat` and axis×lat are an orthonormal pair there)
      at 20–50 m/s, the range the CSM's push-off motors + spring blowout actually clears the
@@ -399,7 +390,8 @@ const _aero = new THREE.Vector3();
 export function coastDrag(out, p, v, mass = totalMass()) {
   const alt = p.length() - RE;
   if (alt >= ATMO_TOP) return out;
-  const vx = v.x - EARTH_SPIN * p.z, vy = v.y, vz = v.z + EARTH_SPIN * p.x, sp = Math.hypot(vx, vy, vz);
+  airVel(p, _air);
+  const vx = v.x - _air.x, vy = v.y, vz = v.z - _air.z, sp = Math.hypot(vx, vy, vz);
   const sh = aeroShape(), k = -0.5 * airDensity(alt) * sh.aRef * sh.ca * machDrag(sp / soundSpeed(alt)) * sp / mass;
   out.x += vx * k; out.y += vy * k; out.z += vz * k;
   return out;
@@ -410,7 +402,7 @@ export function accelAt(p, v, mass, thrustAcc, t = simTime, axis = null) {
   gravityAt(p, _d, t);
   const alt = p.length() - RE;
   if (alt < ATMO_TOP) {                             // atmosphere rides on the planet's spin
-    const vrel = _g.set(v.x - EARTH_SPIN * p.z, v.y, v.z + EARTH_SPIN * p.x);   // v − ω(0,1,0) × r
+    const vrel = _g.copy(v).sub(airVel(p, _air));
     aeroForce(_aero, vrel, alt, axis, axis ? aeroShape() : null);
     _d.addScaledVector(_aero, 1 / mass);
     if (axis && aeroState.q > maxQ && flightStarted) maxQ = aeroState.q;
@@ -470,7 +462,7 @@ export function physStep(dt) {
   S.v.addScaledVector(a, dt);
   const altNow = S.pos.length() - RE;
   if (altNow < 150) {
-    const air = _sv.set(-EARTH_SPIN * S.pos.z, 0, EARTH_SPIN * S.pos.x).negate();     // the air's own velocity
+    const air = airVel(S.pos, _sv);
     const vr = _g.copy(S.v).sub(air), sp = vr.length(), rho = airDensity(altNow);
     if (chute > 0) {
       /* A canopy is stiff: mains at 70 m/s relax the airspeed at 14/s, and an explicit step of

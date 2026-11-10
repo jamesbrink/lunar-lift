@@ -14,8 +14,8 @@
    importmap), so install it for the tool only:  npm i --no-save three@0.187.0
 
    Units are the game's: km, s, tonnes, kN. simTime is real mission seconds — no time speed-up,
-   warp only buys more substeps (js/main.js caps each substep at DTPHYS, so 0.1 s is the step the
-   browser itself never exceeds).
+   warp only buys more steps (js/main.js banks frame time and spends it in whole DTPHYS steps, so
+   0.1 s is the one step the browser takes in flight).
 
    Phases and why each one is what it is:
 
@@ -51,7 +51,7 @@ const PHASE_ARG = Number((process.argv.find(a => a.startsWith('--phase=')) || ''
 const TRACE = process.argv.includes('--trace');
 
 const G0 = 9.80665;
-const H = 0.1;                              // s — the step js/main.js never exceeds
+const H = 0.1;                              // s — DTPHYS, the step js/main.js takes in flight
 const PARK_PE = 150, PARK_AP = 185;         // km — parking orbit targets
 const AIM_PERI = 350;                       // km — periselene the window is solved for: the middle of the band flown to a
                                             //      soft landing (142-597 km), not its late edge — 110 km is a dry tank
@@ -235,8 +235,9 @@ function mission(phase, { trace = false, capture = true, stopAtPeri = false } = 
     } else if (mode === 'mcc') {
       /* Throttle run-down. The cutoff above commands targetThrottle 0; the engine keeps pushing
          until the actual throttle reaches zero, and the surplus is not negligible — coasting
-         forward from the commanded state misses the Moon by more than 16,000 km, while this state
-         reaches the 203 km periselene that the flight records. So this, not the command, is the
+         forward from the commanded state missed the Moon by more than 16,000 km when this was
+         measured, while this state reaches the periselene the flight records (346 km on the
+         shipped window). So this, not the command, is the
          trajectory the mission is actually on, and js/targeting.js is validated against it. */
       if (!ev.tliDone && P.getThrottle() < 0.01) {
         ev.tliDone = { t: +P.getSimTime().toFixed(3), vInert: +P.S.v.length().toFixed(4),
@@ -400,11 +401,11 @@ function mission(phase, { trace = false, capture = true, stopAtPeri = false } = 
       if (P.getSimTime() > 800000) break;
     }
 
-    /* Always H, never a coarser coast step. js/main.js splits warp into substeps capped at
-       DTPHYS = 0.1 s, so 0.1 s is the ONLY step the game can produce, and the translunar encounter
-       is sensitive enough that stepping the coast at 1 s changes the periselene by ~870 km — the
-       whole difference between a nominal landing and a correction burn. A faster coast step would
-       certify a trajectory no player can fly. */
+    /* Always H, never a coarser coast step. js/main.js spends warp in whole steps of
+       DTPHYS = 0.1 s, so 0.1 s is the ONLY step the game takes in flight, and the translunar
+       encounter is sensitive enough that stepping the coast at 1 s changes the periselene by
+       ~820 km (346 km becomes an impact 475 km under the surface, from the shipped coast-start
+       state). A faster coast step would certify a trajectory no player can fly. */
     const step = H;
     const mBefore = P.totalMass(), stageBefore = P.activeStage(), burnBefore = P.isBurning();
     P.physStep(step);

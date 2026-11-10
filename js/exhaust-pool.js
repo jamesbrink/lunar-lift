@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { VS, SOI_M, moonPos } from './constants.js';
 import { getSimTime } from './physics.js';
+import { TAIL_Z, LES_TIP_Z, R_S1_SKIRT } from './stations.js';
 
 /* The exhaust's memory: one fixed pool of gas parcels, the frame of the vehicle they leave, and the
    generic `spawnParticle` contract js/physics.js calls. Nothing here integrates or draws —
@@ -65,7 +66,7 @@ export function resetPool() {
    the hull, the lunar ejecta scales with the engine's height, and the draw call is anchored here. */
 export const ship = {
   pos: new THREE.Vector3(), vel: new THREE.Vector3(), quat: new THREE.Quaternion(), quatI: new THREE.Quaternion(),
-  hullR: 3.63 * VS, tailZ: -40, topZ: 37.6, live: false,
+  hullR: R_S1_SKIRT * VS, tailZ: TAIL_Z[0] + 2, topZ: LES_TIP_Z, live: false,
 };
 
 /* The Moon at the current mission time. The integrator refreshes both once per frame; the spawners

@@ -71,7 +71,7 @@ function compass(c, cx, cy, R, dir, label) {
   c.globalAlpha = b.z > 0 ? 0.85 : 0.3;
   c.fillStyle = '#c9cbd2'; c.font = '10px ui-monospace,monospace';
   /* Ticks ride 0.78R, not the old 0.86R: at 0.86R the lowest tick box reached y ≈ 139 and sat
-     directly in the ball's bottom label band (the round-3 'N' + status-string mush). The band
+     directly in the ball's bottom label band (an 'N' + status-string mush). The band
      0.78R·71 px keeps every tick glyph inside y ∈ [15.6, 134.4], clear of the fixed top legend
      (box ends y 12) and the bottom status slot (starts y 137) in every attitude.
      The 2.6px dark stroke underneath is what lets the same glyph read on the flat #3a7ab8
@@ -278,7 +278,7 @@ export function drawNavball() {
   c.fillText('prograde', cx - 18, 10);
 
   /* Status slot — the strip y ∈ [137, 149] is the one and only place a string lives at the
-     bottom of the ball area, backed by an opaque panel. Round 3 piled THREE strings onto the
+     bottom of the ball area, backed by an opaque panel. An earlier layout piled THREE strings onto the
      old shared baseline y = NB−4: 'x° off prograde' at x = 4, 'nose = centre' at x = 49, and
      any tick that swung near nadir — mush in every frame. With ticks at 0.78R (lowest glyph box
      y ≈ 134.4) nothing on the dial enters this strip; the opaque panel also covers rim-pinned
@@ -343,7 +343,7 @@ function drawOrbit(nearMoon, centre, vel, el, ecc) {
      and the mask edge hides underneath it. A rectangular edge can then only reach the ring's
      outer antialiased pixels, which the ring itself paints over — the crop is masked regardless
      of which draw escaped the old same-radius clip.
-     NaN/exception hardening (round-3 'empty black sub-map', both Earth and Moon sessions): the
+     NaN/exception hardening (the 'empty black sub-map', both Earth and Moon sessions): the
      spin comes off the live scene graph, and world.js latches a NaN into earth/moon rotation.y
      permanently if syncTime ever sees a non-finite time — from there lon → cu → NaN
      and drawImage THROWS (as does any non-finite arg, or a zero-pixel source canvas), which
@@ -437,7 +437,7 @@ function drawOrbit(nearMoon, centre, vel, el, ecc) {
        bottom-left(4, ORB_H−5) 'Pe …' — longest value 'Pe −400,000 km' (14) ends x ≈ 79.6
        bottom-right(ORB_W−4, ORB_H−5) body caption — 'earth' starts x ≈ 115.5: a 35 px gutter,
                                 and the caption finally left the band that visually merged
-                                with the ball's rim labels (the round-3 pile-up read).
+                                with the ball's rim labels (the pile-up read).
      No pair shares a line that can grow into it at any telemetry value. */
   const tag = (txt, x, y, col, right) => {
     const w = txt.length * 5.4;
@@ -481,8 +481,8 @@ function drawOrbit(nearMoon, centre, vel, el, ecc) {
     c.lineTo(vx + ux * (L - 5) + uy * 2.6, vy + uy * (L - 5) - ux * 2.6);
     c.closePath(); c.fill();
   }
-  /* Body caption: bottom-right, tagged like everything else. Round 2 moved it top-right to keep
-     it off the disc; round 3 then read it as part of the rim mush because that row sat directly
+  /* Body caption: bottom-right, tagged like everything else. It was once moved top-right to keep
+     it off the disc, and then read as part of the rim mush because that row sat directly
      under the ball while the sub-map itself was blank. It now lives diagonally away from both
      the ball and the Ap/status line: 'earth' (widest, ≈ 27 px) spans x 115.5..142, y 66..78,
      while the bottom-left 'Pe' tag ends at x ≈ 79.6 even for 'Pe −400,000 km' — a 35 px gutter.

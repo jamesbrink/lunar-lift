@@ -61,9 +61,18 @@ const server = http.createServer((req, res) => {
     return;
   }
 
-  const rel = url === '/' ? 'index.html' : url.replace(/^\/+/, '');
-  const file = path.join(ROOT, rel);
-  if (!file.startsWith(ROOT)) { res.writeHead(403).end('forbidden'); return; }
+  /* Only files under ROOT, and nothing whose path has a dot-segment: no /.git/config, no /.env, no
+     /.github/. The path is decoded and resolved first, so %2e%2e and friends are judged by where they
+     land; a prefix test on the string would also have passed a sibling such as ROOT + '-old'. */
+  let rel;
+  try { rel = decodeURIComponent(url === '/' ? 'index.html' : url.replace(/^\/+/, '')); }
+  catch { res.writeHead(400, { 'Content-Type': 'text/plain' }).end('400 bad request'); return; }
+  const file = path.resolve(ROOT, rel);
+  const inside = path.relative(ROOT, file);
+  if (!inside || inside.startsWith('..') || path.isAbsolute(inside) || rel.includes('\0')
+    || inside.split(path.sep).some(seg => seg.startsWith('.'))) {
+    res.writeHead(403, { 'Content-Type': 'text/plain' }).end('403 forbidden'); return;
+  }
 
   fs.readFile(file, (err, buf) => {
     if (err) { res.writeHead(404, { 'Content-Type': 'text/plain' }).end('404 not found'); return; }

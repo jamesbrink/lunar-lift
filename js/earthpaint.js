@@ -18,7 +18,7 @@ export async function paintEarthJob(diffusePath, maskPath, normalPath) {
   const land = new Uint8Array(w * h);
   for (let i = 0; i < land.length; i++) land[i] = sea[i] ? 0 : 1;
   const cleaned = openClose(cleanMask(land, w, h, 5), w, h, 1);
-  /* (round 5: the shore/outer/stroke dilate masks are gone — the sea bands below are painted from
+  /* (The shore/outer/stroke dilate masks are gone — the sea bands below are painted from
      the smoothed signed distance instead, which is why no boundary here staircases any more.) */
 
   /* Classify the BIOME from smoothed signals, not from one texel's own pixel. A 2048-wide diffuse is
@@ -70,7 +70,7 @@ export async function paintEarthJob(diffusePath, maskPath, normalPath) {
 
   const out = new Uint8ClampedArray(w * h * 4);
   /* The sea-side colour comes from the smoothed signed distance, not from the dilate masks.
-     The masks (dilate [9,4,2]) staircased at one 20 km texel per tread and review 4 measured the
+     The masks (dilate [9,4,2]) staircased at one 20 km texel per tread, and a review measured the
      result at 160 km as "stepped ocean-depth terraces" and a "100-200 km-wide dark zone" around
      every coast: at those slants the MAP texture is what the eye has, so smoothing the SDF the
      shader reads fixed nothing the canvas drew. Blending each band edge over ~1 texel of SDF
@@ -78,9 +78,9 @@ export async function paintEarthJob(diffusePath, maskPath, normalPath) {
   const coast = earthCoast(cleaned, w, h);
   const sdf = coast.km;
   const ss = (a, b, x) => { const t = Math.min(1, Math.max(0, (x - a) / (b - a))); return t * t * (3 - 2 * t); };
-  /* Round 6b: H 14 -> 60 km. With a 28 km blend the shelf-break iso-line (sd ≈ 175) read at
+  /* H is 60 km, not 14. With a 28 km blend the shelf-break iso-line (sd ≈ 175) read at
      160 km as a dark curve running parallel to the limb — the "floating tear" again. A 120 km
-     graded band keeps the near/far sea two tones (review 4's monotone complaint) but no longer
+     graded band keeps the near/far sea two tones (one tone read as monotone) but no longer
      draws a line where there is no coast. */
   const H = 60;                                   // km blend half-width ≈ 3 texels
   for (let y = 0; y < h; y++) {
@@ -95,7 +95,7 @@ export async function paintEarthJob(diffusePath, maskPath, normalPath) {
         out[o] = c[0] + (206 - c[0]) * wsand;
         out[o + 1] = c[1] + (186 - c[1]) * wsand;
         out[o + 2] = c[2] + (132 - c[2]) * wsand;
-        /* Round 6b (user: "the whole Earth should be ONE continuous beautiful planet" — a 50 km
+        /* (The brief: "the whole Earth should be ONE continuous beautiful planet" — a 50 km
            straight-edged slab at the launch site, 20 km checkerboards on every coast): the land
            side of the mask was BINARY — one texel biome, the next texel sea, bilinear or not,
            because the blend lived only in the sea's SDF bands. A texel adjacent to water now
@@ -110,16 +110,16 @@ export async function paintEarthJob(diffusePath, maskPath, normalPath) {
       } else {
         const sd = sdf[i];
         const wo = 1 - ss(115, 235, sd), ws = 1 - ss(95 - H, 95 + H, sd), wc = 1 - ss(25 - H, 25 + H, sd);
-        // open ocean was one value everywhere (review 4: "the low-orbit oceans of 09/15 are
+        // open ocean was one value everywhere (reviewed as "the low-orbit oceans of 09/15 are
         // monotone flats"): three slow tones, ~900-1500 km wavelength, far slower than any mesh
         const u = (x + 0.5) / w, v2 = (y + 0.5) / h;
         const TAU = 6.2831853;
         const dw = 0.5 + 0.5 * Math.sin(TAU * 24 * u) * Math.sin(TAU * 14 * v2 + 1.7)
                  + 0.35 * Math.sin(TAU * 11 * u + 0.6) * Math.sin(TAU * 8 * v2);
-        /* Round 6b: the three open-ocean tones are a GRADED field now. The binary thresholds
+        /* The three open-ocean tones are a GRADED field. The binary thresholds
            (dw > 0.42, dw > 0.62, hard at sd = 175) printed iso-contours of the sine product as
            black ribbons across the sea — measured at 695 km as a ~200 km-wide lens stepping
-           12 % darker with a hard edge, the "seam tear" of review 5 and of the first 06 shot.
+           12 % darker with a hard edge, the "seam tear" seen from orbit.
            Two smoothsteps: the modulation itself ramps with dw, and it fades in with distance
            from the coast instead of switching on at the 175 km iso-line. */
         const tf = 1 + ss(140, 210, sd) * (-0.06 + 0.12 * ss(0.35, 0.72, dw));
@@ -158,7 +158,7 @@ function bakePadCoast(out, w, h) {
       const lon = ((x + 0.5) / w) * 360 - 180;
       if (Math.abs(lon - PAD_LON) > R) continue;
       const u = (x + 0.5) / w, v = 1 - (y + 0.5) / h;   // rows count south, uv.v counts north
-      /* Round 6b: 3×3 coverage per texel. The authored geography is 5–13 km wide (barrier
+      /* 3×3 coverage per texel. The authored geography is 5–13 km wide (barrier
          island, lagoons) and the canvas texel is 20 km: sampled once, every texel drew ONE
          zone's full colour, and the Merritt Island coast became a per-texel lottery — the
          "big square" of alternating lagoon-blue and island-green the user pointed at. Nine
@@ -229,7 +229,7 @@ function buildEarthField(land, rug, coast, sw, sh) {
   /* Shore feather: land eases to exactly 0 over the last 180 km toward the sea, using the same
      1-Lipschitz SDF the colours read. Without it a half-km continent meets zero-height ocean on a
      one-cell step and the far mesh draws that step as a staircase cliff — measured as the w25 dark
-     band, (44,68,68)→(31,49,71) over 75 px. Round 4's 40 km feather still staircased (review 4,
+     band, (44,68,68)→(31,49,71) over 75 px. A 40 km feather still staircased (measured,
      frames 08/09: "stepped ocean-depth terraces") because the FAR MESH is 384×192 — one vertex per
      ~104 km — so a ramp under one cell wide is sampled as a step no matter how smooth the field is.
      180 km ≈ 2 cells: the staircase is gone when the field that feeds the mesh varies slower than
@@ -292,7 +292,7 @@ function earthCoast(land, w, h) {
   }
   /* 5×5 binomial tent (footprint ~80 km). The raw chamfer field is only as round as the MASK that
      fed it, and the mask staircases at one 20 km texel — every isoline of the raw field, including
-     the zero line the ink band draws, is a staircase. Review 4 measured the result at 160 km:
+     the zero line the ink band draws, is a staircase. Measured at 160 km:
      "coastline as a 100-200 km-wide dark zone with ~40-60 px treads". Blurring the DISTANCE, not
      the mask, rounds every isoline at once; the zero-crossing moves by less than a texel, and the
      SDF stays 1-Lipschitz to within the kernel. Strains narrower than ~80 km merge — at 20 km per

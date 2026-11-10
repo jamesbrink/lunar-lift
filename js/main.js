@@ -50,13 +50,13 @@ renderer.setSize(innerWidth, innerHeight);
 /* Flat output. ACES filmic was compressing and desaturating everything, which is what turned the
    ocean charcoal; cel shading wants the palette exactly as authored.
 
-   Shadows are PCF-filtered, not Basic. BasicShadowMap compared one texel, and the box tracking the
-   vehicle is ±6 km at the pad — 5.9 m per texel at 2048² — so the launch tower's 2 m shadow arrived as
-   a black staircase marching across the pad, worst at a low sun where it runs for kilometres. The
-   thing the old comment was protecting is the *cloud* shade, which is not a shadow-map caster at all
-   (js/clouds.js marches its own optical depth into the ground materials), so filtering the map
-   cannot blur it away. What the cel look
-   needs from the map is the terminator on the planet, and that comes from the ramp, not from the die.
+   Shadows are PCF-filtered, not Basic. BasicShadowMap compares one texel: with the box then
+   tracking the vehicle at ±6 km and a 2048² map (5.9 m per texel) the launch tower's 2 m shadow
+   arrived as a black staircase marching across the pad, worst at a low sun where it runs for
+   kilometres. (The map is 4096² over ±3 km on the ground now: js/world.js.) Filtering cannot blur
+   the *cloud* shade away, because that is not a shadow-map caster at all — js/clouds.js looks its
+   own field up along the sun ray in the ground materials. What the cel look needs from the map is
+   the terminator on the planet, and that comes from the ramp, not from the die.
 
    PCFShadowMap, not PCFSoftShadowMap: measured over 90 rAF deltas at the pad, the soft variant cost
    p90 17.9 ms against 17.1 here, and its wider kernel took the edge off the tower shadows that the

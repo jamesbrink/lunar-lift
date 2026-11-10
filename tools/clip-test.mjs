@@ -4,28 +4,16 @@
    drawn terrain, never inside the vehicle's hull, and never closer to anything than the near plane.
 
      node tools/clip-test.mjs [port=8078]        exits 1 on any violation */
-import { chromium } from 'playwright';
-import { existsSync, readdirSync } from 'node:fs';
-import { homedir } from 'node:os';
+import { launch, openGame } from './lib/browser.mjs';
 const port = process.argv[2] || 8078;
-function findChrome() {
-  if (process.env.EXE) return process.env.EXE;
-  const cache = `${homedir()}/Library/Caches/ms-playwright`;
-  if (!existsSync(cache)) return undefined;
-  for (const d of readdirSync(cache).filter(n => /^chromium-\d+$/.test(n)).sort().reverse()) {
-    const p = `${cache}/${d}/chrome-mac-arm64/Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing`;
-    if (existsSync(p)) return p;
-  }
-}
-const browser = await chromium.launch({ headless: true, executablePath: findChrome(),
-  args: ['--headless=new', '--use-angle=metal', '--enable-gpu', '--ignore-gpu-blocklist'] });
+const browser = await launch();
 const page = await browser.newPage({ viewport: { width: 1280, height: 800 } });
-await page.goto(`http://127.0.0.1:${port}/index.html`, { waitUntil: 'networkidle' });
-await page.waitForFunction(() => window.game, null, { timeout: 20000 });
+await openGame(page, port);
 await page.waitForTimeout(2000);
 
 const sweep = name => page.evaluate(async name => {
   const P = await import('/js/physics.js'), C = await import('/js/constants.js'), T = await import('three'), W = await import('/js/world.js');
+  const { NOSE_Z } = await import('/js/stations.js');
   const { updateCamera, camera } = await import('/js/camera.js');
   const moon = new T.Vector3(), d = new T.Vector3(), ax = new T.Vector3(), rel = new T.Vector3();
   let n = 0, minGround = 1e9, minHull = 1e9; const bad = [];
@@ -45,8 +33,8 @@ const sweep = name => page.evaluate(async name => {
           /* distance from the hull: a capsule along the axis between the live tail and the apex */
           ax.copy(P.fwd());
           rel.subVectors(c, P.S.pos);
-          const z = T.MathUtils.clamp(rel.dot(ax), P.tailStation() * C.VS, 28.7 * C.VS);
-          const hull = rel.addScaledVector(ax, -z).length() - 3.6 * C.VS;       // 5 m radius
+          const z = T.MathUtils.clamp(rel.dot(ax), P.tailStation() * C.VS, NOSE_Z * C.VS);
+          const hull = rel.addScaledVector(ax, -z).length() - 3.6 * C.VS;       // the test's own 5 m hull: a hair outside the 3.57 u tanks
           minGround = Math.min(minGround, ground); minHull = Math.min(minHull, hull);
           if (ground < 0.002 || hull < 0.002 || !Number.isFinite(ground + hull))
             bad.push({ mode, dist, pitch: +pitch.toFixed(2), yaw: +yaw.toFixed(2), ground: +(ground * 1000).toFixed(1), hull: +(hull * 1000).toFixed(1) });

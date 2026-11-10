@@ -105,9 +105,9 @@ function mareCollar(out, mare, w, h) {
           mare[y * w + xm] && mare[y * w + xp] &&
           mare[yd * w + xm] && mare[yd * w + x] && mare[yd * w + xp]) continue;
       const o = i * 4;
-      /* Round 6: the stroke used to be an absolute value — a single 10.7 km texel of rgb(79,83,93)
+      /* The stroke used to be an absolute value — a single 10.7 km texel of rgb(79,83,93)
          whose mip chain turned every mare border into a string of stamp-like dark dashes at orbit
-         range (review 5, frame 10). Blending 80 % keeps 0.8·54.1 = 43 levels of step at native
+         range. Blending 80 % keeps 0.8·54.1 = 43 levels of step at native
          resolution (still the cartoon edge the pass exists for) and takes the minified dash to
          grey-in-grey instead of black-on-white. */
       out[o] += (MOON.collar[0] - out[o]) * 0.8; out[o + 1] += (MOON.collar[1] - out[o + 1]) * 0.8;

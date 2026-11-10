@@ -2,13 +2,13 @@ import * as THREE from 'three';
 import { capsuleGroup } from './saturn.js';
 import { toon, outline } from './toon.js';
 import { getChute, getChuteOpen, getSimTime } from './physics.js';
+import { CM_APEX_Z } from './stations.js';
 
 /* The command module's parachutes, as drawn hardware: two drogues, then three ringsail mains in
-   Apollo's orange and white. Build units (1 u = 1.4 m), hung from the apex at z = 28.6. Which are
+   Apollo's orange and white. Build units (1 u = 1.4 m), hung from the top of the cone (CM_APEX_Z). Which are
    out and how far they have inflated is js/physics.js's business (getChute / getChuteOpen); this
    only draws it. Mains are 12 u across — 17 m against Apollo's 25 m, so three of them and the
    capsule fit one frame. */
-const APEX = 28.6;
 const ORANGE = new THREE.Color(0xff7a2a), WHITE = new THREE.Color(0xf6f8fc);
 const lineMat = new THREE.LineBasicMaterial({ color: 0x1a2230 });
 const cloth = toon({ vertexColors: true, side: THREE.DoubleSide });
@@ -46,7 +46,7 @@ function cluster(count, r, len, tilt, gores) {
     const lines = new THREE.LineSegments(new THREE.BufferGeometry().setFromPoints(pts.splice(0)), lineMat);
     leg.add(lines);
   }
-  g.position.z = APEX; g.visible = false;
+  g.position.z = CM_APEX_Z; g.visible = false;
   return g;
 }
 

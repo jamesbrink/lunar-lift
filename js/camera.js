@@ -3,6 +3,7 @@ import * as WORLD from './world.js';
 import { RE, RM, MU_E, SOI_M, MOON_DIST, EARTH_SPIN, MOON_PLANE_N, MOON_U, MOON_V, VS, PAD_SCALE, PAD_POS, PAD_UP, moonPos } from './constants.js';
 import { S, keys, fwd, getSimTime, activeStage, isBurning, getThrottle, airDensity, groundVel, navVel, orbitalElements, getChute } from './physics.js';
 import { stages } from './saturn.js';
+import { NOSE_Z, TAIL_Z, CM_TAIL_Z } from './stations.js';
 
 /* distances are km; 1 m near plane so the 105 m rocket resolves, 3 M km far plane
    so the starfield and the lunar approach both render (logarithmic depth buffer) */
@@ -48,12 +49,11 @@ const camOff = new THREE.Vector3();
    vehicle axis from the state point S.pos (which is the middle of the FULL stack — after two
    stagings the nearest metal is 10 m ahead of it and the command module 38 m). It glides to its new
    value when a stage leaves instead of jumping, so staging re-frames the ship rather than cutting. */
-const NOSE_Z = 28.7;                       // build units: the command module's apex
 let focusZ = null, spanHalf = 37 * VS;
 let wantFov = 64, placedFov = false, shakeT = 0;
 const refH = new THREE.Vector3(1, 0, 0);     // the carried heading, horizontal and unit
 let refOk = false, climb = 0, frame = 1, lastSimT = 0;
-const FULL_SPAN = 0.5 * (NOSE_Z + 42) * VS; // half-length of the whole stack
+const FULL_SPAN = 0.5 * (NOSE_Z - TAIL_Z[0]) * VS; // half-length of the whole stack
 const saved = { yaw: PAD_YAW, pitch: 0, dist: 0.13 };
 const CAM_RANGE = { chase: [0.02, 1000, 0.13], orbit: [0.02, 1000, 0.13] };
 const range = () => mapOn ? MAP_RANGE[FOCI[focus]] : CAM_RANGE[camModes[camMode]];
@@ -344,7 +344,7 @@ export function updateCamera(dt, paused = false) {
     desired.copy(_target).addScaledVector(_dir, curDist);
   } else {
     const i = activeStage();
-    const tail = i >= 0 ? stages[i].tailZ : NOSE_Z - 2.7;        // capsule alone: heat shield to apex
+    const tail = i >= 0 ? stages[i].tailZ : CM_TAIL_Z;           // capsule alone: heat shield to apex
     /* Under parachutes the vehicle is the capsule AND what it hangs from: frame both. */
     const ch = i < 0 ? getChute() : 0, top = ch === 2 ? NOSE_Z + 36 : ch === 1 ? NOSE_Z + 18 : NOSE_Z;
     const wantZ = 0.5 * (tail + top) * VS;
