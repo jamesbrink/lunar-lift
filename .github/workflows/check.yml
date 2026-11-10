@@ -1,0 +1,20 @@
+name: check
+on:
+  push:
+  pull_request:
+jobs:
+  headless:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      # the game has no dependencies; the tools need three to import the game's own modules
+      - run: npm i --no-save three@0.187.0
+      # shader lint, the shipped mission (must win), the retro stack (must lose), mission-math.
+      # The browser checks (console, clipping, flicker) need a GPU: run `npm test` locally.
+      - run: node tools/check.mjs --no-browser

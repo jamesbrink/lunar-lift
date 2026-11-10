@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { RE, RM, SOI_M, VS, CD_AREA, SPECS, moonPos } from './constants.js';
-import { S, getSimTime, getEngineOn, getThrottle, activeStage, totalMass, fwd, gravityAt, airDensity, surfaceAlt, tailStation, getChute } from './physics.js';
+import { S, getSimTime, getEngineOn, getThrottle, activeStage, totalMass, fwd, gravityAt, airDensity, surfaceAlt, tailStation, getChute, coastDrag } from './physics.js';
 import { stages } from './saturn.js';
 import { ribbon } from './ribbon.js';
 
@@ -153,7 +153,7 @@ export function predict() {
     const mass = totalMass();
     gravityAt(p, _g, t);
     const altE = p.length() - RE;
-    if (altE < 420) _g.addScaledVector(v, -0.5 * airDensity(altE) * CD_AREA * v.length() / mass);
+    coastDrag(_g, p, v, mass);            // the same nose-on, air-relative drag targeting uses (js/physics.js)
     if (sp && fuel > 0) {
       fuel = Math.max(0, fuel - sp.thrust * throttle / (sp.isp * 9.81) * dt);
       _g.addScaledVector(axis, sp.thrust * throttle / mass / 1000);

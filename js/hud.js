@@ -338,7 +338,6 @@ export function initHUD({ resetMission }) {
   /* Every chip is the key it names: clicking sends that key through the same handler. */
   for (const b of document.querySelectorAll('button[data-key]')) b.addEventListener('click', () => {
     dispatchEvent(new KeyboardEvent('keydown', { key: b.dataset.key }));
-    dispatchEvent(new KeyboardEvent('keyup', { key: b.dataset.key }));
-    b.blur();
+    dispatchEvent(new KeyboardEvent('keyup', { key: b.dataset.key }));      // focus stays on the chip: keyboard users keep their place
   });
 }

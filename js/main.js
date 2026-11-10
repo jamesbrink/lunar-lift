@@ -17,8 +17,35 @@ import { initPredictor, predict, updatePredictor, clearPredictor, predLine } fro
 
 /* ---------------- renderer / scene ---------------- */
 const canvas = document.getElementById('gl');
-const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, logarithmicDepthBuffer: true });
-renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+/* Fail where the player can see it. No WebGL2 used to leave the HUD floating over a blank canvas
+   with nothing said. */
+function fatal(title, text) {
+  const o = document.getElementById('overlay');
+  o.classList.remove('hidden');
+  o.querySelector('h1').firstChild.textContent = title;
+  document.getElementById('overlayText').innerHTML = `<div class="brief">${text}</div>`;
+  document.getElementById('bigBtn').style.display = 'none';
+  window.__fatal = true;
+}
+let renderer;
+try { renderer = new THREE.WebGLRenderer({ canvas, antialias: true, logarithmicDepthBuffer: true }); }
+catch (err) { fatal('CANNOT START', 'This game needs WebGL 2. Your browser or graphics driver did not provide it — try a current Chrome, Edge, Firefox or Safari with hardware acceleration switched on.'); throw err; }
+/* Resolution is the one quality knob, and it turns itself: the frame is fill-bound (half the cost is
+   pixels), so if frames run long for three seconds the drawing buffer drops a quarter-step of pixel
+   ratio, down to 1. It never climbs back by itself — under vsync a fast frame and a barely-made
+   frame look the same — but ?scale=<n> pins it, and a reload starts from the top again. */
+const SCALE_PIN = Number(new URLSearchParams(location.search).get('scale'));
+let pixelRatio = SCALE_PIN > 0 ? Math.min(SCALE_PIN, 3) : Math.min(devicePixelRatio, 2), slowFor = 0;
+renderer.setPixelRatio(pixelRatio);
+function adaptScale(dtReal) {
+  if (SCALE_PIN > 0 || pixelRatio <= 1 || document.hidden) { slowFor = 0; return; }
+  slowFor = dtReal > 0.024 ? slowFor + dtReal : Math.max(0, slowFor - dtReal * 2);     // slower than ~42 fps
+  if (slowFor > 3) {
+    slowFor = 0; pixelRatio = Math.max(1, pixelRatio - 0.25);
+    renderer.setPixelRatio(pixelRatio); renderer.setSize(innerWidth, innerHeight);
+    addLog(`RENDER SCALE ${pixelRatio.toFixed(2)} — KEEPING THE FRAME RATE`);
+  }
+}
 renderer.setSize(innerWidth, innerHeight);
 /* Flat output. ACES filmic was compressing and desaturating everything, which is what turned the
    ocean charcoal; cel shading wants the palette exactly as authored.
@@ -81,7 +108,10 @@ initHalfRes(scene, plumeLive);
 occlude(scene);          // every opaque mesh built so far hides the half-resolution layer
 
 addEventListener('keydown', e => {
-  const k = e.key.toLowerCase();
+  let k = e.key.toLowerCase();
+  if (k === '}') k = ']'; else if (k === '{') k = '[';       // SHIFT is the throttle: warp must still work while it is held
+  /* A focused chip or button takes SPACE and ENTER for itself, as any button does. */
+  if (e.target && e.target.tagName === 'BUTTON' && (k === ' ' || k === 'enter')) return;
   if ([' ', 'arrowup', 'arrowdown', 'arrowleft', 'arrowright', '-', '='].includes(k) || (k === ']' || k === '[')) e.preventDefault();
   if (e.repeat) return; keys[k] = true;
   if (!audioArmed) { audioArmed = true; audioInit(); }          // browsers gate sound on a user gesture
@@ -92,6 +122,8 @@ addEventListener('keydown', e => {
   }
   if (k === '?' || k === '/') { document.getElementById('helpCard').classList.toggle('on'); return; }
   if (k === 'escape' && document.getElementById('helpCard').classList.contains('on')) { document.getElementById('helpCard').classList.remove('on'); return; }
+  /* Paused is for looking: the view, the map, the clock and the help work; the ship's switches wait. */
+  if (WARPS[getWarpIndex()] === 0 && [' ', 'x', 'g', 'p', 'v', 'h', 't'].includes(k)) { addLog('PAUSED — ESC OR ] TO RESUME', 'warn'); return; }
   if (k === ' ') toggleIgnite();
   else if (k === 'x') dropStage();
   else if (k === 'p') toggleSas();
@@ -107,7 +139,7 @@ addEventListener('keydown', e => {
   else if (k === 'r') resetMission();
   else if (k === 'escape' || k === 'pause') { setWarpIndex(WARPS[getWarpIndex()] === 0 ? WARPS.indexOf(1) : 0); addLog(WARPS[getWarpIndex()] === 0 ? 'PAUSED — ESC TO RESUME' : 'RESUMED'); }
 });
-addEventListener('keyup', e => { keys[e.key.toLowerCase()] = false; });
+addEventListener('keyup', e => { const k = e.key.toLowerCase(); keys[k] = false; if (k === 'shift') keys['}'] = keys['{'] = false; });
 addEventListener('blur', () => { for (const k in keys) keys[k] = false; });
 
 /* X drops a stage for good, and one slip of a finger used to throw away a burning S-1 with 74 % of
@@ -145,9 +177,11 @@ function retrue() { shown = false; prevValid = false; bank = 0; lastDraw = getSi
 const _gv = new THREE.Vector3();
 
 function frame() {
+  if (window.__frameErr) return;
   requestAnimationFrame(frame);
   const now = performance.now();
   const dtReal = Math.min(.1, (now - last) / 1000); last = now;
+  adaptScale(dtReal);
   try {
 
   /* Paused (warp 0): nothing advances — not the physics, the planets, the exhaust or the debris —
@@ -198,6 +232,7 @@ function frame() {
     updateAim();   // predicted lunar aim; spends a fixed step budget per frame and self-throttles
   }
   else if (!paused) { syncTime(getSimTime()); }
+  if (getState() === 'won' || getState() === 'lost') updateAudio({ burning: false, throttle: 0, rho: 0, q: 0 });   // no wind under the end card
   if (!paused) updateParticles(Math.min(1, dtReal * WARPS[getWarpIndex()]));
   updateCamera(dtReal, paused);
   if (paused) updateAudio({ burning: false, throttle: 0, rho: 0, q: 0 });   // and the engine is silent
@@ -214,7 +249,8 @@ function frame() {
   renderHalfRes(renderer, scene, camera);   // weather and exhaust, at a quarter of the pixels
   renderer.render(scene, camera);
   } catch (err) {
-    if (!window.__frameErr) { window.__frameErr = true; console.error('LUNAR LIFT frame error:', err); }
+    /* One exception used to freeze the picture for good with a single console line. */
+    if (!window.__frameErr) { window.__frameErr = true; console.error('LUNAR LIFT frame error:', err); fatal('SOMETHING BROKE', `The game hit an error and stopped: <b>${String(err && err.message || err).slice(0, 160)}</b><br>Reload the page to fly again.`); }
   }
 }
 requestAnimationFrame(frame);

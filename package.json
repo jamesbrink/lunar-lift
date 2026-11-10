@@ -5,8 +5,12 @@
   "main": "js/main.js",
   "scripts": {
     "dev": "node server.js",
-    "start": "node server.js"
+    "start": "node server.js",
+    "test": "node tools/check.mjs",
+    "test:headless": "node tools/check.mjs --no-browser"
   },
   "license": "MIT",
-  "engines": { "node": ">=18" }
+  "engines": {
+    "node": ">=18"
+  }
 }

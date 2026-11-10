@@ -94,7 +94,7 @@ let addLog = () => {};
 export function initCamera(canvas, log) {
   addLog = log;
   canvas.addEventListener('pointerdown', e => { dragging = true; canvas.setPointerCapture(e.pointerId); });
-  canvas.addEventListener('pointerup', () => { dragging = false; lastInput = performance.now(); });
+  for (const ev of ['pointerup', 'pointercancel', 'lostpointercapture']) canvas.addEventListener(ev, () => { dragging = false; lastInput = performance.now(); });
   canvas.addEventListener('pointermove', e => {
     if (!dragging) return;
     wantYaw += e.movementX * 0.005;
@@ -110,7 +110,9 @@ export function initCamera(canvas, log) {
   canvas.addEventListener('wheel', e => {
     e.preventDefault();
     const [lo, hi] = range();
-    wantDist = THREE.MathUtils.clamp(wantDist * (e.deltaY > 0 ? 1.12 : 0.9), lo, hi);
+    /* By how far the wheel turned, not once per event: a trackpad sends dozens of small events a
+       gesture and zoomed many times faster than a mouse. One notch (~100) is still ~12 %. */
+    wantDist = THREE.MathUtils.clamp(wantDist * Math.exp(THREE.MathUtils.clamp(e.deltaY, -240, 240) * 0.00113), lo, hi);
   }, { passive: false });
 }
 

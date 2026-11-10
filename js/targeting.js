@@ -63,7 +63,11 @@ function applicable() {
 function needsSeed() {
   if (seed.t < 0) return true;
   if (getEngineOn() && getThrottle() > 0.02) return true;    // thrust invalidates the prediction
-  if (getSimTime() > bestT) return true;                     // the encounter it predicted has passed
+  /* Only a FINISHED scan can have its encounter pass. While one is still running and the Moon is
+     receding, the best range so far is the starting one and bestT sits at t0: tested unconditionally
+     this abandoned and re-seeded the scan every 400 ms for as long as the ship moved away from the
+     Moon (reviewer: 428 restarts in 3,000 frames, the readout stuck on 'scanning'). */
+  if (finished && getSimTime() > bestT) return true;
   /* (A 20 s 'belt and braces' re-seed used to sit here. A coast does not change its own answer, and
      the restart republished 'best so far' ranges on a loop — 92,570 → 170,146 → 139,093 → … — and at
      under ~43 fps never let a scan finish at all.) */

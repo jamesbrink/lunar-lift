@@ -91,7 +91,10 @@ export function guardWarp() {
   if (WARPS[warpIdx] > cap) { while (WARPS[warpIdx] > cap) warpIdx--; hooks.addLog(`TIME WARP LIMITED TO ×${WARPS[warpIdx]} HERE`, 'warn'); }
 }
 export function cycleWarp(delta) {
-  if (delta > 0 && WARPS[Math.min(WARPS.length - 1, warpIdx + 1)] > warpCap()) { hooks.addLog(`TIME WARP LIMITED TO ×${WARPS[warpIdx]} HERE — CLIMB OUT OF THE AIR FIRST`, 'warn'); return; }
+  if (delta > 0 && WARPS[Math.min(WARPS.length - 1, warpIdx + 1)] > warpCap()) {
+    const why = warpIdx === WARPS.length - 1 || WARPS[warpIdx] >= 1000 && state !== 'pad' ? 'THE FASTEST THERE IS IN FLIGHT' : state === 'pad' ? 'WITH THE ENGINES LIT' : 'THIS CLOSE TO THE GROUND';
+    hooks.addLog(`TIME WARP ×${WARPS[warpIdx]} IS ${why}`, 'warn'); return;
+  }
   if (delta > 0) warpIdx = Math.min(WARPS.length - 1, warpIdx + 1);
   else warpIdx = Math.max(0, warpIdx - 1);
   hooks.addLog(WARPS[warpIdx] === 0 ? 'PAUSED — ] TO RESUME' : WARPS[warpIdx] < 1 ? `SLOW MOTION ×${WARPS[warpIdx]}` : WARPS[warpIdx] === 1 ? 'REAL TIME' : `TIME WARP ×${WARPS[warpIdx]}`);
@@ -418,7 +421,7 @@ export function accelAt(p, v, mass, thrustAcc, t = simTime, axis = null) {
 
 export function physStep(dt) {
   if (keys['shift']) targetThrottle = Math.min(1, targetThrottle + 0.6 * dt);
-  if (keys['control']) targetThrottle = Math.max(0, targetThrottle - 0.6 * dt);
+  if (keys['control'] || keys['z']) targetThrottle = Math.max(0, targetThrottle - 0.6 * dt);   // Z: CTRL+W/S/D belong to the browser on Windows and Linux
   if (engineOn && stages && !stages[0].separated && (state === 'pad' || state === 'flying')) targetThrottle = 1;   // a solid has no throttle
   const dThr = targetThrottle - throttle;
   throttle += THREE.MathUtils.clamp(dThr, -0.25 * dt, 0.25 * dt);

@@ -8,13 +8,13 @@
 <link rel="stylesheet" href="css/style.css">
 </head>
 <body>
-<canvas id="gl"></canvas>
+<canvas id="gl" aria-label="Lunar Lift: 3-D view of the rocket, the Earth and the Moon" role="img"></canvas>
 
 <!-- Top centre: clock, then the one line that says what to do next. -->
 <div id="clock" class="hud onmap">MET <b id="met">00:00:00</b> &nbsp;·&nbsp; <span id="warpInd">REAL TIME</span></div>
-<div id="guide" class="hud onmap"><span id="guideTag">NEXT</span><span id="guideText"></span></div>
-<div id="log" class="hud onmap"></div>
-<div id="warn" class="hud flightonly"></div>
+<div id="guide" class="hud onmap" aria-live="polite"><span id="guideTag">NEXT</span><span id="guideText"></span></div>
+<div id="log" class="hud onmap" aria-live="polite"></div>
+<div id="warn" class="hud flightonly" role="alert"></div>
 <div id="desc" class="hud flightonly"></div>
 
 <!-- Top left: where am I and how fast. The air row appears only while there is air. -->
@@ -89,7 +89,7 @@
 <div id="helpCard" class="panel">
   <div class="cols">
     <div><kbd>SPACE</kbd>ignite / cut engine</div><div><kbd>W</kbd><kbd>S</kbd>pitch</div>
-    <div><kbd>⇧</kbd><kbd>CTRL</kbd>throttle up / down</div><div><kbd>A</kbd><kbd>D</kbd>yaw</div>
+    <div><kbd>⇧</kbd>throttle up · <kbd>CTRL</kbd> or <kbd>Z</kbd> down</div><div><kbd>A</kbd><kbd>D</kbd>yaw</div>
     <div><kbd>X</kbd>drop the stage · <kbd>G</kbd>parachutes</div><div><kbd>Q</kbd><kbd>E</kbd>roll</div>
     <div><kbd>P</kbd>SAS autopilot on / off</div><div><kbd>V</kbd>SAS aims prograde / retrograde</div>
     <div><kbd>H</kbd>hold attitude: stop all rotation</div><div><kbd>←</kbd><kbd>→</kbd><kbd>↑</kbd><kbd>↓</kbd>look around · <kbd>-</kbd><kbd>=</kbd>zoom</div>
@@ -101,15 +101,26 @@
   <p>The keys apply torque, so a full stack turns slowly and gets livelier as it empties. With <b>RCS assist</b> off nothing damps a rotation in vacuum but you.</p>
 </div>
 
-<div id="overlay" class="hidden">
+<div id="overlay" class="hidden" role="dialog" aria-modal="true" aria-labelledby="overlayTitle">
   <div id="overlayCard">
     <img id="logo" src="assets/logo.svg" alt="Lunar Lift">
-    <h1>LUNAR LIFT<small>A THREE-STAGE LUNAR MISSION</small></h1>
+    <h1 id="overlayTitle">LUNAR LIFT<small>A THREE-STAGE LUNAR MISSION</small></h1>
     <div id="overlayText"></div>
     <button id="bigBtn">FLY AGAIN</button>
   </div>
 </div>
 
+<div id="narrow">LUNAR LIFT is flown from a keyboard and wants a wider window — open it on a desktop or turn the device sideways.</div>
+<script>
+/* If the game has not started in ten seconds, say why it might not have: the module graph loads
+   three.js from a CDN and needs WebGL 2, and either failing used to leave a blank page. */
+setTimeout(function () {
+  if (window.game || window.__fatal) return;
+  var o = document.getElementById('overlay'); o.classList.remove('hidden');
+  document.getElementById('overlayText').innerHTML = '<div class="brief">The game did not start. It needs WebGL 2 and a network connection to load three.js from cdn.jsdelivr.net. Check the connection and reload.</div>';
+  document.getElementById('bigBtn').style.display = 'none';
+}, 10000);
+</script>
 <script type="importmap">
 {
   "imports": {

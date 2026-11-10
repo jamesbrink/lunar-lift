@@ -69,3 +69,4 @@ await page.keyboard.press('m');
 console.log('state    ', await ev(`JSON.stringify((s => ({ t: s.simTime | 0, altE: s.altE | 0, speed: +s.speed.toFixed(3) }))(game.state()))`));
 console.log(msgs.length ? `console (${msgs.length}):\n  ` + [...new Set(msgs)].slice(0, 12).join('\n  ') : 'console: clean');
 await browser.close();
+process.exit(msgs.length ? 1 : 0);        // a console error or warning fails the run

@@ -489,4 +489,8 @@ if (asc) console.log(`  ascent: flown ${asc.dv} m/s against the ${IDEAL_TO_ORBIT
 console.log('\n--- events ---');
 for (const [k, v] of Object.entries(r.ev)) console.log(`  ${k}: ${JSON.stringify(v)}`);
 console.log(`\nRESULT ${r.state.toUpperCase()}  fuel left ${r.fuel.map(x => x.toFixed(1)).join('/')} t`);
+/* The exit code is the verdict: the shipped stacks must WIN, the retro stack is kept as a recorded
+   LOSS. --expect=won|lost|any overrides. A check that cannot fail is not a check. */
+const EXPECT = (process.argv.find(a => a.startsWith('--expect=')) || '').split('=')[1] || (WHICH === 'retro' ? 'lost' : 'won');
+process.exitCode = EXPECT === 'any' || r.state === EXPECT ? 0 : 1;
 console.log('  log:', r.log.slice(-6).join('\n        '));
