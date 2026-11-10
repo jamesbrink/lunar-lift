@@ -435,6 +435,35 @@ These five are carried as written — rule and history together — because `js/
 - A mesh inside an invisible group is still `visible` to `tools/flicker-test.mjs`; pose hidden
   things too.
 
+- **A toon ramp shades a form; night is not the shadow side of one.** `RAMP_EARTH`'s lowest band is
+  34 % of noon, so the globe's night side was lit at a third of daylight and the far ground glowed
+  green at night beside a navy near field (the 3 km shadow box hid it close in). The Earth's ground
+  exports `sfLit` (cuts the sun's term below the horizon) and `sfTwi` (twilight, as INDIRECT sky
+  light: a set sun has no direction for a shadow map, and left in the direct term the shadow box
+  drew its own outline 40 km across the dusk). Anything standing on the ground that is not
+  floodlit takes the same two numbers (`js/cape.js` does, for itself; the pad's slabs are `padware` and must not be given a second `onBeforeCompile` — that left the apron black).
+- **A flat step in sun elevation is a ruled line across the landscape.** Everything else in the
+  ground shader is a flat tone behind an edge; daylight is the exception, twice tried.
+- **Light that must read as light is written past 1.** A lit toon surface shows albedo × light / π.
+  Foam and the sun's glint as palette whites came out grey; they are 2.3–3.0 in linear.
+- **A lattice reject box must be the exact bound of what the cell can reach.** `js/mooncraters.js`
+  derives it (0.644 of a cell); the shader uses the same number. Tighter cuts craters off along
+  lattice planes — an 85° wall in the lunar patch, a ruled edge in the drawing — and
+  `tools/crater-stats.mjs` gates the largest 2 m height step at 8 m (it found 499 m). Looser costs
+  frame time: 3.4 candidate cells of 8 instead of 2.1 was half the Moon's frame again.
+- **The lunar ground is relief grid + crater ladder, in three places that must stay one function**:
+  `moonGroundHeight` (contact, camera, dust), the patch's vertices (`js/terrain.js`), and the
+  drawing (`js/surface-moon.js`, same hash). The patch re-centres by HEIGHT, not by distance flown,
+  or a lander arrives on 400 m triangles that are not the craters it is landing in. Verify with
+  `tools/terrain-views.mjs <dir> <port> moon-landed`: it raycasts the drawn patch under a landed
+  CSM (measured 0.00–0.07 m at four sites, one 2.45 km under the datum).
+- **A patch rebuild is sliced.** Rows into back buffers inside 3.5 ms a frame, swapped in whole with
+  the anchor and the globe's hole. Anything new in the per-vertex height must be cheap per call and
+  safe to evaluate across frames (no state that the next frame changes).
+- **Flat things on the ground are drawn by the ground; only what stands up is geometry.** Roads,
+  the crawlerway beyond the pad's own slabs, ponds, beach and canal are in `js/surface-earth.js`
+  from `js/padsite.js`'s fields. A slab on terrain is two surfaces on one plane.
+
 ### Exhaust
 
 - If a parameter appears to have no effect, read the arithmetic that consumes it before changing
@@ -599,6 +628,7 @@ await tab.evaluate(`(async () => {
 - `js/world.js` — Earth, Moon, sky dome, limb shell, stars, the sun and its shadow box, the pad's mount; terrain lookups (`groundHeight`, `fineGroundHeight`, `moonGroundHeight`), `padMatrix()`, `syncTime()`, `updateSky()`.
 - `js/terrain.js` — the near patch of each body, re-centred on the vehicle. `js/surface.js`, `js/surface-earth.js`, `js/surface-moon.js` — the ground, drawn per fragment.
 - `js/toonmap.js` — the registry of paint products. `js/earthpaint.js`, `js/moonpaint.js`, `js/paintkit.js` — the painters. `js/padsite.js` — the authored launch site. `js/palette.js`, `js/textures.js` — shared palettes and sheets.
+- `js/cape.js` — everything that stands within 6 km of the pad, one merged mesh. `js/mooncraters.js` — the crater ladder as numbers (display-free).
 - `js/pad.js` — Launch Complex 39 as drawn. `js/clouds.js`, `js/cloudfields.js` — the weather shell and its data. `js/haze.js` — aerial perspective, one law for patch and globe.
 
 **Rendering and interface**
@@ -610,7 +640,7 @@ await tab.evaluate(`(async () => {
 
 **Tools**
 - `tools/check.mjs` — `npm test`. `tools/mission-sim.mjs` — flies the mission headless. `tools/mission-math.py` — derived numbers, checked against code and docs. `tools/shader-lint.mjs` — static GLSL rules.
-- `tools/shots.mjs`, `tools/clip-test.mjs`, `tools/flicker-test.mjs` — the browser gates. `tools/gpu-time.mjs`, `tools/cloud-views.mjs` — measurements. `tools/lib/browser.mjs` — how all of them find and launch Chromium.
+- `tools/shots.mjs`, `tools/clip-test.mjs`, `tools/flicker-test.mjs` — the browser gates. `tools/trail-offset.mjs` (smoke column on the flame at every warp) and `tools/crater-stats.mjs` (lunar relief continuity) are gates too. `tools/gpu-time.mjs`, `tools/cloud-views.mjs`, `tools/terrain-views.mjs`, `tools/boot-time.mjs` — measurements. `tools/lib/browser.mjs` — how all of them find and launch Chromium.
 
   closed, and because every save hot-reloads, the user's own Chrome loaded the same shader and lost
   WebGL for the session (`GL_VENDOR = Disabled`; only a browser restart clears it). Two neighbours of

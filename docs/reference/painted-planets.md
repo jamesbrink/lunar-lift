@@ -17,8 +17,9 @@ makes the contour a fractal line. So each body carries a few fields and the shad
 | --- | --- | --- |
 | Earth | `sfField` 2048×1024 RGBA8, mipmapped | aridity, tree cover, cold, ruggedness |
 | Earth | `sfCoast` 2048×1024 R16F | signed km to the coast (the same field as before) |
-| Earth | `sfPadSdf` 512² R16F over ±72 km | the authored launch-site shore, 0.28 km per texel |
-| Moon | `sfField` 1024×512 RGBA8, mipmapped | albedo, the 340 km-smoothed albedo the mare cut is taken on, relief-crater tone |
+| Earth | `sfPadSdf` 512² RG16F over ±72 km | the authored Cape's shore, 0.28 km per texel; km to the nearest road |
+| Earth | `sfSite` 512² RGBA16F over ±10 km | the site at 39 m: shore, wood-lot field, Atlantic side, km to the nearest road |
+| Moon | `sfField` 1024×512 RGBA8, mipmapped | albedo, the 340 km-smoothed albedo the mare cut is taken on, highland weight, where the two largest crater octaves reach |
 
 The Earth's three biome axes are the voted labels turned back into memberships (each label votes a
 value per axis; land-weighted box mean, r 2), so the table in "Biomes" below still decides what
@@ -78,6 +79,129 @@ GPU time (`EXT_disjoint_timer_query_webgl2`, 2160×1250, weather hidden so only 
 timed) was measured while other jobs shared the GPU and is noisy: medians of 1.0–1.5 ms before
 against 1.5–3.5 ms after at the pad and over the Cape, 0.8 against ~2.2 from 400 km, 0.3–0.6
 against 0.9–2.6 at the Moon. It needs re-measuring on a quiet machine before anyone quotes it.
+
+## Terrain round: the sea, the night, the Cape, and a Moon made of craters
+
+What an adversarial review scored 4/10 (Earth) and 6/10 (Moon), and what was changed. Every number
+here is from a run; the GPU was shared with other jobs throughout and says so where it matters.
+`tools/terrain-views.mjs <outdir> [port]` photographs every station named below.
+
+**The sea is not one blue.** Open water is three masses by latitude (tropic / temperate / cold, the
+line carried on the 512 and 128 km octaves) and three by depth (a rise, the plain, an abyss, from
+the same octaves' other channel), all flat. Then the coast's bands by distance — ocean, shelf,
+shallows, a bar, the aqua wash — and off an ocean beach one line of breakers cut into runs.
+
+**The sun on the water** is drawn where the surface normal bisects the sun and the eye
+(`sfEye`, set each frame in the Earth's own axes): three nested hard-edged shapes — glitter, glare,
+core — whose thresholds are broken by the swell's octaves, more the further out. They are written
+past 1 in linear (`K_GLINT 2.9`, `K_GLARE` up to 2.05, foam 2.3): a lit toon surface shows
+albedo × light / π, about a third of the palette byte, and white foam painted as a palette tone
+came out grey.
+
+**Night is the planet's own shadow, not the ramp's.** `RAMP_EARTH` shades a form: its lowest band
+is 34 % of noon, so the night side of the globe was lit at a third of daylight and, from the pad at
+night, everything beyond the 3 km shadow box glowed green beside a navy near field. The ground
+shader now exports `sfLit` (the sun's term × `smoothstep(−0.006, 0.012, sun elevation)`: the disc
+takes 0.53° to set) and `sfTwi` (cool sky light, indirect, rising from nothing at −8° to 0.34/π at
+the horizon). Twilight is indirect because light from a set sun has no direction for a shadow map:
+left in the sun's term, the shadow box drew its own outline across the dusk as a wedge 40 km long.
+Neither is a flat step — a step in sun elevation is a straight line across the whole landscape, and
+two were tried. The Cape's props and the pad's ground slabs take the same two numbers
+(`js/cape.js`); the tower and the vehicle keep their light.
+
+**Land.** Jungle, savanna and marsh join the palette (the tropics' forest is a different green,
+the line wandering on the continental octave); rivers taper to a source where a second field says a
+river runs at all, instead of every contour closing into a loop; relief slope no longer
+differentiates the ruggedness sheet (its 20 km bilinear facets times a 64 km amplitude sat exactly
+on the band threshold and drew square hills over the Congo); one more patch-tone step comes from
+the 512 km octave, the only one a whole-Earth view resolves.
+
+**Land and sea are each computed only where they can show** — within the shore's anti-aliased
+width (2.5 × `fwidth(sd)` + 3 m) both are, elsewhere one branch is skipped.
+
+### The Moon is one population of craters
+
+There were two kinds: 560 "relief craters" stamped into the 1024 × 512 height grid and its albedo
+plate (45–345 km), and a per-octave drawn population with no relief at all. From 4,000 km the
+first kind was grey blobs; from 10 km the second was identical ellipses on a billiard ball.
+
+Now there is one, `js/mooncraters.js`, and nothing is stored. Space is cut into cubic lattices —
+1024, 256, 64, 16, 4, 1 km for relief; the shader carries on to 16 m — and each cell the surface
+passes through holds at most one crater, everything about it from one integer hash of the cell:
+centre (jittered ±0.17 of a cell, within a third of a cell of the surface), radius (5–27 % of the
+cell, as size^2.5: few large, many small), age, the angle and number of its rim's breaks, whether
+it keeps a central peak. JavaScript and GLSL run the same hash (`Math.imul` is the shader's uint
+multiply), so the bowl in the mesh, the bowl physics lands in and the bowl that is drawn are the
+same crater. Counted by `tools/crater-stats.mjs`: 27 craters of 51–271 km radius in the top
+octave, 402 of 13–69 km in the next, 6,037 of 3–17 km in the third.
+
+- **Relief** (`craterHeight`): a bowl 0.2 r deep (capped at 3.5 km), a rim 0.07 r high (capped at
+  1.8 km — twice life-size on purpose: a real 1 km rim on the horizon from 10 km up is 5 px), a
+  peak in the larger fresh ones, the rim knocked down where a worn wall is broken. Over 200,000
+  directions the crater term spans −6.50 … +3.92 km. The two largest octaves are scaled by the
+  highland weight, so the maria stay plains.
+- **A mesh takes the craters it can hold**: one fades in between 2 and 5 vertex spacings of radius.
+  The globe (10.7 km a vertex, asks with 16) carries the top octave and the larger half of the
+  second; the near patch carries everything down to ~40 m under the vehicle.
+- **The reject box must be the exact bound.** A crater can reach
+  sqrt(0.33² + (1.25 × 0.27)²) + 0.17 = 0.644 of a cell from its cell's centre on one axis. A box
+  of 0.60 (against a true 0.83 at the time) cut craters off along lattice planes: an 84.9° wall in
+  the patch at one test site and a 499 m step between points 2 m apart. `crater-stats.mjs` walks
+  4,000 random 2 km tracks in 2 m steps and gates the largest step at 8 m; it measures 2.95 m.
+- **Drawn variety**: fresh craters have a hard rim line and a ragged two-harmonic ejecta apron;
+  worn ones have faint crescents, no rim line and one or two gaps; the oldest large ones are
+  flooded dark; the fresh ones of the two top octaves throw rays out to 0.47 of a cell (480 km in
+  the top octave), their edges ragged by the ground's own octaves, collapsing to a bright splash
+  where a spoke is under a pixel.
+- **The mare cut moved from 0.36 to 0.43** of the sheet's tone: only 3.2 % of the sheet is darker
+  than 0.36, and a Moon drawn from that had ink blots where the maria should be.
+- **Cost of looking for big craters**: the sheet's alpha says where the two top octaves reach at
+  all (`craterReach`), so a pixel does not hash a 1024 km lattice to find nothing.
+
+### The near patch: sliced, and re-centred by height
+
+`moonGroundHeight` is now relief grid + `craterHeight` at full detail, and the lunar patch writes
+the same two terms. Measured by raycasting the drawn patch under a landed CSM at four sites (one a
+crater floor 2.45 km under the datum): drawn minus function **0.07, 0.00, 0.00, 0.00 m**. The
+lowest point of the vehicle comes to rest 0.36–0.87 m below the function after a 9.6–9.9 m/s
+arrival — the integrator stops on the first 0.1 s step that finds the tail under the ground; that
+is physics' step, not the terrain's. Non-finite floats in position / normal / uv: 0 at all four.
+Worst normal tilt 38–51° (crater walls). The camera's ground lookup may now be negative, or it sat
+at the datum looking down into a crater at a landed ship.
+
+Two things had to change for that to hold while the vehicle moves:
+
+- **The Moon's patch re-centres by height.** It is 8 m fine only within ~300 m of its centre, and
+  a 100 m crater sampled by 400 m triangles is not that crater. It rebuilds when the ground point
+  is further from its centre than 0.35 × the height above the ground (60 m at least, 12 km at
+  most).
+- **A rebuild never blocks a frame.** It runs a few rows at a time into back buffers inside a
+  3.5 ms budget and is swapped in whole — positions, normals, uv, the mesh's place, the shader's
+  anchor, the globe's hole — in one frame. Measured over the four landings: 57–78 ms of work
+  spread over 17–22 frames, worst slice 3.6 ms. The Earth's rebuild used to be 15–25 ms in one
+  piece every 12 km of ground track; it goes through the same slicer (only the first build, at
+  boot, runs through: 29 ms).
+
+### Cost of the round
+
+Headless Chromium, Apple M4 Max, other jobs on the GPU. Timer queries at 2880 × 1800
+(`tools/gpu-time.mjs`, which now has two lunar stations), three alternating runs of HEAD and this
+round, medians in ms:
+
+| station | before | after |
+| --- | --- | --- |
+| pad | 3.1 / 7.4 / 7.9 | 4.3 / 11.0 / 7.1 |
+| orbit 500 km | 2.7 / 7.2 / 7.7 | 8.4 / 7.6 / 7.6 |
+| Moon 100 km | 4.5 / 5.5 / 7.4 | 3.5 / 7.4 / 7.8 |
+| Moon 10 km | 10.1 / 9.1 / 11.7 | 7.0 / 12.3 / 11.4 |
+
+The same code disagrees with itself by 4 ms between runs, which is more than any difference in the
+table. A paired on/off toggle inside one page (24 alternations) put the Cape's props at 0.6–1.2 ms
+and the site's shader path at ~0.6 ms at the pad; nothing finer can be said from this machine
+today, and it needs re-measuring on a quiet one. Boot (`tools/boot-time.mjs`, five cold loads
+each, alternating): painted frame 3.75 s before, 3.85 s after, single runs 2.6–4.5 s on both.
+Cold in node: `padSdfGrid` 18 ms (before the first frame), `siteGrid` 36 ms (after it);
+`buildCape` 30 ms in the page.
 
 **Stale below.** "Cost" (the 540 ms / 27 ms paint times), "The near level" (vertex colour, the
 blurred `canvasDataSoft` copy, the 8 m lift), the Moon's 4096 canvas and its analytic near-level

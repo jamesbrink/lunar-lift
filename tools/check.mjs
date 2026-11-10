@@ -2,7 +2,7 @@
 /* One command for everything that can fail:   npm test   (or: node tools/check.mjs [--no-browser])
 
    Headless: shader-lint, the shipped mission (must WIN), the recorded retro stack (must LOSE),
-   mission-math. Browser (needs a GPU and a Playwright Chromium, so not in CI): shots (console must
+   mission-math, crater-stats. Browser (needs a GPU and a Playwright Chromium, so not in CI): shots (console must
    be clean), clip-test, trail-offset, flicker-test — run against a private dev server on its own port, so a file
    saved in an editor cannot reload the page mid-measurement the way it does on the shared one. */
 import { spawn, spawnSync } from 'node:child_process';
@@ -24,6 +24,7 @@ run('shader-lint', 'node', ['tools/shader-lint.mjs']);
 run('mission (shipped)', 'node', ['tools/mission-sim.mjs', 'game', `--phase=${PHASE}`]);
 run('mission (retro loses)', 'node', ['tools/mission-sim.mjs', 'retro', '--phase=1.4742618']);
 run('mission-math', 'python3', ['tools/mission-math.py']);
+run('crater-stats', 'node', ['tools/crater-stats.mjs']);        // the lunar relief is continuous: no crater cut off along a lattice plane
 if (browser) {
   const port = await new Promise(res => { const s = createServer(); s.listen(0, () => { const p = s.address().port; s.close(() => res(p)); }); });
   const server = spawn('node', ['server.js', String(port)], { stdio: 'ignore' });

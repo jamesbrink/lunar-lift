@@ -208,11 +208,12 @@ function bodyRadial(out) {
   return out.multiplyScalar(1 - w).addScaledVector(_diff, w).normalize();
 }
 
-/* Relief under `dir`, km above the datum sphere; never negative and never non-finite, so a bad
-   lookup leaves the camera on the plain sphere. */
+/* Relief under `dir`, km above the datum sphere; never non-finite, so a bad lookup leaves the
+   camera on the plain sphere. It may be negative: a lunar crater's floor is kilometres under the
+   datum, and a camera held at the datum looked down on a landed ship from the height of the rim. */
 function groundLift(fn, dir) {
   const h = fn(dir);
-  return Number.isFinite(h) && h > 0 ? h : 0;
+  return Number.isFinite(h) ? h : 0;
 }
 
 /* Push `pos` onto the surface of the ellipsoid spanned by the orthonormal `ax` with half-widths

@@ -112,3 +112,43 @@ ignition is what determines whether intercept is cheap or impossible.
 | `PAD_POS` offset | 4 × PAD_SCALE + 37 × VS ≈ 57.4 m | the state point on the pad: deck top 4 u above the datum, vehicle centre 37 u above that; contact itself is `surfaceAlt()`, see [orbital-mechanics.md](orbital-mechanics.md) |
 | pad stand height | 4 × VS ≈ 5.6 m | the crawler/pedestal, not the 136 m LUT — the vehicle is welded at its own scale |
 | pad tangential speed | `SPIN_AXIS × PAD_POS · EARTH_SPIN` | `PAD_ANGULAR` |
+
+## The Cape as the game draws it
+
+Authored, in km east (x) and north (y) of the pad, in `js/padsite.js`; `js/cape.js` builds what
+stands on it and `js/surface-earth.js` draws what lies on it. Positions are the real site's to a
+few hundred metres, not surveyed; sizes of the named buildings are the published ones.
+
+| thing | where | size | note |
+| --- | --- | --- | --- |
+| Atlantic shore | 0.95 km east of the pad, running NNW; the Cape's point 16 km SSE at x 7.7 | — | beach, dune grass, a breaker line |
+| Vehicle Assembly Building | x −5.58, y 0, at the crawlerway's end | **218 × 158 × 160 m** (published: 716 × 518 × 525 ft) | four inverted-T doors, 139 m tall |
+| low bay | south wall of the VAB | 135 × 83.5 × 64 m | |
+| Launch Control Centre | x −5.40, y −0.215 | 115 × 55 × 23 m | windows face the pads |
+| crawlerway | VAB to pad A along y 0, branch to pad B | 49 m over all: two gravel tracks and a median | drawn by the ground |
+| LC-39B | x −1.35, y 2.35 (2.7 km NNW) | hardstand 475 m across, as pad A's | no vehicle on it |
+| turn basin and barge canal | x −5.35…−4.75, y −0.85, then SE to the Banana River | basin 400 m, canal 140 m | |
+| Indian River | 13.7 km west | 3.4 km wide | NASA Causeway crosses it on fill at y −6.5 |
+| Mosquito Lagoon | north of y 5.2, behind a 0.7 km barrier beach | up to 3.7 km | |
+| Banana River | south of y −4.6, behind the Cape | up to 4.5 km | |
+| impoundment ponds | eleven, within 4.5 km | 0.5–1.4 km long | marsh banks |
+| roads | 27 segments: Kennedy Parkway, Saturn Causeway, Beach Road, the Cape road, US 1 | 11 m | inked at their width or 1.3 px |
+| trees and scrub | 4,367 crowns within 6.6 km, inside the wood lots the ground draws | crowns 7–20 m tall | three levels of detail by distance from the pad |
+
+Everything stands on the ground: the terrain within 90 km of the pad is the exact sphere, so a
+thing d km away has its foot d²/2R below the pad's datum — 2.4 m at the VAB — and every solid is
+sunk 4 m further. The whole Cape is one merged, indexed, vertex-coloured mesh plus one that
+carries the ink outline: **66,508 triangles, two draws**. `tools/flicker-test.mjs` asks the group
+to audit itself (coplanar overlapping faces between primitives, non-finite attribute values) and
+gates both at zero.
+
+Solid to the vehicle (`js/colliders.js`, `CAPE_SOLIDS`, appended to `FIXED`) and to the camera
+(`js/camera.js`, which leaves those boxes through their nearest face): the VAB, its low bay, the
+LCC, the parked mobile launcher and its tower, the crawler.
+
+### Sun over the site (for the night rule)
+
+The ground's daylight is `sfLit` × sun + `sfTwi` (see painted-planets.md). With the game's fixed
+sun the pad is in daylight at MET 0, in twilight at +12 h (`game.ff(12 * 3600)`) and in full
+night at +16.5 h; `tools/terrain-views.mjs` photographs all three from the pad, from 3 km and
+from 40 km, where the near patch and the globe are both in frame.

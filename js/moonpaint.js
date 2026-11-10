@@ -2,12 +2,16 @@ import * as THREE from 'three';
 import { RM } from './constants.js';
 import { MOON } from './palette.js';
 import {
-  FW, FH, pixels, openClose, boxSignal, shareBelow, quantile, hash2, noise, fbm, smoothS,
+  FW, FH, pixels, openClose, boxSignal, shareBelow, quantile, noise, fbm, smoothS, sampleGrid,
 } from './paintkit.js';
+import { craterHeight, listCraters, craterDepth, craterRim } from './mooncraters.js';
 
-/* The Moon's paint job: the map canvas, the shader's fields, and the relief grid with its 560 craters. */
+/* The Moon's paint job: the map canvas, the shader's fields, and the relief grid. The craters are
+   not in the grid: they are js/mooncraters.js's ladder, added on top by field.crater(). */
 
 const MOON_CIRC = 2 * Math.PI * RM;
+
+const MARE_AT = 0.43;
 
 export async function paintMoonJob(path) {
   const src = await pixels(path);
@@ -40,19 +44,23 @@ export async function paintMoonJob(path) {
   const wide = blur.slice();
   boxSignal(wide, w, h, 7);
   boxSignal(wide, w, h, 5);
-  const mareCut = quantile(wide, shareBelow(blur, 0.36));
+  /* The sheet's maria are not as dark as 0.36: only 3.2 % of it is, and the Moon drawn from that
+     had a few small ink blots where Imbrium and Procellarum should be. MARE_AT is the tone the
+     sheet's dark plains actually end at (see docs/reference/painted-planets.md for the shares). */
+  const mareCut = quantile(wide, shareBelow(blur, MARE_AT));
   const rawMare = new Uint8Array(w * h);
   for (let i = 0; i < w * h; i++) rawMare[i] = wide[i] < mareCut ? 1 : 0;
   const mare = openClose(rawMare, w, h, 2);   // 2 rounds at 10.7 km: the corner shave the relief's mare step wants
   const out = new Uint8ClampedArray(w * h * 4);
   for (let i = 0; i < w * h; i++) {
     const v = blur[i];
-    const col = mare[i] ? MOON.maria : v < 0.47 ? MOON.mid : v < 0.62 ? MOON.high : MOON.bright;
+    const col = mare[i] ? MOON.maria : v < 0.50 ? MOON.mid : v < 0.62 ? MOON.high : MOON.bright;
     const o = i * 4;
     out[o] = col[0]; out[o + 1] = col[1]; out[o + 2] = col[2]; out[o + 3] = 255;
   }
   mareCollar(out, mare, w, h);
-  stampCraterAlbedo(out, blur, w, h);
+  const built = buildMoonField(blur, w, h, mare);
+  stampCraterAlbedo(out, built.field.hi, w, h);
   /* Contrast curve ×1.5 about the mid tone, as the drawn surface's palette has it (js/surface.js). */
   for (let i = 0; i < out.length; i += 4) {
     out[i] = (out[i] - 140) * 1.5 + 140;
@@ -64,12 +72,14 @@ export async function paintMoonJob(path) {
   cv.getContext('2d').putImageData(new ImageData(out, w, h), 0, 0);
 
   /* The shader's fields, rows SOUTH first: R albedo (one more r-1 pass, so a threshold on it draws
-     shapes rather than JPEG blocks), G the wide field the mare cut lives on, B the relief craters'
-     tone around 0.5 — the same stamp the canvas gets, into a neutral plate. */
+     shapes rather than JPEG blocks), G the wide field the mare cut lives on, B the highland weight
+     the two largest crater octaves are scaled by — the relief's own number, so a flooded crater
+     is flooded in the drawing and in the ground alike — and A where those two octaves can reach
+     at all (craterReach), so the shader does not go looking for a 300 km crater in every pixel. */
   const alb = blur.slice();
   boxSignal(alb, w, h, 1);
-  const plate = new Uint8ClampedArray(w * h * 4).fill(128);
-  stampCraterAlbedo(plate, blur, w, h);
+  const hi = built.field.hi;
+  const reachMask = craterReach(w, h);
   const bytes = new Uint8Array(w * h * 4);
   for (let y = 0; y < h; y++) {
     const orow = (h - 1 - y) * w;
@@ -77,11 +87,11 @@ export async function paintMoonJob(path) {
       const i = y * w + x, o = (orow + x) * 4;
       bytes[o] = Math.round(255 * Math.min(1, alb[i]));
       bytes[o + 1] = Math.round(255 * Math.min(1, wide[i]));
-      bytes[o + 2] = plate[i * 4];
-      bytes[o + 3] = 255;
+      bytes[o + 2] = Math.round(255 * hi[((y * FH / h) | 0) * FW + ((x * FW / w) | 0)]);
+      bytes[o + 3] = reachMask[i];
     }
   }
-  return { canvas: cv, data: { w, h, bytes, mareCut }, ...buildMoonField(blur, w, h, mare) };
+  return { canvas: cv, data: { w, h, bytes, mareCut }, ...built };
 }
 
 /* Every mare texel that touches open plain drops to MOON.collar: a one-texel stroke drawn on the
@@ -134,7 +144,7 @@ function buildMoonField(blur, sw, sh, mare) {
          on the painted mare mask rather than on this feather so that a texel is never drawn as dark
          plain while standing at half highland height: the paint and the ground agree on where the
          mare is (the feather still shapes the climb out of it). */
-      const m = mare && mare[srow + ((x * sw / w) | 0)] ? 0 : smoothS(0.36, 0.47, b);
+      const m = mare && mare[srow + ((x * sw / w) | 0)] ? 0 : smoothS(MARE_AT - 0.04, MARE_AT + 0.09, b);
       hi[i] = m;
       if (!m) continue;
       const u = (x + 0.5) / w;
@@ -151,7 +161,6 @@ function buildMoonField(blur, sw, sh, mare) {
       km[i] = m * (0.35 + roll + massif + fine);                          // 0.35 km mare-highland step
     }
   }
-  stampCraters(km, hi, w, h);
   /* Soft knee above 1.7 km instead of letting the clamp do the shaping: a hard ±2 cap clipped
      ~3 % of texels (mostly crater rims on massif flanks) into flat plateaus. Compressing the
      headroom preserves ordering and relief everywhere and leaves the cap untouched in practice. */
@@ -160,116 +169,80 @@ function buildMoonField(blur, sw, sh, mare) {
     if (k > 1.7) k = 1.7 + (k - 1.7) * 0.3;
     km[i] = THREE.MathUtils.clamp(k, -2.0, 2.0);
   }
-  return { field: { w, h, km } };
+  /* The craters ride on top of the grid, analytically (js/mooncraters.js): `spacing` is the vertex
+     spacing of the mesh asking, 0 for the contact surface. hi is the grid the two largest octaves
+     are weighted by. */
+  const hiGrid = { w, h, km: hi };
+  const crater = (x, y, z, u, v, spacing = 0) => craterHeight(x, y, z, sampleGrid(hiGrid, u, v), spacing);
+  return { field: { w, h, km, hi, crater, farSpacing: 16 } };
 }
 
-/* ~560 craters per run, placed uniform-on-sphere by hash (asin of the v sample — equirectangular
-   latitude sampling would otherwise pile every small crater near the poles). The size floor sits
-   where the 512-segment mesh can still resolve a bowl — ~45 km radius, 4 vertices across — because
-   the Moon has no near level anymore: what the mesh cannot show, nothing shows. Depths and rims
-   scale with size and are capped to leave headroom under the ±2 km honesty limit — saturation at
-   the clamp flattens whole regions into plateaus.
-
-   The list is generated ONCE and consumed twice: the height pass (stampCraters) displaces the
-   mesh, and paintMoonJob paints the same bowls' albedo — bright rim, shadowed floor, ray systems
-   on the young ones. Displacement alone went away at noon sun, when the whole face sits in one
-   ramp band and a cratered highland looked as blank as a ping-pong ball; the bright ring is what
-   makes the geology legible from every sun angle, and it is exactly how the cartoons do it. */
-let _craters = null;
-export function moonCraters() {
-  if (_craters) return _craters;
-  _craters = [];
-  for (let c = 0; c < 560; c++) {
-    const hu = hash2(c, 0, 11);
-    const hv = hash2(c, 1, 23);
-    const hr = hash2(c, 2, 37);
-    const hy = hash2(c, 3, 53);
-    const lat = Math.asin(2 * hv - 1);
-    const r = 45 + 300 * hr * hr * hr;
-    const depth = Math.min(0.98, 0.10 + r * 0.0040);
-    const rim = Math.min(0.69, 0.15 + depth * 0.55);
-    _craters.push({
-      cx: (hu * FW) | 0,
-      cy: (((90 - lat * 180 / Math.PI) / 180) * FH) | 0,
-      r, depth, rim,
-      young: hy > 0.90,                       // ~10 % ray systems: Tycho-class fresh impactors
-      spokes: 7 + ((hash2(c, 4, 71) * 6) | 0),
-      phase: hy * 6.283,
-    });
-  }
-  return _craters;
-}
-
-function stampCraters(km, hi, w, h) {
-  const kme = MOON_CIRC / w, kmr = Math.PI * RM / h;
-  for (const cr of moonCraters()) {
-    const { cx, cy, r, depth, rim } = cr;
-    const clAt = (yy) => Math.max(0.05, Math.cos((90 - (yy + 0.5) * 180 / h) * Math.PI / 180));
-    const rx = Math.ceil(r * 1.6 / (kme * clAt(cy))), ry = Math.ceil(r * 1.6 / kmr);
+/* Where the two largest crater octaves can touch the ground, rows NORTH first, one byte a texel:
+   170 inside the reach of a 1024 km-lattice crater (its apron, or its rays), 85 inside a 256 km
+   one's, 255 inside both — each grown by 40 km, so the bilinear edge of the mask stays outside
+   the thing it guards. The shader reads it as two thresholds (js/surface-moon.js). */
+function craterReach(w, h) {
+  const m = new Uint8Array(w * h), kmr = Math.PI * RM / h;
+  for (const k of [0, 1]) for (const cr of listCraters(k)) {
+    const lat = Math.asin(cr.y);
+    let u = Math.atan2(cr.z, -cr.x) / (2 * Math.PI); if (u < 0) u += 1;
+    const cx = u * w, cy = (0.5 - lat / Math.PI) * h, reach = cr.reach * cr.r + 40, cosR = Math.cos(reach / RM);
+    const ry = Math.ceil(reach / kmr) + 1, bit = k === 0 ? 170 : 85;
     for (let dy = -ry; dy <= ry; dy++) {
-      const y = cy + dy;
+      const y = (cy + dy) | 0;
       if (y < 0 || y >= h) continue;
-      const kx = kme * clAt(y);
+      const la = (0.5 - (y + 0.5) / h) * Math.PI, cl = Math.cos(la), sl = Math.sin(la);
+      const rx = Math.min(w >> 1, Math.ceil(reach / (kmr * Math.max(0.02, cl))) + 1);
       for (let dx = -rx; dx <= rx; dx++) {
-        const x = ((cx + dx) % w + w) % w;
+        const x = ((((cx + dx) | 0) % w) + w) % w, lo = ((x + 0.5) / w - 0.5) * 2 * Math.PI;
+        // three's sphere direction for this texel, against the crater's
+        if (cl * Math.cos(lo) * cr.x + sl * cr.y - cl * Math.sin(lo) * cr.z < cosR) continue;
         const i = y * w + x;
-        if (!hi[i]) continue;
-        let ex = (x + 0.5 - cx) * kx;
-        if (ex > MOON_CIRC / 2) ex -= MOON_CIRC; else if (ex < -MOON_CIRC / 2) ex += MOON_CIRC;
-        const ey = (y + 0.5 - cy) * kmr;
-        const dd = Math.sqrt(ex * ex + ey * ey) / r;
-        if (dd >= 1.7) continue;
-        let add = 0;
-        if (dd < 0.82) { const t = dd / 0.82; add -= depth * (1 - t * t); }
-        if (dd > 0.55) { const g = (dd - 1.03) / 0.17; add += rim * Math.exp(-g * g); }
-        km[i] += add * hi[i];
+        if (m[i] !== bit && m[i] !== 255) m[i] += bit;
       }
     }
   }
+  return m;
 }
 
-/* The albedo pass over the same craters. Bowls shade darker, rims catch the sun brighter — and the
-   young ones throw ray systems, bright spokes that run four crater radii and cross even the maria,
-   because Tycho's do. Applied to the classified paint after tone assignment, so a 200 km walled
-   plain still gets a drawn circle under noon sun, which displacement + a three-band ramp can never
-   show. Stamps land where the height pass stamps: one list, two consumers, no drift by
-   construction. */
-function stampCraterAlbedo(out, blur, w, h) {
-  const sx = w / FW, sy = h / FH;
+/* The albedo pass for the painted MAP (the orbital chart and the navball blit this canvas; the
+   ground itself is drawn per fragment). The same craters as the relief and the shader — the two
+   largest octaves of js/mooncraters.js's ladder, which is everything a 10.7 km texel can hold:
+   bowls shade darker, rims brighter, and the rayed ones throw their spokes. */
+function stampCraterAlbedo(out, hi, w, h) {
   const kmr = Math.PI * RM / h;
-  const hiAt = (i) => smoothS(0.36, 0.47, blur[i]);
-  for (const cr of moonCraters()) {
-    const cx = cr.cx * sx, cy = cr.cy * sy;
-    const rPx = cr.r / (kmr);                       // rows are the isotropic axis; columns widen by cos
-    const ry = Math.ceil(rPx * (cr.young ? 4.8 : 1.7));
+  for (const k of [0, 1]) for (const cr of listCraters(k)) {
+    const lat = Math.asin(cr.y);
+    let u = Math.atan2(cr.z, -cr.x) / (2 * Math.PI); if (u < 0) u += 1;
+    const cx = u * w, cy = (0.5 - lat / Math.PI) * h;
+    const reach = cr.reach, rPx = cr.r / kmr;
+    const depth = craterDepth(cr.r) / 3.5, rim = craterRim(cr.r) / 1.8, n = 6 + ((cr.h3 >>> 8) & 3) + ((cr.h3 >>> 10) & 1) * 2;
+    const ry = Math.ceil(rPx * reach);
     for (let dy = -ry; dy <= ry; dy++) {
       const y = (cy + dy) | 0;
       if (y < 0 || y >= h) continue;
       const clat = Math.max(0.05, Math.cos((90 - (y + 0.5) * 180 / h) * Math.PI / 180));
-      const rx = Math.ceil(rPx * (cr.young ? 4.8 : 1.7) / clat);
+      const rx = Math.min(w >> 1, Math.ceil(rPx * reach / clat));
       for (let dx = -rx; dx <= rx; dx++) {
-        const x = ((cx + dx) % w + w) % w;
-        const i = (y * w + x) * 4;
-        let ex = dx * kmr / clat;
-        if (ex > MOON_CIRC / 2) ex -= MOON_CIRC; else if (ex < -MOON_CIRC / 2) ex += MOON_CIRC;
-        const ey = dy * kmr;
+        const x = ((((cx + dx) | 0) % w) + w) % w;
+        const ex = dx * kmr * clat, ey = dy * kmr;
         const dd = Math.hypot(ex, ey) / cr.r;
+        if (dd > reach) continue;
+        const hk = (0.15 + 0.85 * hi[((y * FH / h) | 0) * FW + ((x * FW / w) | 0)]) * cr.own;
         let tone = 0;
-        const hiM = hiAt(y * w + x);
-        if (dd < 1.7) {
-          if (!hiM) continue;                        // maria stay flat and blank, both in height and in tone
-          if (dd < 0.82) { const t = dd / 0.82; tone -= (16 + 26 * cr.depth) * (1 - t * t); }
-          const g = (dd - 1.06) / 0.20;
-          tone += (22 + 26 * cr.rim) * Math.exp(-g * g);
-        } else if (cr.young && dd < 4.8) {
+        if (dd < 1.25) {
+          if (dd < 0.92) { const t = dd / 0.92; tone -= (10 + 22 * depth) * (1 - t * t); }
+          const g = (dd - 1.0) / 0.2;
+          tone += (14 + 22 * rim) * Math.exp(-g * g);
+          tone *= hk;
+        } else {
           const th = Math.atan2(ey, ex);
-          let sp = Math.cos(cr.spokes * th + cr.phase);
-          sp = sp > 0 ? Math.pow(sp, 10) : 0;
-          const fall = (1 - (dd - 1.05) / 3.75);
-          tone += 34 * sp * fall * fall * (hiM ? 1 : 0.55);   // rays cross maria, dimmer there
+          const sp = Math.cos(th * n + (cr.h3 & 63)) * (0.72 + 0.28 * Math.cos(th * 3 + ((cr.h3 >>> 6) & 63)));
+          if (sp > 0.30 + 0.66 * (dd - 1) / (reach - 1)) tone += 30 * hk;
         }
         if (!tone) continue;
-        out[i] = out[i] + tone; out[i + 1] = out[i + 1] + tone; out[i + 2] = out[i + 2] + tone;
+        const i = (y * w + x) * 4;
+        out[i] += tone; out[i + 1] += tone; out[i + 2] += tone;
       }
     }
   }

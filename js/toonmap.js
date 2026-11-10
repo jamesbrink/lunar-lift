@@ -100,9 +100,12 @@ export function applyRelief(geometry, key) {
     const pos = geometry.attributes.position, uvs = geometry.attributes.uv;
     const n = new THREE.Vector3();
     for (let i = 0; i < pos.count; i++) {
-      const h = sampleGrid(g, uvs.getX(i), uvs.getY(i));
-      if (h === 0) continue;
       n.set(pos.getX(i), pos.getY(i), pos.getZ(i)).normalize();
+      let h = sampleGrid(g, uvs.getX(i), uvs.getY(i));
+      /* the Moon's craters are analytic (js/mooncraters.js): this mesh takes the ones its vertex
+         spacing can hold */
+      if (g.crater) h += g.crater(n.x, n.y, n.z, uvs.getX(i), uvs.getY(i), g.farSpacing);
+      if (h === 0) continue;
       pos.setXYZ(i, pos.getX(i) + n.x * h, pos.getY(i) + n.y * h, pos.getZ(i) + n.z * h);
     }
     geometry.computeVertexNormals();

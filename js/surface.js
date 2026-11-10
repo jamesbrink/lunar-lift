@@ -39,18 +39,21 @@ const lin = (c) => {
 };
 const palette = (o) => Object.entries(o).map(([k, v]) => `#define K_${k.toUpperCase()} ${lin(v)}`).join('\n');
 
+/* nine lattices a body: eight octaves four apart, and the Moon's ninth (1024 km) holds its largest
+   craters. The Earth's ninth is unused. */
 export const CELLS = {
-  earth: [512, 128, 32, 8, 2, 0.5, 0.125, 0.03125],
-  moon: [256, 64, 16, 4, 1, 0.25, 0.0625, 0.015625],
+  earth: [512, 128, 32, 8, 2, 0.5, 0.125, 0.03125, 2048],
+  moon: [256, 64, 16, 4, 1, 0.25, 0.0625, 0.015625, 1024],
 };
+const NC = 9;
 const ANCHOR_STEP = 8;                 // km: the patch anchor snaps to this lattice
 
 /* The lattice noise, shared by both stages: the patch evaluates its coarse octaves per VERTEX (a
    32 km cell is hundreds of vertices wide there) and hands them down as varyings; the globe, whose
    vertices are 104 km apart, evaluates everything per fragment. Same function, same numbers. */
 const NOISE = /* glsl */`
-uniform ivec3 sfCellI[8];
-uniform vec3 sfCellF[8];
+uniform ivec3 sfCellI[9];
+uniform vec3 sfCellF[9];
 
 uint sfMix( uint n ) {
   n = ( n ^ ( n >> 15 ) ) * 2246822519u;
@@ -185,8 +188,8 @@ export function surface(key) {
          back for the things that need a direction or a height, and sfOff = centre − anchor, taken
          in doubles here, is all the lattices ever see. Both are zero for the globe. */
       sfCentre: { value: new THREE.Vector3() }, sfOff: { value: new THREE.Vector3() },
-      sfCellI: { value: new Int32Array(24) },
-      sfCellF: { value: new Float32Array(24) },
+      sfCellI: { value: new Int32Array(NC * 3) },
+      sfCellF: { value: new Float32Array(NC * 3) },
       sfSun: { value: new THREE.Vector3(1, 0, 0) },
       sfHole: { value: new THREE.Vector4(0, 1, 0, 2) },
       sfEye: { value: new THREE.Vector3(0, 0, 1e6) },
@@ -272,7 +275,7 @@ export function anchorPatch(key, cx, cy, cz) {
   const a = [Math.round(cx / ANCHOR_STEP) * ANCHOR_STEP, Math.round(cy / ANCHOR_STEP) * ANCHOR_STEP, Math.round(cz / ANCHOR_STEP) * ANCHOR_STEP];
   U.sfAnchor.value.set(a[0], a[1], a[2]);
   U.sfCentre.value.set(cx, cy, cz); U.sfOff.value.set(cx - a[0], cy - a[1], cz - a[2]);
-  for (let k = 0; k < 8; k++) for (let c = 0; c < 3; c++) {
+  for (let k = 0; k < NC; k++) for (let c = 0; c < 3; c++) {
     const q = a[c] / cells[k], i = Math.floor(q);
     U.sfCellI.value[k * 3 + c] = i; U.sfCellF.value[k * 3 + c] = q - i;
   }
