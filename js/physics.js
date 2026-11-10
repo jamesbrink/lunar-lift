@@ -35,7 +35,7 @@ let distFlown = 0;
 let sasHoldTime = 0;
 let rcsAssist = true, aeroLoad = 0;
 /* What the touchdown was, for the debrief: m/s, degrees from vertical, tonnes left, seconds. */
-export const landing = { speed: 0, tilt: 0, fuel: 0, time: 0 };
+export const landing = { speed: 0, tilt: 0, fuel: 0, time: 0, home: false, flyby: false };
 /* Lateral aerodynamic load the airframe survives, in g. Set against the measured nominal ascent
    (see docs/reference/atmosphere.md): the stack is a pressure-stabilised tank and folds early. */
 export const LOAD_LIMIT_STACK = 0.5, LOAD_LIMIT_CSM = 6;
@@ -188,7 +188,8 @@ function aeroShape() {
   _shape.aRef = Math.PI * (rMax * U_M) ** 2;
   _shape.ca = bare ? BLUNT_CA : CA_STACK;
   _shape.aPlan = aPlan * U_M * U_M; _shape.zPlan = az / aPlan;
-  _shape.aFin = stages[0].separated ? 0 : FIN_AREA;
+  _shape.aFin = bare ? 3 : stages[0].separated ? 0 : FIN_AREA;      // a blunt cone trails its apex: a 'fin' AHEAD of the CG
+  _shape.zFin = bare ? NOSE_Z : FIN_Z;
   return _shape;
 }
 function planformMoment(z0) {
@@ -209,6 +210,43 @@ export function getControlAuthority() { const I = inertiaAxes(); return { py: I0
 const UP_Z = new THREE.Vector3(0, 0, 1);
 const _ax = new THREE.Vector3(), _dq = new THREE.Quaternion();
 const MAX_RATE_PY = 0.45, MAX_RATE_ROLL = 1.0;        // rad/s ceilings on body rates
+
+/* ---------------- the command module alone: heat shield and parachutes ----------------
+   Once every stage is gone (X on the CSM) what flies is a 10 t blunt cone, and coming home is its
+   own piece of flying:
+     heat    the proxy is sqrt(rho)·v³ (rho kg/m³, v km/s — the shape of stagnation heating).
+             Above HEAT_SHIELD only a heat shield survives it, and only shield-first: anything
+             still wearing a stage, or a capsule flying nose-first, cooks in HEAT_TIME seconds.
+             A bare capsule is aerodynamically stable shield-first (aeroShape gives it a forward
+             'fin'), so letting go of the stick is the right entry attitude.
+     chutes  G deploys the drogues, G again the mains. Each has a dynamic pressure it tears at, so
+             the order and the timing are the pilot's: drogues once q is under 20 kPa, mains once
+             the drogues have you under 4 kPa. Mains set the capsule down at about 8 m/s; the
+             splashdown limit is SAFE_EARTH. */
+export const HEAT_SHIELD = 4, HEAT_TIME = 3;
+export const CHUTE = { drogue: { area: 30, tear: 20000 }, mains: { area: 2300, tear: 4000 } };   // CdA m², q Pa
+let chute = 0, chuteOpen = 0, heat = 0, cooking = 0;       // chute: 0 stowed, 1 drogue, 2 mains, -1 torn
+export const getChute = () => chute;
+export const getChuteOpen = () => chuteOpen;               // 0..1 inflation of the current canopy
+export const getHeat = () => heat;                         // the proxy, live
+export const getCooking = () => cooking / HEAT_TIME;       // 0 fine … 1 gone
+export const isCapsule = () => activeStage() < 0;
+export function deployChute() {
+  if (state !== 'flying') return;
+  if (!isCapsule()) { hooks.addLog('PARACHUTES ARE ON THE COMMAND MODULE — DROP THE CSM FIRST (X)', 'warn'); return; }
+  if (chute < 0) { hooks.addLog('PARACHUTES ARE GONE', 'bad'); return; }
+  if (chute >= 2) return;
+  if (aeroState.q < 20) { hooks.addLog('NO AIR TO OPEN A PARACHUTE IN', 'warn'); return; }
+  const next = chute === 0 ? CHUTE.drogue : CHUTE.mains;
+  if (aeroState.q > next.tear) {
+    chute = -1; chuteOpen = 0;
+    hooks.addLog(`${chute === 0 ? 'DROGUES' : 'PARACHUTES'} TORN AWAY — ${(aeroState.q / 1000).toFixed(1)} kPa, LIMIT ${next.tear / 1000} kPa`, 'bad');
+    audio.thud(); return;
+  }
+  chute++; chuteOpen = 0;
+  hooks.addLog(chute === 1 ? 'DROGUE CHUTES OUT' : 'MAIN PARACHUTES OUT', 'good');
+  audio.thud();
+}
 
 export function toggleIgnite() {
   const i = activeStage();
@@ -359,6 +397,29 @@ export function physStep(dt) {
   const mass = totalMass();
   const a = accelAt(S.pos, S.v, mass, thrustAcc, simTime, _fw.copy(UP_REF).applyQuaternion(S.q));
   S.v.addScaledVector(a, dt);
+  const altNow = S.pos.length() - RE;
+  if (altNow < 150) {
+    const air = _sv.set(-EARTH_SPIN * S.pos.z, 0, EARTH_SPIN * S.pos.x).negate();     // the air's own velocity
+    const vr = _g.copy(S.v).sub(air), sp = vr.length(), rho = airDensity(altNow);
+    if (chute > 0) {
+      /* A canopy is stiff: mains at 70 m/s relax the airspeed at 14/s, and an explicit step of
+         0.1 s overshoots through zero. Solved implicitly instead — dv/dt = −k·v² over the step is
+         v/(1 + k·v·dt) exactly — so it is stable at any warp. Inflation takes 2.5 s. */
+      chuteOpen = Math.min(1, chuteOpen + dt / 2.5);
+      const c = chute === 1 ? CHUTE.drogue : CHUTE.mains;
+      const k = 0.5 * rho * (c.area * chuteOpen + (chute === 2 ? CHUTE.drogue.area * (1 - chuteOpen) : 0)) / mass;
+      vr.multiplyScalar(1 / (1 + k * sp * dt));
+      S.v.copy(air).add(vr);
+      if (aeroState.q > 1.4 * c.tear) {
+        chute = -1; chuteOpen = 0;
+        hooks.addLog('PARACHUTES TORN AWAY BY THE AIRSTREAM', 'bad'); audio.thud();
+      }
+    }
+    heat = Math.sqrt(rho) * sp * sp * sp;
+    const shielded = i < 0 && _fw.dot(vr) < -0.6 * sp;             // capsule, apex trailing
+    cooking = heat > HEAT_SHIELD && !shielded ? cooking + dt : Math.max(0, cooking - dt);
+    if (cooking >= HEAT_TIME && state === 'flying') { S.pos.addScaledVector(S.v, dt); return burnUp(i < 0); }
+  } else { heat = 0; cooking = 0; }
   S.pos.addScaledVector(S.v, dt);
 
   // ---- true flight controls: keys command torque; ω integrates against live inertia ----
@@ -376,6 +437,10 @@ export function physStep(dt) {
   omega.z += rollIn * 0.25 * ratioR * dt;
   if (manual && sasOn) sasHoldTime = 0;                            // hands-on overrides SAS briefly
 
+  if (chute > 0 && aeroState.q > 5) {                              // the canopy hauls the apex round to trail
+    const vs = surfaceVel(_nv);
+    if (vs.lengthSq() > 1e-10) servo(_sq.setFromUnitVectors(UP_Z, vs.normalize().negate()), Math.min(ratio, 20), dt);
+  }
   if (holdOn && manual) holdQ.copy(S.q);
   if (holdOn && !manual) servo(holdQ, ratio, dt);
   if (sasOn && !manual) {                                          // SAS: rate servo toward the reference
@@ -489,6 +554,7 @@ function checkImpact() {
   else if (S.pos.length() < RE + 40 && surfaceAlt(false) <= 0) impact(false);
 }
 function impact(onMoon) {
+  const i = activeStage();
   const speed = groundVel(_nv).length();         // km/s, relative to the surface being hit
   const disp = speed * 1000;                    // m/s
   const upright = fwd().dot(bodyUp(_rad)) > 0.5;           // within 60° of vertical: it stays standing
@@ -500,7 +566,7 @@ function impact(onMoon) {
   }
   if (onMoon && speed <= LAND_SAFE) {
     landing.speed = disp; landing.tilt = Math.acos(Math.min(1, fwd().dot(bodyUp(_rad)))) * 57.2958;
-    landing.fuel = stages[2].separated ? 0 : stages[2].fuel; landing.time = simTime;
+    landing.fuel = stages[2].separated ? 0 : stages[2].fuel; landing.time = simTime; landing.home = false;
     state = 'won'; vehicleOps.setVisible(true);
     hooks.addLog(`TOUCHDOWN — ${disp.toFixed(1)} m/s. THE MOON IS OURS.`, 'good');
     audio.win();
@@ -515,14 +581,19 @@ function impact(onMoon) {
     hooks.addLog(`HARD IMPACT ON THE MOON AT ${disp.toFixed(0)} m/s — MISSION LOST`, 'bad');
     hooks.showEndOverlay('MOON IMPACT', `The ${activeStage() === 2 ? 'CSM' : 'vehicle'} struck the lunar surface at ${disp.toFixed(0)} m/s. Land softer than 32 m/s — start the braking burn early, at the edge of the dashed sphere.`, 'RETRY');
   } else {
-    if (speed <= SAFE_EARTH) {
-      state = 'lost';
-      hooks.addLog(`SPLASHDOWN — returned safely, but the Moon was the target`, 'warn');
-      hooks.showEndOverlay('HOME AGAIN', `A safe splashdown back on Earth after ${fmtDuration(simTime)}. The Moon is still waiting — try a higher apoapsis next flight.`, 'RETRY');
+    if (speed <= SAFE_EARTH && i < 0) {
+      state = 'won'; vehicleOps.setVisible(true);
+      landing.speed = disp; landing.tilt = 0; landing.fuel = 0; landing.time = simTime; landing.home = true; landing.flyby = loiLogged;
+      hooks.addLog(`SPLASHDOWN — ${disp.toFixed(1)} m/s UNDER ${chute === 2 ? 'THREE GOOD MAINS' : 'WHAT WAS LEFT'}`, 'good');
+      audio.win();
+      hooks.showEndOverlay(loiLogged ? 'AROUND THE MOON AND HOME' : 'SPLASHDOWN',
+        `The command module is down at <b>${disp.toFixed(1)} m/s</b> after ${fmtDuration(simTime)}. ${loiLogged ? 'You went to the Moon and brought the crew back.' : 'The crew is safe. The Moon is still up there.'}`, 'FLY AGAIN');
     } else {
       state = 'lost';
       hooks.addLog(`IMPACT WITH EARTH AT ${disp.toFixed(0)} m/s — MISSION LOST`, 'bad');
-      hooks.showEndOverlay('RE-ENTRY DISASTER', `The vehicle hit the atmosphere at ${disp.toFixed(0)} m/s. ${disp > 4000 ? 'Nothing survives that.' : 'Ease the descent — burn retrograde before the ground arrives.'}`, 'RETRY');
+      hooks.showEndOverlay(disp > 1000 ? 'RE-ENTRY DISASTER' : 'HARD LANDING', i < 0
+        ? `The capsule hit at ${disp.toFixed(0)} m/s. Drogues (G) once the air has slowed you under ${CHUTE.drogue.tear / 1000} kPa, mains (G again) under ${CHUTE.mains.tear / 1000} kPa — down at under ${SAFE_EARTH * 1000} m/s.`
+        : `The vehicle hit the ground at ${disp.toFixed(0)} m/s. Only the command module comes home: drop the rest (X) and open the parachutes (G).`, 'RETRY');
     }
   }
 }
@@ -540,6 +611,13 @@ function overstressed(load, limit, dt) {
   return strain >= STRAIN_FAIL;
 }
 
+function burnUp(capsule) {
+  explode(); state = 'lost';
+  hooks.addLog(capsule ? 'BURNED UP — THE HEAT SHIELD WAS NOT FACING THE AIRSTREAM' : 'BURNED UP ON ENTRY — ONLY THE COMMAND MODULE HAS A HEAT SHIELD', 'bad');
+  hooks.showEndOverlay('BURNED UP', capsule
+    ? 'The capsule met the atmosphere apex-first. Let it fly itself — a bare command module settles heat shield forward — or hold retrograde (V + P) before the air thickens.'
+    : 'Stages do not survive re-entry. Drop everything but the command module (X) before the atmosphere, and come in heat shield first.', 'RETRY');
+}
 function breakup() {
   explode(); state = 'lost';
   hooks.addLog(`AERODYNAMIC BREAKUP — ${aeroLoad.toFixed(1)} g SIDE LOAD AT MACH ${aeroState.mach.toFixed(1)}`, 'bad');
@@ -596,7 +674,7 @@ export function resetSim() {
   engineOn = false; throttle = targetThrottle = 0;
   sasOn = false; sasRetro = false; simTime = 0; warpIdx = 0; maxQ = 0;
   tliLogged = loiLogged = loggedMaxQ = turnHintLogged = false; distFlown = 0; trail = [];
-  flightStarted = false; state = 'pad'; omega.set(0, 0, 0); I0 = null; holdOn = false; rcsAssist = true; aeroLoad = 0; strain = 0;
+  flightStarted = false; state = 'pad'; omega.set(0, 0, 0); I0 = null; holdOn = false; chute = 0; chuteOpen = 0; heat = 0; cooking = 0; rcsAssist = true; aeroLoad = 0; strain = 0;
 }
 
 /* teleport() starts the flight directly, bypassing the liftoff guard */

@@ -92,7 +92,7 @@ export const DTPHYS = 0.1, WARPS = [1, 2, 4, 8, 16, 32, 64, 128, 256, 512, 1000]
 export const TURN = { t0: 55, ramp: 190, max: 1.15 };
 
 export const LAND_SAFE = 0.032;          // km/s — 32 m/s touchdown limit
-export const SAFE_EARTH = 0.12;          // km/s — splashdown is survivable below this
+export const SAFE_EARTH = 0.012;         // km/s — 12 m/s: a splashdown under parachutes (three good mains give ~8)
 
 export const SKY_DAY = new THREE.Color(0x79b1de), SKY_NULL = new THREE.Color(0x04060b);
 

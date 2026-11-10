@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>LUNAR LIFT — a three-stage lunar mission</title>
-<link rel="icon" href="data:,">
+<link rel="icon" type="image/svg+xml" href="assets/favicon.svg">
 <link rel="stylesheet" href="css/style.css">
 </head>
 <body>
@@ -71,6 +71,7 @@
     <button id="mHold" data-key="h"><kbd>H</kbd><span>HOLD</span><b id="mHoldV">OFF</b></button>
     <button id="mRcs" data-key="t"><kbd>T</kbd><span>RCS</span><b id="mRcsV">ON</b></button>
     <button id="mStage" data-key="x"><kbd>X</kbd><span>STAGE</span><b id="mStageV">S-1</b></button>
+    <button id="mChute" data-key="g" style="display:none"><kbd>G</kbd><span>CHUTE</span><b id="mChuteV">STOWED</b></button>
   </div>
 </div>
 
@@ -89,7 +90,7 @@
   <div class="cols">
     <div><kbd>SPACE</kbd>ignite / cut engine</div><div><kbd>W</kbd><kbd>S</kbd>pitch</div>
     <div><kbd>⇧</kbd><kbd>CTRL</kbd>throttle up / down</div><div><kbd>A</kbd><kbd>D</kbd>yaw</div>
-    <div><kbd>X</kbd>drop the spent stage</div><div><kbd>Q</kbd><kbd>E</kbd>roll</div>
+    <div><kbd>X</kbd>drop the stage · <kbd>G</kbd>parachutes</div><div><kbd>Q</kbd><kbd>E</kbd>roll</div>
     <div><kbd>P</kbd>SAS autopilot on / off</div><div><kbd>V</kbd>SAS aims prograde / retrograde</div>
     <div><kbd>H</kbd>hold attitude: stop all rotation</div><div><kbd>←</kbd><kbd>→</kbd><kbd>↑</kbd><kbd>↓</kbd>look around · <kbd>-</kbd><kbd>=</kbd>zoom</div>
     <div><kbd>T</kbd>RCS stability assist</div><div><kbd>C</kbd>camera: orbit / chase / system</div>
@@ -102,6 +103,7 @@
 
 <div id="overlay" class="hidden">
   <div id="overlayCard">
+    <img id="logo" src="assets/logo.svg" alt="Lunar Lift">
     <h1>LUNAR LIFT<small>A THREE-STAGE LUNAR MISSION</small></h1>
     <div id="overlayText"></div>
     <button id="bigBtn">FLY AGAIN</button>

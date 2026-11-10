@@ -1,7 +1,7 @@
 import * as THREE from 'three';
-import { RE, RM, MU_E, MU_M, SOI_M, MOON_DIST, PAD_UP, PAD_POS, WARPS, SPECS, CAPSULE_MASS, LAND_SAFE, moonPos } from './constants.js';
+import { RE, RM, MU_E, MU_M, SOI_M, MOON_DIST, PAD_UP, PAD_POS, WARPS, SPECS, CAPSULE_MASS, LAND_SAFE, SAFE_EARTH, moonPos } from './constants.js';
 import { stages } from './saturn.js';
-import { S, getState, getSimTime, getEngineOn, getThrottle, getWarpIndex, getSasOn, getSasRetro, getDistFlown, getMaxQ, getTrail, activeStage, orbitalElements, getControlAuthority, groundVel, bodyUp, navVel, surfaceAlt, aeroState, getAeroLoad, getRcsAssist, getHold, getStrain, totalMass, landing, LOAD_LIMIT_STACK, LOAD_LIMIT_CSM } from './physics.js';
+import { S, getState, getSimTime, getEngineOn, getThrottle, getWarpIndex, getSasOn, getSasRetro, getDistFlown, getMaxQ, getTrail, activeStage, orbitalElements, getControlAuthority, groundVel, bodyUp, navVel, surfaceAlt, aeroState, getAeroLoad, getRcsAssist, getHold, getStrain, getChute, getHeat, getCooking, isCapsule, HEAT_SHIELD, CHUTE, totalMass, landing, LOAD_LIMIT_STACK, LOAD_LIMIT_CSM } from './physics.js';
 import { getCamMode, getMapFocus } from './camera.js';
 import { CORRIDOR } from './targeting.js';
 import { drawn } from './predictor.js';
@@ -100,6 +100,19 @@ function nextStep({ state, engineOn, live, i, dry, altE, alt, nearMoon, el, radi
   if (state === 'pad') return engineOn ? ['Engines building thrust — hold on', 'ok']
     : [`${K('SPACE')} ignite · then ${K('P')} lets SAS fly the ascent`];
   if (state !== 'flying') return [''];
+  if (i < 0 && !nearMoon) {                       // the command module alone: coming home
+    const q = aeroState.q, ch = getChute();
+    if (getCooking() > 0.05) return [`HEAT SHIELD FORWARD — ${K('V')} ${K('P')} retrograde, now`, 'bad'];
+    if (ch === 2) return [`Under the mains — ${Math.abs(radial * 1000).toFixed(0)} m/s down, splashdown limit ${SAFE_EARTH * 1000} m/s`, 'ok'];
+    if (ch < 0) return ['Parachutes are gone — nothing left to slow you', 'bad'];
+    if (altE > 120) return el.pe > 60 ? [`Capsule only. To come home: retrograde burn is gone — you need a path that meets the air (periapsis ${Math.round(el.pe)} km)`, 'warn']
+      : [`Re-entry ahead — let the capsule settle heat shield first; ${K('G')} is for later`];
+    if (ch === 1) return q < CHUTE.mains.tear * 0.8 && altE < 6 ? [`${K('G')} MAIN PARACHUTES — now`, 'ok']
+      : [`Drogues out — mains (${K('G')}) once under ${CHUTE.mains.tear / 1000} kPa: now ${(q / 1000).toFixed(1)}`];
+    if (q < CHUTE.drogue.tear * 0.8 && altE < 12 && radial < 0) return [`${K('G')} DROGUE CHUTES — now`, 'ok'];
+    return getHeat() > HEAT_SHIELD ? [`Entry — heat shield is taking it. Ride it out; drogues under ${CHUTE.drogue.tear / 1000} kPa (now ${(q / 1000).toFixed(0)})`, 'warn']
+      : [`Falling — drogues (${K('G')}) once under ${CHUTE.drogue.tear / 1000} kPa and below 12 km: now ${(q / 1000).toFixed(1)} kPa`];
+  }
   if (dry) return i === 2 ? ['Out of propellant — you are a passenger now', 'bad'] : [`Tank empty — ${K('X')} drop the stage`, 'warn'];
   if (nearMoon) {
     const vs = -radial * 1000;
@@ -140,7 +153,8 @@ function nextStep({ state, engineOn, live, i, dry, altE, alt, nearMoon, el, radi
    propellant left is the efficiency; stars are thresholds, the score breaks ties, and the best
    score is kept in this browser so there is a number to beat. */
 function debrief() {
-  const { speed, tilt, fuel } = landing;
+  const { speed, tilt, fuel, home, flyby } = landing;
+  if (home) return `<div class="rating"><div class="stars">${flyby ? '★★' : '★'}<i>${flyby ? '★' : '★★'}</i></div><div class="marks">${speed.toFixed(1)} m/s splashdown${flyby ? ' · lunar flyby' : ''}</div><div class="marks dim">★★★ is a landing on the Moon.</div></div>`;
   const stars = 1 + (speed <= 12 && tilt <= 20 ? 1 : 0) + (speed <= 4 && tilt <= 8 ? 1 : 0);
   const score = Math.max(0, Math.round(1000 - 25 * speed - 6 * tilt + 40 * fuel));
   let best = 0;
@@ -238,6 +252,10 @@ export function updateHUD(dt) {
   $('mRcsV').textContent = getRcsAssist() ? 'ON' : 'OFF'; $('mRcs').classList.toggle('on', getRcsAssist());
   const dry = i >= 0 && stages[i].fuel <= 0;
   $('mStageV').textContent = i >= 0 ? (dry ? 'DROP' : SPECS[i].name.split(' ')[0]) : '—';
+  const ch = getChute();
+  $('mChute').style.display = isCapsule() ? 'flex' : 'none'; $('mStage').style.display = isCapsule() ? 'none' : 'flex';
+  $('mChuteV').textContent = ch < 0 ? 'TORN' : ch === 0 ? 'STOWED' : ch === 1 ? 'DROGUE' : 'MAINS';
+  $('mChute').classList.toggle('on', ch > 0); $('mChute').classList.toggle('alert', ch < 0);
   $('mStage').classList.toggle('alert', dry && state === 'flying');
   const auth = getControlAuthority().py;
   $('oCtrl').textContent = '×' + (auth > 9.95 ? '9.9' : auth.toFixed(1));

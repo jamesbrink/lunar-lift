@@ -1,3 +1,5 @@
+<p align="center"><img src="assets/logo.svg" alt="Lunar Lift" width="420"></p>
+
 # LUNAR LIFT
 
 Fly a three-stage rocket — S-1 SATURN I (solid), S-2 SATURN II and the CSM ENGINE (both

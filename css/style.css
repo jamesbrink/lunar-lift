@@ -193,3 +193,4 @@
   .rating .score{font-size:26px;font-weight:700;color:var(--fg)} .rating .score small{font-size:11px;color:var(--accent);margin-left:8px;letter-spacing:.08em}
   .rating .marks{font-size:12px;color:var(--fg);margin-top:4px} .rating .marks.dim{color:var(--muted)}
   body:not(.map) .maponly{display:none !important}
+  #logo{display:block;width:250px;margin:0 auto 14px}
