@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { airDensity, aeroForce, aeroState, ATMO_TOP, CN_BODY } from './aero.js';
+import { padHit, ARM_TIME } from './colliders.js';
 import { RE, MU_E, RM, MU_M, SOI_M, PAD_UP, PAD_POS, PAD_ANGULAR, VS, CD_AREA, WARPS, LAND_SAFE, SAFE_EARTH, SPECS, CAPSULE_MASS, EARTH_SPIN, SPIN_AXIS, PAD_EAST, MOON_DIST, TURN, moonPos, moonVel } from './constants.js';
 
 /* ---------------- injected dependencies (see initPhysics) ----------------
@@ -225,6 +226,10 @@ const MAX_RATE_PY = 0.45, MAX_RATE_ROLL = 1.0;        // rad/s ceilings on body 
              splashdown limit is SAFE_EARTH. */
 export const HEAT_SHIELD = 4, HEAT_TIME = 3;
 export const CHUTE = { drogue: { area: 30, tear: 20000 }, mains: { area: 2300, tear: 4000 } };   // CdA m², q Pa
+/* Swing arms: 0 across the stack, 1 swung clear. They start to move at ignition and take
+   ARM_TIME; until they are most of the way round they are solid (js/colliders.js). */
+let armSwing = 0;
+export const getArmSwing = () => armSwing;
 let chute = 0, chuteOpen = 0, heat = 0, cooking = 0;       // chute: 0 stowed, 1 drogue, 2 mains, -1 torn
 export const getChute = () => chute;
 export const getChuteOpen = () => chuteOpen;               // 0..1 inflation of the current canopy
@@ -367,6 +372,7 @@ export function physStep(dt) {
   let thrustAcc = null;
   // hold-down clamps: kN / t = m/s²
   simTime += dt;
+  if (engineOn || flightStarted) armSwing = Math.min(1, armSwing + dt / ARM_TIME);
   if (state === 'pad') {
     /* The vehicle is welded to LC-39, and LC-39 is a child of the spinning Earth mesh.
        While hold-down clamps the rocket it must ride the planet's rotation, otherwise the
@@ -518,7 +524,22 @@ export function physStep(dt) {
   }
   S.q.normalize();
 
+  /* The launch complex is solid. Checked from the moment the hold-down lets go — the first 150 m,
+     before 'flying' is declared, is exactly where the tower is. A launch vehicle does not bounce:
+     contact with steel is the end of the flight. */
+  if (S.pos.length() - RE < 1) {
+    const hit = padHit(S.pos, _fw.copy(UP_REF).applyQuaternion(S.q), simTime, tailStation(), NOSE_Z, armSwing < 0.85);
+    if (hit) return collide(hit);
+  }
+
   // liftoff bookkeeping
+  if (!flightStarted && S.pos.length() < PAD_POS.length() - 0.004) {
+    /* Let go of the pad and came back down, or tipped over before clearing it: that is a flight,
+       and the ground is there. (It used to stay 'pad' — which tests no ground — and a stack
+       steered over at ignition tunnelled two kilometres into the Earth.) */
+    flightStarted = true; state = 'flying'; checkImpact();
+    if (state !== 'flying') return;
+  }
   if (!flightStarted) {
     const alt0 = S.pos.length() - RE;
     if (alt0 > (PAD_POS.length() - RE) + 0.15 && thrustAcc && thrustAcc.length() > 9.81e-3) {
@@ -611,6 +632,12 @@ function overstressed(load, limit, dt) {
   return strain >= STRAIN_FAIL;
 }
 
+function collide(what) {
+  const v = groundVel(_nv).length() * 1000;
+  explode(); state = 'lost'; flightStarted = true;
+  hooks.addLog(`COLLISION WITH ${what} AT ${v.toFixed(0)} m/s — VEHICLE LOST`, 'bad');
+  hooks.showEndOverlay('COLLISION', `The vehicle struck <b>${what.toLowerCase()}</b> at ${v.toFixed(0)} m/s. Climb straight until the tower is below you — SAS (P) holds the vertical for the first 55 seconds — and steer east, away from it.`, 'RETRY');
+}
 function burnUp(capsule) {
   explode(); state = 'lost';
   hooks.addLog(capsule ? 'BURNED UP — THE HEAT SHIELD WAS NOT FACING THE AIRSTREAM' : 'BURNED UP ON ENTRY — ONLY THE COMMAND MODULE HAS A HEAT SHIELD', 'bad');
@@ -674,7 +701,7 @@ export function resetSim() {
   engineOn = false; throttle = targetThrottle = 0;
   sasOn = false; sasRetro = false; simTime = 0; warpIdx = 0; maxQ = 0;
   tliLogged = loiLogged = loggedMaxQ = turnHintLogged = false; distFlown = 0; trail = [];
-  flightStarted = false; state = 'pad'; omega.set(0, 0, 0); I0 = null; holdOn = false; chute = 0; chuteOpen = 0; heat = 0; cooking = 0; rcsAssist = true; aeroLoad = 0; strain = 0;
+  flightStarted = false; state = 'pad'; omega.set(0, 0, 0); I0 = null; holdOn = false; armSwing = 0; chute = 0; chuteOpen = 0; heat = 0; cooking = 0; rcsAssist = true; aeroLoad = 0; strain = 0;
 }
 
 /* teleport() starts the flight directly, bypassing the liftoff guard */

@@ -3,10 +3,11 @@ import { RE, RM, WARPS, DTPHYS, PAD_POS, moonPos } from './constants.js';
 import { initWorld, spinBodies, syncTime, updateSky, updateSunShadow, groundHeight, fineGroundHeight, moonGroundHeight } from './world.js';
 import { stages, lesGroup } from './saturn.js';
 import { initVehicle, spawnParticle, addDebris, detachStage, setVisible, updateParticles, updateDebris, updateBurnVisuals, clearDebris, resetStages, plumeLive } from './vehicle.js';
-import { S, keys, initPhysics, getState, getSimTime, setSimTime, getEngineOn, getThrottle, getWarpIndex, setWarpIndex, setTargetThrottle, getSasOn, setSas, cycleWarp, toggleSas, toggleSasRetro, activeStage, fwd, isBurning, accelAt, physStep, toggleIgnite, separateStage, separateLES, addDistFlown, pushTrail, resetSim, markTeleported, airDensity, groundVel, omega, getControlAuthority, toggleRcsAssist, toggleHold, deployChute, aeroState, getAeroLoad, stability } from './physics.js';
+import { S, keys, initPhysics, getState, getSimTime, setSimTime, getEngineOn, getThrottle, getWarpIndex, setWarpIndex, setTargetThrottle, getSasOn, setSas, cycleWarp, toggleSas, toggleSasRetro, activeStage, fwd, isBurning, accelAt, physStep, toggleIgnite, separateStage, separateLES, addDistFlown, pushTrail, resetSim, markTeleported, airDensity, groundVel, omega, getControlAuthority, toggleRcsAssist, toggleHold, deployChute, getArmSwing, aeroState, getAeroLoad, stability } from './physics.js';
 import { camera, initCamera, cycleCamera, updateCamera, resetCameraView, setCamMode, setCamDist, setCamView, resizeCamera, setMap, isMap, cycleMapFocus } from './camera.js';
 import { initMapView, updateMapView } from './mapview.js';
 import { updateChutes } from './chutes.js';
+import { setArmSwing } from './pad.js';
 import { initHUD, addLog, updateHUD, toggleMapView, endOverlay, setWarn, hideOverlay, clearLog } from './hud.js';
 import { audioInit, audioEngine, audioThud, audioExplosion, audioWin, updateAudio } from './audio.js';
 import { updateAim, resetAim } from './targeting.js';
@@ -148,6 +149,7 @@ function frame() {
   updateSunShadow(S.pos);
   updateMapView(isMap(), dtReal);
   updateChutes();
+  setArmSwing(getArmSwing());
   renderHalfRes(renderer, scene, camera);   // weather and exhaust, at a quarter of the pixels
   renderer.render(scene, camera);
   } catch (err) {

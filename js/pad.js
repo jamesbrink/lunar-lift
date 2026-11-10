@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { PAD_SCALE } from './constants.js';
 import { toon, outline, PALETTE } from './toon.js';
+import { ARMS, ARM_FROM, ARM_SWING } from './colliders.js';
 
 /* Launch Complex 39 as the game draws it: the mobile launcher's deck over the flame opening, the
    red umbilical tower with its swing arms and hammerhead crane, the propellant farm, the
@@ -57,6 +58,13 @@ function batcher() {
       }
     },
   };
+}
+
+const arms = [];
+/* 0 = across the stack, 1 = swung clear against the tower. Eased, so they start and stop gently. */
+export function setArmSwing(s) {
+  const e = s * s * (3 - 2 * s);
+  for (const a of arms) a.rotation.z = a.userData.dir * ARM_SWING * e;
 }
 
 export function buildPad(glowMap) {
@@ -125,18 +133,33 @@ export function buildPad(glowMap) {
   /* Swing arms, one per joint that needs servicing, each stopping 0.9 u short of the hull it faces
      (hull radii 3.6 / 3.6 / 3.6 / 2.4 / 1.4 at those heights). They are on the −x side; the fins
      sweep the diagonals, so the ascent passes between nothing. */
-  const armFrom = TX + TW / 2;
-  for (const [z, hullR, w] of [[14, 3.6, 1.6], [30, 3.6, 1.6], [48, 3.6, 1.5], [61, 2.4, 1.4], [68.5, 1.4, 1.2]]) {
-    const tip = -(hullR + 0.9), len = tip - armFrom;
-    box(len, w, w, red, armFrom + len / 2, 0, z, true);
-    box(len * 0.6, 0.3, 0.3, red, armFrom + len * 0.3, 0, z + w * 1.6, false, 0, -0.42, 0);   // stay from the tower to mid-arm
+  /* They MOVE: each arm is its own group hinged on the tower face and swings clear at ignition
+     (setArmSwing, driven from js/physics.js's clock). Standing still they were sawn through by the
+     wider stages on the way up — the S-1's 3.6 u hull passing an arm that stops 2.3 u from the
+     axis. Shapes come from js/colliders.js, the same table collision uses. */
+  arms.length = 0;
+  for (const [z, hullR, w] of ARMS) {
+    const tip = -(hullR + 0.9), len = tip - ARM_FROM;
+    const arm = new THREE.Group(); arm.position.set(ARM_FROM, 0, z);
+    const part = (gw, gd, gh, mat, x, y, zz, edge, ry = 0) => {
+      const m = new THREE.Mesh(boxGeo(gw, gd, gh), mat); m.position.set(x, y, zz); m.rotation.y = ry;
+      m.castShadow = m.receiveShadow = true; if (edge) outline(m); arm.add(m);
+    };
+    part(len, w, w, red, len / 2, 0, 0, true);
+    part(len * 0.6, 0.3, 0.3, red, len * 0.3, 0, w * 1.6, false, -0.42);     // stay from the tower to mid-arm
+    if (z === 68.5) part(3.2, 3.0, 2.8, whiteMat, -4.6 - ARM_FROM, 0, 0, true);   // the white room, on the crew arm
+    /* Alternate sides, so neighbouring arms do not fold into each other against the tower. */
+    arm.userData.dir = arms.length % 2 ? 1 : -1;
+    g.add(arm); arms.push(arm);
   }
-  box(3.2, 3.0, 2.8, whiteMat, -4.6, 0, 68.5, true);                   // the white room, on the crew arm
   // hammerhead crane
   box(4.5, 4.5, 3.4, red, TX, 0, ZT + 1.9, true);
-  box(34, 1.8, 2.2, red, TX + 3, 0, ZT + 4.6, true);
-  box(5, 3.2, 3, dark, TX - 12, 0, ZT + 4.2, true);                    // counterweight
-  box(3, 2.6, 2.4, steel, TX + 2.5, 2.2, ZT + 2.4, true);              // operator's cab
+  /* Parked along the tower's north-south face, not out over the vehicle: its jib used to end 1.4 m
+     from the vehicle's axis at z 96, and the stack flew straight through it (found by
+     js/colliders.js the first time the complex was made solid). */
+  box(1.8, 34, 2.2, red, TX, 3, ZT + 4.6, true);
+  box(3.2, 5, 3, dark, TX, -12, ZT + 4.2, true);                       // counterweight
+  box(2.6, 3, 2.4, steel, TX + 2.2, 2.5, ZT + 2.4, true);              // operator's cab
   // two tail service masts at the foot of the vehicle
   for (const y of [-11, 11]) { box(2.2, 2.2, 7, steel, -11, y, 4.3, true); box(4.5, 0.7, 0.7, steel, -8.6, y * 0.82, 6.6, false, 0, 0, y > 0 ? -0.5 : 0.5); }
 
