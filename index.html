@@ -11,7 +11,7 @@
 <canvas id="gl"></canvas>
 
 <!-- Top centre: clock, then the one line that says what to do next. -->
-<div id="clock" class="hud onmap">MET <b id="met">00:00:00</b> &nbsp;·&nbsp; <span id="warpInd">×1</span></div>
+<div id="clock" class="hud onmap">MET <b id="met">00:00:00</b> &nbsp;·&nbsp; <span id="warpInd">REAL TIME</span></div>
 <div id="guide" class="hud onmap"><span id="guideTag">NEXT</span><span id="guideText"></span></div>
 <div id="log" class="hud onmap"></div>
 <div id="warn" class="hud flightonly"></div>
@@ -81,7 +81,7 @@
   <button data-key="m"><kbd>M</kbd><span>MAP</span></button>
   <button data-key="f" class="maponly"><kbd>F</kbd><span>FOCUS</span><b id="vFocus">EARTH</b></button>
   <button data-key="["><kbd>[</kbd><span>SLOWER</span></button>
-  <button data-key="]"><kbd>]</kbd><span>FASTER</span><b id="vWarp">×1</b></button>
+  <button data-key="]"><kbd>]</kbd><span>FASTER</span><b id="vWarp">REAL TIME</b></button>
   <button id="helpBtn"><kbd>?</kbd><span>KEYS</span></button>
 </div>
 <span id="oCtrl" hidden></span>
@@ -94,7 +94,7 @@
     <div><kbd>P</kbd>SAS autopilot on / off</div><div><kbd>V</kbd>SAS aims prograde / retrograde</div>
     <div><kbd>H</kbd>hold attitude: stop all rotation</div><div><kbd>←</kbd><kbd>→</kbd><kbd>↑</kbd><kbd>↓</kbd>look around · <kbd>-</kbd><kbd>=</kbd>zoom</div>
     <div><kbd>T</kbd>RCS stability assist</div><div><kbd>C</kbd>camera: orbit / chase</div>
-    <div><kbd>[</kbd><kbd>]</kbd>time: paused · ×¼ · ×1 → ×1000 · <kbd>ESC</kbd>pause</div><div><kbd>M</kbd>3-D map · <kbd>F</kbd>focus</div>
+    <div><kbd>[</kbd><kbd>]</kbd>time: paused · slow · real time → ×1000 · <kbd>ESC</kbd>pause</div><div><kbd>M</kbd>3-D map · <kbd>F</kbd>focus</div>
     <div><kbd>R</kbd>restart mission · <kbd>?</kbd>this card</div><div>drag · wheel · double-click: look · zoom · re-centre</div>
   </div>
   <p>The <b>S-1 solid booster</b> burns at full thrust once lit and drops itself at burnout; the S-2 and CSM engines throttle. <b>SAS</b> flies the gravity turn for you and then holds the velocity vector — prograde to speed up, retrograde to brake. In thick air keep the nose near the airflow: the <b>side load</b> readout turns red before the stack breaks.</p>

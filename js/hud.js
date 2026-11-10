@@ -246,7 +246,7 @@ export function updateHUD(dt) {
   es.classList.toggle('live', live);
   $('met').textContent = fmtMET(getSimTime());
   const wp = WARPS[getWarpIndex()];
-  $('warpInd').textContent = $('vWarp').textContent = wp === 0 ? 'PAUSED' : `×${wp}`;
+  $('warpInd').textContent = $('vWarp').textContent = wp === 0 ? 'PAUSED' : wp === 1 ? 'REAL TIME' : wp < 1 ? `SLOW ×${wp}` : `×${wp}`;
   $('clock').classList.toggle('paused', wp === 0);
   $('vCam').textContent = getCamMode().toUpperCase();
 

@@ -91,7 +91,7 @@ export function cycleWarp(delta) {
   if (delta > 0 && WARPS[Math.min(WARPS.length - 1, warpIdx + 1)] > warpCap()) { hooks.addLog(`TIME WARP LIMITED TO ×${WARPS[warpIdx]} HERE — CLIMB OUT OF THE AIR FIRST`, 'warn'); return; }
   if (delta > 0) warpIdx = Math.min(WARPS.length - 1, warpIdx + 1);
   else warpIdx = Math.max(0, warpIdx - 1);
-  hooks.addLog(WARPS[warpIdx] === 0 ? 'PAUSED — ] TO RESUME' : WARPS[warpIdx] < 1 ? `SLOW MOTION ×${WARPS[warpIdx]}` : `TIME WARP ×${WARPS[warpIdx]}`);
+  hooks.addLog(WARPS[warpIdx] === 0 ? 'PAUSED — ] TO RESUME' : WARPS[warpIdx] < 1 ? `SLOW MOTION ×${WARPS[warpIdx]}` : WARPS[warpIdx] === 1 ? 'REAL TIME' : `TIME WARP ×${WARPS[warpIdx]}`);
 }
 
 /* Attitude hold: stop every rotation and keep the nose where it is. The same rate servo as SAS,
