@@ -152,7 +152,10 @@ function decal(r, z0, z1, az, width, map) {
   g.add(cyl(3.62, 3.62, 0.3, -7.4, black));                   // aft frame
   const tunnel = cyl(0.2, 0.2, 13.4, -1.0, white, 8); tunnel.position.x = 3.6; g.add(tunnel);
   g.add(cyl(2.55, 3.52, 1.9, 7.65, white, SEG, true));        // forward cone +6.7 .. +8.6, tapering 10 m to the S-IVB
-  g.add(cyl(3.61, 3.61, 0.4, 6.8, black));                    // the frame at its foot
+  /* +6.58 .. +7.08: its top face stands 0.08 u over the tank's top cap (+7.0). At 0.4 tall it ended
+     at +7.0 exactly, and the two caps shared the ring between the cone's foot (r 3.52) and the tank
+     wall (r 3.57) — coplanar faces, which flickered as a speckled band round the shoulder. */
+  g.add(cyl(3.61, 3.61, 0.5, 6.83, black));                   // the frame at its foot
   g.add(bell(0.30, 0.72, 1.9, -10.85));                       // five J-2s on r 1.44, exits at −11.8
   const engines = [[0, 0]];
   for (let i = 0; i < 4; i++) {
