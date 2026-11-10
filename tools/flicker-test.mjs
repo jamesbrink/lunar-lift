@@ -132,6 +132,17 @@ await view('paused in flight', async () => { game.ignite(); game.setSas(true, fa
   console.log(`${pairs.length ? 'FAIL' : 'ok  '} coplanar overlapping faces: ${pairs.length}`);
   for (const p of pairs.slice(0, 25)) console.log('     ' + p);
   if (pairs.length) fail++;
+  /* The rest of the Cape (js/cape.js) is ONE merged mesh, which the scan above cannot see into — it
+     compares meshes. The group audits itself primitive against primitive, and counts non-finite
+     attribute values while it is there. */
+  const cape = await page.evaluate(async () => {
+    const P = await import('/js/predictor.js'); let g = null;
+    P.predLine.parent.traverse(o => { if (o.name === 'cape') g = o; });
+    return g ? g.userData.audit() : null;
+  });
+  const capeOk = cape && cape.coplanar === 0 && cape.nonFinite === 0;
+  console.log(`${capeOk ? 'ok  ' : 'FAIL'} cape: ${cape ? `${cape.triangles} triangles, coplanar pairs ${cape.coplanar}, non-finite ${cape.nonFinite} ${cape.pairs.join(' ')}` : 'group not found'}`);
+  if (!capeOk) fail++;
   await page.close();
 }
 await browser.close();

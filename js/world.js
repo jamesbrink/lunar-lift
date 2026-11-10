@@ -6,11 +6,12 @@ import { startPlanetPaint, glowTex, flareTex } from './textures.js';
 import { toon, RAMP_EARTH, RAMP_MOON } from './toon.js';
 import { applyRelief, sampleGrid, reliefField, coastField, paintedCanvas } from './toonmap.js';
 import { fineRelief } from './padsite.js';
-import { surfaceInject, setSun } from './surface.js';
+import { surfaceInject, setSun, setEye } from './surface.js';
 import { makePatch, attachEarthPatch, updatePatch, makeMoonPatch, attachMoonPatch, updateMoonPatch, hidePatch } from './terrain.js';
 import { makeWeather, makeCloudShell, updateWeather, cloudShadeInject, setWeatherEye } from './clouds.js';
 import { makeHaze, hazeInject, updateHaze } from './haze.js';
 import { buildPad } from './pad.js';
+import { buildCape } from './cape.js';
 import { uOrigin, absolute } from './origin.js';
 
 /* distances are km, angles rad — everything here lives at real planetary scale */
@@ -393,6 +394,7 @@ export function initWorld(target) {
   const north = new THREE.Vector3().crossVectors(PAD_UP, PAD_EAST).normalize();
   pad.quaternion.setFromRotationMatrix(new THREE.Matrix4().makeBasis(PAD_EAST, north, PAD_UP));
   earth.add(pad);
+  earth.add(buildCape(pad));       // the rest of the Cape: js/cape.js welds itself the same way       // the rest of the Cape: js/cape.js welds itself the same way
 
   scene.fog = new THREE.FogExp2(SKY_DAY.getHex(), 0.002);
   updateSky(PAD_POS);
@@ -616,6 +618,8 @@ export function setWeatherVisible(on) {
 
 export function updateSky(pos, camPos) {
   if (weather && camPos) setWeatherEye(weather, camPos);
+  /* the eye in the Earth's own axes, for the sun's reflection on the sea (js/surface-earth.js) */
+  if (camPos && earth) { _ld.copy(camPos); spinLocal(earth, _ld); setEye('earth', _ld.x, _ld.y, _ld.z); }
   /* The frame is drawn in Earth-fixed axes (js/origin.js): shaders that work in planet-centred
      positions get the sun, and the haze its eye, turned the same way. */
   _sunF.copy(SUN_DIR).applyAxisAngle(Y_UP, -spin);

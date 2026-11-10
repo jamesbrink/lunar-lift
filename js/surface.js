@@ -3,6 +3,7 @@ import { RE, RM, PAD_UP, PAD_EAST } from './constants.js';
 import { C, MOON } from './palette.js';
 import { EARTH_GLSL } from './surface-earth.js';
 import { MOON_GLSL } from './surface-moon.js';
+import { ROADS } from './padsite.js';
 
 /* The ground is drawn per fragment, from data.
 
@@ -146,7 +147,19 @@ varying vec3 vSfS;
    Earth, 1.9 km on the Moon; globe: 10.7 km on the Moon; the Earth's globe is 104 km a vertex, too coarse for any octave). `fn` is the noise they use. */
 const BODIES = {
   earth: { R: RE, glsl: EARTH_GLSL, fn: 'sfN', slope: [[1, 'x', 'x'], [2, 'y', 'y'], [3, 'y', 'z']], vtx: { patch: [[512, 11], [128, 12], [32, 13], [8, 14]], globe: [] },
-    pal: palette({ ...C, snow: [244, 248, 250], steppe: [170, 160, 100], shallow: [128, 196, 226], aqua: [166, 220, 226], foam: [238, 246, 248], lake: [72, 148, 204], wheat: [206, 190, 112], crop: [138, 172, 84], soil: [152, 124, 90] }) },
+    lit: true,
+    pal: palette({ ...C, snow: [244, 248, 250], steppe: [170, 160, 100], shallow: [128, 196, 226], aqua: [166, 220, 226], foam: [238, 246, 248], lake: [72, 148, 204], wheat: [206, 190, 112], crop: [138, 172, 84], soil: [152, 124, 90],
+      // biomes the vote does not name: the tropics' forest, and the dry grass between pasture and steppe
+      jungle: [40, 112, 52], savanna: [158, 162, 86], marsh: [112, 126, 78],
+      // water masses, the bar inside the shallows, and the sun's glare and core on the sea
+      tropic: [34, 104, 172], coldsea: [30, 72, 122], bar: [146, 208, 228],
+      forest: [66, 116, 60],
+      // the site's inked ground: js/toon.js PALETTE.gravel / .asphalt, so the drawn crawlerway meets the built one
+      gravel: [191, 174, 140], asphalt: [74, 79, 87] })
+      /* Light that is not paint. A lit toon surface shows albedo × (sun + sky) / π — about a third
+         of what the palette says, which every tone here was chosen under. Foam and the sun on the
+         sea are the two things that must come out white, so they are written past 1 in linear. */
+      + '\n#undef K_FOAM\n#define K_FOAM vec3( 2.3, 2.4, 2.45 )\n#define K_GLARE vec3( 0.75, 1.45, 2.05 )\n#define K_GLINT vec3( 2.9, 3.0, 3.0 )' },
   moon: { R: RM, glsl: MOON_GLSL, fn: 'sfNv', vtx: { patch: [[256, 31], [64, 32], [16, 33]], globe: [[256, 31], [64, 32]] },
     pal: palette({
       // the regolith palette after the ×1.5 contrast curve the painted canvas applies about 140
@@ -176,6 +189,7 @@ export function surface(key) {
       sfCellF: { value: new Float32Array(24) },
       sfSun: { value: new THREE.Vector3(1, 0, 0) },
       sfHole: { value: new THREE.Vector4(0, 1, 0, 2) },
+      sfEye: { value: new THREE.Vector3(0, 0, 1e6) },
       sfLocal: { value: local },
       sfMareCut: { value: 0.36 },
     };
@@ -185,12 +199,21 @@ export function surface(key) {
   if (key === 'earth') {
     tex.sfField = dataTex(new Uint8Array(2048 * 1024 * 4), 2048, 1024, THREE.RGBAFormat, THREE.UnsignedByteType, true);
     tex.sfCoast = dataTex(new Uint16Array(2048 * 1024).fill(THREE.DataUtils.toHalfFloat(1000)), 2048, 1024, THREE.RedFormat, THREE.HalfFloatType, false);
-    tex.sfPadSdf = dataTex(new Uint16Array(PAD_N * PAD_N).fill(THREE.DataUtils.toHalfFloat(1000)), PAD_N, PAD_N, THREE.RedFormat, THREE.HalfFloatType, false);
+    tex.sfPadSdf = dataTex(new Uint16Array(PAD_N * PAD_N * 2).fill(THREE.DataUtils.toHalfFloat(1000)), PAD_N, PAD_N, THREE.RGFormat, THREE.HalfFloatType, false);
     tex.sfPadSdf.wrapS = THREE.ClampToEdgeWrapping;
+    /* the site at 39 m: shore, wood lots, ocean side. Filled a moment after boot (fillSite); until
+       then it reads "land, no woods, far from the ocean". */
+    const blank = new Uint16Array(SITE_N * SITE_N * 4), hf = THREE.DataUtils.toHalfFloat;
+    for (let i = 0; i < blank.length; i += 4) { blank[i] = hf(-1); blank[i + 1] = hf(-1); blank[i + 2] = hf(-4); blank[i + 3] = hf(0); }
+    tex.sfSite = dataTex(blank, SITE_N, SITE_N, THREE.RGBAFormat, THREE.HalfFloatType, false);
+    tex.sfSite.wrapS = THREE.ClampToEdgeWrapping;
+    const road = new Float32Array(ROADS.length * 4), kind = new Float32Array(ROADS.length);
+    ROADS.forEach((r, i) => { road.set(r.slice(0, 4), i * 4); kind[i] = r[5]; });
     const north = new THREE.Vector3().crossVectors(PAD_UP, PAD_EAST).normalize();
     for (const U of [S.globe, S.patch]) {
       U.sfPadUp = { value: PAD_UP.clone() }; U.sfPadE = { value: PAD_EAST.clone() }; U.sfPadN = { value: north };
       U.sfPadO = { value: new THREE.Vector2() };
+      U.sfRoad = { value: road }; U.sfRoadKind = { value: kind };
     }
   } else {
     tex.sfField = dataTex(new Uint8Array(1024 * 512 * 4).fill(128), 1024, 512, THREE.RGBAFormat, THREE.UnsignedByteType, true);
@@ -201,6 +224,7 @@ export function surface(key) {
 }
 
 export const PAD_N = 512;              // texels across the authored launch-site distance field
+export const SITE_N = 512;             // and across the site's own ±10 km
 
 function dataTex(data, w, h, format, type, mips) {
   const t = new THREE.DataTexture(data, w, h, format, type);
@@ -230,6 +254,12 @@ export function fillCoast(grid) {
 export function fillPadSdf(km) {
   const t = surface('earth').tex.sfPadSdf, d = t.image.data;
   for (let i = 0; i < km.length; i++) d[i] = THREE.DataUtils.toHalfFloat(km[i]);
+  t.needsUpdate = true;
+}
+
+export function fillSite(rgba) {
+  const t = surface('earth').tex.sfSite, d = t.image.data;
+  for (let i = 0; i < rgba.length; i++) d[i] = THREE.DataUtils.toHalfFloat(Number.isFinite(rgba[i]) ? rgba[i] : 0);
   t.needsUpdate = true;
 }
 
@@ -263,6 +293,12 @@ export function setSun(key, x, y, z) {
   S.globe.sfSun.value.set(x, y, z); S.patch.sfSun.value.set(x, y, z);
 }
 
+/* The eye, planet-centred in the body's own axes: the sun's reflection on the sea needs it. */
+export function setEye(key, x, y, z) {
+  const S = surface(key);
+  S.globe.sfEye.value.set(x, y, z); S.patch.sfEye.value.set(x, y, z);
+}
+
 /* Splice the ground shader into a toon material's program. `which` is 'globe' or 'patch'. The
    geometry must carry `sfUv`, the body's equirectangular uv (unwrapped across the dateline). */
 export function surfaceInject(sh, key, which) {
@@ -292,4 +328,7 @@ export function surfaceInject(sh, key, which) {
   sh.fragmentShader = sh.fragmentShader
     .replace('#include <common>', '#include <common>\n' + def + '#define SF_R ' + B.R.toFixed(1) + '\n' + B.pal + '\n' + NOISE + COMMON + B.glsl)
     .replace('#include <map_fragment>', '#include <map_fragment>\n  diffuseColor.rgb = sfColour();');
+  /* the Earth's ground carries its own daylight (see js/surface-earth.js): the sun's term is cut by it */
+  if (B.lit) sh.fragmentShader = sh.fragmentShader
+    .replace('#include <lights_fragment_end>', '#include <lights_fragment_end>\n  reflectedLight.directDiffuse *= sfLit;\n  reflectedLight.indirectDiffuse += sfTwi * diffuseColor.rgb;');
 }

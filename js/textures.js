@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { paintEarth, paintMoon, surfaceData, coastField } from './toonmap.js';
-import { padSdfGrid } from './padsite.js';
-import { fillField, fillCoast, fillPadSdf, surface, PAD_N } from './surface.js';
+import { padSdfGrid, siteGrid } from './padsite.js';
+import { fillField, fillCoast, fillPadSdf, fillSite, surface, PAD_N, SITE_N } from './surface.js';
 
 /* Everything the planets wear is drawn, not photographed.
 
@@ -22,6 +22,8 @@ export function startPlanetPaint() {
   paintEarth('assets/earth_atmos_2048.jpg', 'assets/earth_specular_2048.jpg', 'assets/earth_normal_2048.jpg');
   paintMoon('assets/moon_1024.jpg');
   fillPadSdf(padSdfGrid(PAD_N));
+  /* the site's 39 m grid is a quarter of a million evaluations: after the first frames, not before */
+  setTimeout(() => fillSite(siteGrid(SITE_N)), 0);
   surfaceData('earth').then((d) => fillField('earth', d.bytes));
   coastField().then((c) => fillCoast(c));
   surfaceData('moon').then((d) => {

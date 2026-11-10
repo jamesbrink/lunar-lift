@@ -3,6 +3,7 @@ import * as WORLD from './world.js';
 import { RE, RM, MU_E, SOI_M, MOON_DIST, EARTH_SPIN, MOON_PLANE_N, MOON_U, MOON_V, VS, PAD_SCALE, PAD_POS, PAD_UP, moonPos } from './constants.js';
 import { S, keys, fwd, getSimTime, activeStage, isBurning, getThrottle, airDensity, groundVel, navVel, orbitalElements, getChute } from './physics.js';
 import { stages } from './saturn.js';
+import { CAPE_SOLIDS } from './colliders.js';
 
 /* distances are km; 1 m near plane so the 105 m rocket resolves, 3 M km far plane
    so the starfield and the lunar approach both render (logarithmic depth buffer) */
@@ -249,9 +250,22 @@ function collide(pos, map) {
   for (let round = 0; round < 3; round++) {
     if (!map) shipOut(pos);
     const pm = WORLD.padMatrix();
-    if (pm && pos.distanceToSquared(_c.setFromMatrixPosition(pm)) < 0.09) {   // within 300 m of the complex
+    const padD2 = pm ? pos.distanceToSquared(_c.setFromMatrixPosition(pm)) : 1e9;
+    if (padD2 < 0.09) {                                                       // within 300 m of the complex
       _loc.copy(pos).applyMatrix4(_inv.copy(pm).invert());
       for (const s of PAD_SOLIDS) pushOut(X_AXIS, Y_AXIS, Z_AXIS, s[0], s[1], s[2], _c.set(s[3], s[4], s[5]), _loc);
+      pos.copy(_loc).applyMatrix4(pm);
+    } else if (padD2 > 20 && padD2 < 40) {                                    // 4.5 to 6.3 km out: the assembly building's group
+      /* Boxes, not ellipsoids: an ellipsoid that holds a 160 m box is 100 m wider than it. A point
+         inside a box (grown by 4 u of standoff) leaves through its nearest face, the floor excepted. */
+      _loc.copy(pos).applyMatrix4(_inv.copy(pm).invert());
+      for (const b of CAPE_SOLIDS) {
+        const dx = b[4] + 4 - Math.abs(_loc.x - b[1]), dy = b[5] + 4 - Math.abs(_loc.y - b[2]), dz = b[3] + b[6] + 4 - _loc.z;
+        if (dx <= 0 || dy <= 0 || dz <= 0) continue;
+        if (dz <= dx && dz <= dy) _loc.z += dz;
+        else if (dx <= dy) _loc.x += _loc.x > b[1] ? dx : -dx;
+        else _loc.y += _loc.y > b[2] ? dy : -dy;
+      }
       pos.copy(_loc).applyMatrix4(pm);
     }
     groundOut(pos);
