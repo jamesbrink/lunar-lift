@@ -428,69 +428,103 @@ function decal(r, z0, z1, az, width, map) {
 if (stages.length > 3) {
   const g3 = stages[3].meshes, g4 = stages[4].meshes;
 
-  /* descent stage: octagonal tank block +29.7 .. +31.35, bell to +29.3 */
+  /* descent stage: the octagonal foil-wrapped tank cluster +29.7 .. +31.35, bell to +29.3.
+     Real proportions (1 u = 1.4 m): the body is 2.9 u across, and the four landing legs splay
+     WIDER than the body — foot circle 2.62 u against the tank's 1.72 — which is what makes the
+     LM read as a spider and not a box on stilts. The old version stood its feet inside the hull
+     and wore its RCS quads on the descent stage; the real quads are on the ASCENT stage (fore
+     and aft), and the descent stage carries the landing radar instead. */
   g3.add(cyl(1.72, 1.72, 1.65, 30.525, gold, 8, true));
   g3.add(cyl(1.76, 1.76, 0.16, 29.78, tone, 8));              // aft frame at the tank's foot
   g3.add(cyl(1.76, 1.76, 0.16, 31.27, tone, 8));              // and the deck the cabin bolts to
   {
     const dk = fuse(black, { cast: true });
-    for (const azd of [0, 90, 180, 270]) {                    // RCS quads on the four flat faces
-      const az = azd * Math.PI / 180, r = 1.72 * Math.cos(Math.PI / 8) + 0.06;
-      dk.add(new THREE.BoxGeometry(0.34, 0.34, 0.3), r, 0, 30.9, 0, 0, 0, az);
-      for (const d of [-0.11, 0.11]) dk.add(zcyl(0.05, 0.08, 0.4, 8), r + 0.05, d, 30.9, 0, 0, 0, az);
-    }
+    for (let k = 0; k < 8; k++)                               // the eight corner posts of the tank cluster
+      dk.add(new THREE.BoxGeometry(0.10, 0.10, 1.58), 1.70, 0, 30.52, 0, 0, 0, k * Math.PI / 4);
+    dk.add(new THREE.BoxGeometry(0.10, 0.62, 0.46), 1.60, 0, 29.62, 0, 0, 0, 3 * Math.PI / 4);   // AGS/RDMA bay
+    for (const yo of [-0.20, 0, 0.20])                        // its three antenna horns
+      dk.add(new THREE.CylinderGeometry(0.045, 0.065, 0.2, 8).rotateZ(Math.PI / 2), 1.74, yo, 29.62, 0, 0, 0, 3 * Math.PI / 4);
     dk.into(g3);
   }
   const db = bell(0.30, 0.68, 1.4, 30.0); g3.add(db); dressBells(g3, [db]);   // exit +29.3
 
-  /* landing legs, hinged at the tank's foot, feet 4.4 u below on LM_FOOT_Z — the plane
-     js/physics.js scores contact (CONTACT_Z[3]). Each: main strut, a fore-brace, and a 0.8 u
-     footpad whose soles sit exactly at contact, out past the heat shield's widest ring (r 1.33):
-     nothing of the capsule is under a foot. */
+  /* landing legs, hinged at the tank's corner, feet 4.4 u below on LM_FOOT_Z — the plane
+     js/physics.js scores contact (CONTACT_Z[3]). Each: a main strut out to r 2.62, two
+     secondary struts to points down its length, and a 1.6 u dish footpad whose rim sits exactly
+     at contact, far out past the heat shield's widest ring (r 1.33): nothing of the capsule is
+     under a foot. At 225° the strut carries the ladder the crew walks down onto the Moon. */
   {
     const A = new THREE.Vector3(), B = new THREE.Vector3(), D = new THREE.Vector3(), YAX = new THREE.Vector3(0, 1, 0);
-    const leg = (mat, ra, za, rb, zb, r) => {                 // a strut from (ra,0,za) to (rb,0,zb); cylinder axis is Y → map Y onto the strut
+    const leg = (mat, ra, za, rb, zb, r, edge = true) => {    // a strut from (ra,0,za) to (rb,0,zb); cylinder axis is Y → map Y onto the strut
       A.set(ra, 0, za); B.set(rb, 0, zb); D.subVectors(B, A);
       const m = new THREE.Mesh(new THREE.CylinderGeometry(r, r, D.length(), 8), mat);
       m.position.copy(A).addScaledVector(D, 0.5);
       m.quaternion.setFromUnitVectors(YAX, D.clone().normalize());
-      m.castShadow = true; outline(m); g3.add(m); return m;
+      m.castShadow = true; if (edge) outline(m); g3.add(m); return m;
     };
+    const padPts = [new THREE.Vector2(0.80, 0), new THREE.Vector2(0.72, 0.07), new THREE.Vector2(0.45, 0.14), new THREE.Vector2(0.20, 0.17), new THREE.Vector2(0, 0.18)];
+    const padGeo = new THREE.LatheGeometry(padPts, 20);       // a shallow dish, opening up: rim is the sole
     for (let i = 0; i < 4; i++) {
       const az = i * Math.PI / 2 + Math.PI / 4, c = Math.cos(az), s = Math.sin(az);
-      leg(silver, 1.85, 30.0, 1.6, 25.72, 0.10);              // main strut (hinge bracket to foot centre)
-      leg(silver, 1.7, 29.78, 1.55, 26.6, 0.055);             // fore-brace
-      const pad = new THREE.Mesh(new THREE.CylinderGeometry(0.65, 0.65, 0.14, 16), tone);
-      pad.rotation.x = Math.PI / 2;                           // the disc lies in the ground plane, not standing up
-      pad.position.set(c * 1.6, s * 1.6, 25.67); pad.castShadow = true; outline(pad); g3.add(pad);   // sole at 25.6 = LM_FOOT_Z
+      leg(silver, 1.78, 30.10, 2.62, 25.80, 0.085);           // main strut (hinge bracket to foot centre)
+      leg(silver, 1.70, 29.78, 2.20, 27.05, 0.045, false);    // the two secondaries Apollo braced it with
+      leg(silver, 1.70, 29.78, 2.42, 26.45, 0.045, false);
+      const pad = new THREE.Mesh(padGeo, tone);
+      pad.position.set(c * 2.62, s * 2.62, 25.60); pad.castShadow = true; outline(pad); g3.add(pad);  // rim at 25.6 = LM_FOOT_Z
       const hng = new THREE.Mesh(new THREE.CylinderGeometry(0.14, 0.14, 0.34, 10), black);
       hng.quaternion.setFromUnitVectors(YAX, new THREE.Vector3(-s, c, 0));   // hinge pin horizontal, tangential
-      hng.position.set(c * 1.85, s * 1.85, 30.0); g3.add(hng);
+      hng.position.set(c * 1.80, s * 1.80, 30.10); g3.add(hng);
     }
+    const lad = fuse(silver, { cast: true });                 // ladder on the 225° leg, outside its strut
+    const ux = (2.62 - 1.78) / 4.40, uz = (25.80 - 30.10) / 4.40, th = Math.atan2(ux, uz);
+    for (let j = 0; j < 5; j++)
+      lad.add(new THREE.BoxGeometry(0.06, 0.42, 0.06), 1.78 + ux * (1.35 + j * 0.62) - uz * 0.30, 0, 30.10 + uz * (1.35 + j * 0.62) + ux * 0.30, 0, th, 0, 5 * Math.PI / 4);
+    for (const yo of [-0.19, 0.19])
+      lad.add(new THREE.BoxGeometry(0.05, 0.05, 3.7), 1.78 + ux * 2.2 - uz * 0.30, yo, 30.10 + uz * 2.2 + ux * 0.30, 0, th, 0, 5 * Math.PI / 4);
+    lad.into(g3);
   }
   stages[3].tailZ = TAIL_Z[3];
   stages[3].engines = [[0, 0]];
 
-  /* ascent stage: the crew cabin +29.15 (bell exit) .. +33.4, and the docking tunnel that spans
-     down to the CM rim at +28.66. Cabin 31.35 .. 33.4: a gold octagon with the two triangle-front
-     windows the LM is known by, the hatch, and the tunnel collar. */
-  g4.add(cyl(1.0, 1.12, 2.05, 32.375, gold, 8, true));
-  g4.add(cyl(1.16, 1.16, 0.14, 31.42, tone, 8));              // its lower frame
+  /* ascent stage: equipment deck, wedge cabin and roof 31.35 .. 33.4 (LM_TOP_Z), and the docking
+     tunnel that spans down to the CM rim at +28.66. The octagon is turned 22.5° so its FLAT
+     faces centre on the cardinals and diagonals: the two big front windows and two smaller sides
+     sit on true facets, not across a corner as they used to. White crew cabin over the gold
+     equipment deck is the real scheme — the foil ends where the crew compartment begins. */
   g4.add(cyl(0.34, 0.34, 2.6, 30.0, silver, 16, true));       // docking tunnel +28.7 .. +31.3
   g4.add(cyl(0.56, 0.56, 0.16, 31.24, silver, 16));           // tunnel collar at the cabin floor
   g4.add(cyl(0.5, 0.5, 0.14, 28.78, silver, 16));             // and the capture ring at the CM end
+  g4.add(cyl(1.16, 1.16, 0.16, 31.42, tone, 8));              // lower frame to the descent deck
+  const deck = new THREE.Mesh(zcyl(1.12, 1.16, 0.60, 8, false, 22.5), gold);
+  deck.position.z = 31.80; deck.castShadow = true; outline(deck); g4.add(deck);
+  const cab = new THREE.Mesh(zcyl(0.88, 0.97, 1.20, 8, false, 22.5), panelWhite);
+  cab.position.z = 32.55; cab.castShadow = true; outline(cab); g4.add(cab);   // foot sunk into the deck; top 33.15
+  const roof = new THREE.Mesh(zcyl(1.10, 1.10, 0.12, 8, false, 22.5), tone);
+  roof.position.z = 33.34; roof.castShadow = true; outline(roof); g4.add(roof);   // top 33.40 = LM_TOP_Z
   {
-    const gl = fuse(glass, { edge: false }), dk = fuse(black, { cast: true });
-    for (const azd of [90, 270]) {                            // the faceted front: one window per bow face
-      const az = azd * Math.PI / 180;
-      gl.add(new THREE.PlaneGeometry(0.44, 0.3), 1.08, 0, 32.7, 0, 0, 0, az);
+    const gl = fuse(glass, { edge: false }), fr = fuse(frame), dk = fuse(black, { cast: true }), sv = fuse(silver, { cast: true });
+    for (const azd of [90, 270]) {                            // the two big front windows, and their frames
+      gl.add(new THREE.PlaneGeometry(0.46, 0.32), 0.880, 0, 32.60, 0, 0, 0, azd * Math.PI / 180);
+      fr.add(new THREE.PlaneGeometry(0.58, 0.44), 0.865, 0, 32.60, 0, 0, 0, azd * Math.PI / 180);
     }
-    for (const azd of [45, 225]) {                            // hatch outline and RCS on the flanks
-      const az = azd * Math.PI / 180, r = 1.1 * Math.cos(Math.PI / 8) + 0.05;
-      dk.add(new THREE.BoxGeometry(0.3, 0.44, 0.05), r, 0, 32.35, 0, 0, 0, az);
-      dk.add(new THREE.BoxGeometry(0.26, 0.26, 0.26), r, 0, 31.9, 0, 0, 0, az);
+    for (const azd of [45, 225]) {                            // the two side windows
+      gl.add(new THREE.PlaneGeometry(0.30, 0.22), 0.880, 0, 32.56, 0, 0, 0, azd * Math.PI / 180);
+      fr.add(new THREE.PlaneGeometry(0.40, 0.32), 0.865, 0, 32.56, 0, 0, 0, azd * Math.PI / 180);
     }
-    gl.into(g4); dk.into(g4);
+    fr.add(new THREE.PlaneGeometry(0.50, 0.60), 0.868, 0, 32.45);                // hatch frame at 0°...
+    gl.add(new THREE.PlaneGeometry(0.32, 0.42), 0.885, 0, 32.45);                // ...and its glass
+    /* RCS: the two quads the real ascent stage carries, fore on one diagonal and aft on the
+       other, each four nozzles. They live above the deck, never on the descent stage. */
+    for (const [azd, zq] of [[45, 33.02], [225, 31.80]]) {
+      const az = azd * Math.PI / 180, r = azd === 45 ? 0.97 : 1.08;
+      dk.add(new THREE.BoxGeometry(0.28, 0.28, 0.26), r, 0, zq, 0, 0, 0, az);
+      for (const dz of [-0.19, 0.19]) dk.add(new THREE.CylinderGeometry(0.05, 0.07, 0.22, 8).rotateX(Math.PI / 2), r, 0, zq + dz, 0, 0, 0, az);
+      dk.add(new THREE.CylinderGeometry(0.05, 0.07, 0.22, 8).rotateZ(Math.PI / 2), r + 0.22, 0, zq, 0, 0, 0, az);
+    }
+    /* high-gain antenna: a dish on the aft deck tilted up and out, on a short mast */
+    sv.add(new THREE.SphereGeometry(0.42, 14, 6, 0, Math.PI * 2, 0, 0.85), 0.62, 0, 33.38, 1.35, 0, 0, 7 * Math.PI / 4);
+    sv.add(new THREE.CylinderGeometry(0.05, 0.05, 0.26, 8), 0.56, 0, 33.53, 1.35, 0, 0, 7 * Math.PI / 4);
+    gl.into(g4); fr.into(g4); dk.into(g4); sv.into(g4);
   }
   const ab = bell(0.22, 0.50, 0.9, 29.6); g4.add(ab); dressBells(g4, [ab]);   // exit +29.15, inside the descent skirt
   stages[4].tailZ = TAIL_Z[4];

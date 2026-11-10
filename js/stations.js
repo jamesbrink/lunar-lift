@@ -30,7 +30,7 @@ export const SIVB_TOP_Z = 22;                 // above this the pad collider's h
 export const LM_FOOT_Z = 25.6;                // soles of the LM's footpads: CONTACT for the descent stage on the Moon
 export const LM_ASC_TAIL_Z = 29.15;           // ascent bell exit plane: CONTACT once the descent stage is left behind
 export const LM_TOP_Z = 33.4;                 // top of the ascent cabin: the nose for LM-phase contact and camera framing
-export const R_LM = 2.2;                      // the LM as ONE cylinder for ground contact: between the 1.72 body and the 3.35 foot circle
+export const R_LM = 2.2;                      // the LM as ONE cylinder for ground contact: between the 1.72 body and the 2.62 foot circle
 
 /* ---- radii ---- */
 export const R_STACK = 3.57;                  // S-1 and S-2 tanks (10.0 m across)
