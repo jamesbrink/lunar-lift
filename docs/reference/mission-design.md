@@ -271,9 +271,13 @@ page did not take at ×1.)
 
 `MOON_PHASE0` is solved for the `TURN` table in the same file. Change the pitch program without
 re-running the tool and TLI mis-aims by tens of thousands of km: `--turn=steep` (the reach-horizontal
-table `t0 60, ramp 200, max π/2`) solves to phase **4.9463355**, 0.028 rad ≈ 2.9 h of lunar motion
-away, and it wins with 7.7 t spare for 16,216 m/s (periselene 322 km, touchdown 3.1 m/s) against the
-shipped table's 7.2 t and 16,274.
+table `t0 60, ramp 200, max π/2`) solves to phase **2.1635768**, 3.88e-3 rad ≈ 24 min of lunar motion
+from the shipped window, periselene comes back at 337 km — and **LOSES**. Its LOI parks the CSM,
+the descent stage runs dry braking into a deorbit whose coast height is 1.1 km where the shipped
+chain flies ~20 km, the insertion arrives at 19.7 km, the Hohmann window takes the ascent stage to
+an apoapsis 74 km over the parked CSM, and the terminal phase opens a 2,694 km gap it has no fuel
+to close: `HARD IMPACT ON THE MOON AT 1503 m/s`. The pitch program is not decoration; it shapes the
+descent it will fly three days later.
 
 The same is true of the forces. The flight-model change — a drag rise that reshapes the ascent, and
 the indirect term in `gravityAt` that acts through the whole 80 h coast — moved the solved window
@@ -444,7 +448,8 @@ A touchdown on the Moon opens a debrief (`js/hud.js`):
   ≤ 20° of tilt. Three at ≤ 4 m/s and ≤ 8°.
 - **Score.** `1000 − 25·speed(m/s) − 6·tilt(°) + 40·propellant left(t)`, floored at zero. The best
   score is kept in the browser's `localStorage`.
-- A splashdown is one star, two after a lunar flyby; three stars need the Moon.
+- A splashdown is one star, two after a lunar flyby, and three when it closes a round trip that
+  touched down on the Moon ("walked on the Moon and came back").
 
 By that rule the tool's shipped flight — 3.3 m/s with 7.2 t left — is a three-star landing if its
 tilt is under 8°; the tool does not print tilt, so the score is not quoted here. Note what the

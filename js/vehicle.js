@@ -1,7 +1,7 @@
 import * as THREE from 'three';
-import { VS, RE, RM, EARTH_SPIN, DTPHYS, moonPos, moonVel } from './constants.js';
+import { VS, RE, RM, EARTH_SPIN, DTPHYS, moonPos, moonVel, csmParkPos, csmParkVel } from './constants.js';
 import { rocketGroup, stages, lesGroup, bellMetal } from './saturn.js';
-import { S, airDensity, getSimTime, getState, landing } from './physics.js';
+import { S, airDensity, getSimTime, getState, landing, getCsmParked } from './physics.js';
 import { ATMO_TOP } from './aero.js';
 import { TAIL_Z, R_SM_DRAWN } from './stations.js';
 import * as WORLD from './world.js';
@@ -271,6 +271,26 @@ const _sp = new THREE.Vector3(), _svv = new THREE.Vector3(), _seam = new THREE.V
 
 export function clearDebris() {
   debris.forEach(d => scene.remove(d.mesh)); debris.length = 0;
+}
+
+/* The parked CSM is not integrated — js/physics.js keeps ONE state and its park orbit is the
+   analytic csmParkPos. The drawing follows that line: out of rocketGroup, nose along the orbit,
+   back the moment the docks engage. (resetStages also re-homes it; this covers dock, which does
+   not pass through reset.) */
+const _parkV = new THREE.Vector3(), _parkUp = new THREE.Vector3(0, 0, 1);
+export function syncParkedCsm() {
+  const m = stages[2].meshes;
+  if (getCsmParked()) {
+    if (m.parent !== scene) scene.add(m);
+    csmParkPos(getSimTime(), m.position);
+    csmParkVel(getSimTime(), _parkV);
+    if (_parkV.lengthSq() > 1e-12) m.quaternion.setFromUnitVectors(_parkUp, _parkV.normalize());
+    m.scale.setScalar(VS);
+    m.visible = true;
+  } else if (m.parent === scene) {
+    rocketGroup.add(m);
+    m.position.set(0, 0, 0); m.quaternion.identity(); m.scale.setScalar(1);
+  }
 }
 
 export function resetStages() {

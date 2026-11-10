@@ -48,7 +48,7 @@ it starts itself on a free port, so nothing an editor saves can reload the page 
 | shader-lint | `node tools/shader-lint.mjs` | any `ShaderMaterial` or injected GLSL helper breaks a rule (braces, `main`, `<common>` first, unknown `#include`, a splice anchor three does not have, `atan2`, a loop with no increment, an array parameter written through) |
 | mission (shipped) | `node tools/mission-sim.mjs game --phase=<MOON_PHASE0>` | the result is not `WON` |
 | mission (retro loses) | `node tools/mission-sim.mjs retro --phase=1.4742618` | the previous stack does not `LOSE` (it is kept as a recorded loss) |
-| mission-math | `python3 tools/mission-math.py` | its vehicle is not `SPECS`, or a derived number it prints (15,142 / 17,090 / 16,303 / 20,608 m/s, 1.13×, 3,433 t, 66,184 km) is not the one the docs and `js/constants.js` quote. It does not check flown numbers |
+|mission-math|`python3 tools/mission-math.py`|its vehicle is not `SPECS`, or a derived number it prints (15,142 / 20,192 / 16,303 / 20,608 m/s, 1.33×, 4,898 t, 66,184 km) is not the one the docs and `js/constants.js` quote. It does not check flown numbers|
 | crater-stats | `node tools/crater-stats.mjs` | the lunar relief ladder is discontinuous: a height step over 8 m between points 2 m apart along 4,000 random tracks (a crater cut off along a lattice plane) |
 | shots (console clean) | `node tools/shots.mjs <outdir> <port>` | the console printed any error or warning during eleven minutes of flight (ten screenshots are written to `<outdir>`) |
 | clip-test | `node tools/clip-test.mjs <port>` | the camera is under the drawn terrain or inside the hull anywhere in a yaw / pitch / zoom sweep at the pad, liftoff, ascent, orbit and 30 m over the Moon |
@@ -138,6 +138,21 @@ was scored on inertial `S.v` while the ground moved at 1,023 m/s, so a soft land
 and a landed mission looked like a 1,233 m/s win; the HUD's vertical speed was `pos − pos`, always
 zero; Ap/Pe mixed a Moon-centred position with inertial velocity and printed `ESCAPE` for a bound
 200 km orbit. If a formula combines a position and a velocity, check which frame each is in.
+
+## Rule: the parked CSM is a curve, not a ship
+
+- While the LM is away the CSM exists only as `csmParkPos(t)` / `csmParkVel(t)` in
+  `js/constants.js` — closed-form circular park at `PARK_R = RM + 110`. There is NO second
+  integrator and nothing may steer it: not SAS, not debris code, not a test. Mass, inertia, aero,
+  contact, `stranded()` and `separateStage()` all exclude separated stages; docking is the only
+  thing that brings it back.
+- Docking is decided inside `physStep`: within `DOCK_DIST = 1` km of the parked point at under
+  `DOCK_SPEED = 0.05` km/s relative → `dockCsm()`, log `LUNAR MODULE DOCKED — CSM RE-MATED`, and
+  the CSM is the active stack again. The parked CSM never seeks the player — that asymmetry is
+  what keeps every round-trip trajectory the certifier certifies reproducible.
+- Touchdown perches the LM (`moonPerch`, held at `moonPos(t)` + offset; the frame is one
+  single step, `moonIdle()`, exactly like `padIdle()` for the pad) and the first burning step
+  clears it. `warpCap()` offers ×10000 under `moonIdle()` for the same reason it does on the pad.
 
 ## Rule: the step is part of the trajectory
 
@@ -278,8 +293,22 @@ air. Corollaries, each read off the code or measured:
 ## Harness gotchas (`tools/mission-sim.mjs`)
 
 - It imports the real `js/*.js`. Phases: `ascent → tliwait → tli → mcc → approach → loi →
-  orbitCheck → deorbit → toPeri → descend`; the launch phase is found by bisecting the first
-  periselene (`probePeri` runs the mission with `capture: false, stopAtPeri: true`).
+  orbitCheck → deorbit → toPeri → descend`, and for a round-trip stack (≥ 5 rows: demate,
+  touchdown, ascent) additionally `→ lmClimb → lmCoast → lmRise → lmApex → lmTerminal → tei →
+  tecoast → capsule`. Three-row stacks (`landed`, `nova`, `retro`) pre-separate the LM rows and
+  fly the one-way chain they were certified on.
+- The launch phase is found by bisecting the first periselene (`probePeri` runs the mission with
+  `capture: false, stopAtPeri: true`). The straddling corridor is ~0.004 rad wide and moves with
+  every mass change, so the solve walks FORWARD FROM `MOON_PHASE0` in 0.002 rad steps to bracket
+  it, then bisects — a coarse walk around the whole circle provably misses it (a 0.25 rad stride
+  skipped the corridor on 32 consecutive probes and reported "no launch window").
+- The `ev` record is the source for every measured number in `docs/reference/atmosphere.md` and
+  `mission-design.md`: `maxQ`, `loadPeak`, `strainPeak`, `padMargin`, `stageMargin` (static margin
+  and inertial speed at every staging), `ascent.rows` (MET/alt/q/Mach/α/side-load/margin every
+  10 s), `dvDrag` (integrated axial drag loss; 23.8 m/s on the pre-LM stack, matching the script
+  whose 24 m/s the docs quote), `aimLP` (`lunarPass` from `ev.tliDone`, scored against the flown
+  periselene). Add telemetry there rather than writing throwaway scripts, and move the docs with
+  the run.
 - `stages[i].dry` is copied at import time by `js/saturn.js`, and `resetSim()` re-syncs only
   `fuel`. If you override `SPECS`, you MUST write `stages[i].dry` too, or you fly the old airframe.
 - `P.setSas(on, retro)` — the second argument is **retrograde**, not "prograde".

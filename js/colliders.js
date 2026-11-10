@@ -52,8 +52,13 @@ const ARM_BOXES = ARMS.map(([z, hullR, w]) => {
 });
 ARM_BOXES.push(['THE WHITE ROOM', -4.6, 0, 68.5, 1.6, 1.5, 1.4]);
 
-/* Hull radius at a station along the vehicle axis (build units), for whatever is still attached. */
-function hullRadius(z) { return z < TAIL_Z[2] ? R_STACK : z < SIVB_TOP_Z ? R_SIVB : z < 28.8 ? R_SM : 0.6; }   // above the apex: the escape tower's mast
+/* Hull radius at a station along the vehicle axis (build units), for whatever is still attached.
+   25.6..31.4: the LM straddling the CM (soles at LM_FOOT_Z), ring capped at 2.2 u: the crew arm's
+   box (ARMS entry [68.5, 1.4, 1.2]) tips at 2.3 u from the axis at build 26.9..28.1, and while
+   armSwing < 0.6 it is solid — a wider ring opens the mission with `COLLISION WITH A SWING ARM
+   AT 0 m/s`. Above the tank: the ascent cabin, then only the escape tower's mast. The one-way test
+   stacks run with the LM pre-separated and clear the same boxes the same way. */
+function hullRadius(z) { return z < TAIL_Z[2] ? R_STACK : z < SIVB_TOP_Z ? R_SIVB : z < 25.6 ? R_SM : z < 31.4 ? 2.2 : z < 33.5 ? 1.2 : 0.6; }
 
 const NORTH = new THREE.Vector3().crossVectors(PAD_UP, PAD_EAST).normalize();
 const Y = new THREE.Vector3(0, 1, 0);

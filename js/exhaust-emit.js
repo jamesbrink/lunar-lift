@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import { G0, SPECS, VS, RE, RM, moonPos } from './constants.js';
 import { airDensity, getSimTime } from './physics.js';
 import { airVel } from './aero.js';
-import { TAIL_Z, R_S1_SKIRT, R_STACK, R_IU } from './stations.js';
+import { TAIL_Z, R_S1_SKIRT, R_STACK, R_IU, R_LM } from './stations.js';
 import * as WORLD from './world.js';
 import { pPos, pVel, pR, pLife, pAge, pInv, pHeat, pMode, pSmoke, pMoon, pPal, pTh, allocSlot, spawnParticle, ship, moonP, moonV, SOI2,
   plumeDebug, SM_SPRAY, SM_TRAIL, SM_STEAM } from './exhaust-pool.js';
@@ -51,6 +51,10 @@ export const BELL_SETS = [
       }
       return a; })() },
   { ve: SPECS[2].isp * G0 / 1000, rate: 240, pal: 1, trail: 0, tailZ: TAIL_Z[2], hullR: R_IU, bells: [bellA(0, 0, TAIL_Z[2], 0, 0, -1, 0.85, 0.30)] },
+  /* The LM's two hypergolic engines: one bell each, born on the exit discs js/saturn.js builds —
+     descent (lip 0.68 u at z 29.3) and the smaller ascent bell recessed to 29.15. */
+  { ve: SPECS[3].isp * G0 / 1000, rate: 300, pal: 1, trail: 0, tailZ: TAIL_Z[3], hullR: R_LM, bells: [bellA(0, 0, TAIL_Z[3], 0, 0, -1, 0.68, 0.30)] },
+  { ve: SPECS[4].isp * G0 / 1000, rate: 150, pal: 1, trail: 0, tailZ: TAIL_Z[4], hullR: R_LM, bells: [bellA(0, 0, TAIL_Z[4], 0, 0, -1, 0.50, 0.28)] },
 ];
 
 /* Emission bookkeeping. `rate` is parcels/s at full throttle — rendering resolution, not mass flow

@@ -151,6 +151,12 @@ const LOOKS = [
     core: 0xf6fbff, mid: 0xa9d6ff, out: 0x5c9df2, sootC: 0x5c9df2, tint: 0x9cc8ff, delays: [0, 0.1, 0.2, 0.1, 0.2] },
   { len: 9, rad: 0.85, wide: 2.6, vacLen: 1.3, cover: 0.8, veil: 0.52, glow: 0.2, soot: 0, cant: 0,
     core: 0xffffff, mid: 0xb6deff, out: 0x66a8f6, sootC: 0x66a8f6, tint: 0xa8d0ff, delays: [0] },
+  /* The LM's hypergolics: single bells, a hotter whiter core than the J-2 family and an amber rim —
+     NTO/A-50 burns bright orange, and neither stage throws a merged envelope (one jet each). */
+  { len: 12, rad: 0.72, wide: 2.4, vacLen: 1.5, cover: 0.8, veil: 0.5, glow: 0.2, soot: 0, cant: 0,
+    core: 0xffffff, mid: 0xffd96a, out: 0xff8a2e, sootC: 0xff8a2e, tint: 0xffb45a, delays: [0] },
+  { len: 8, rad: 0.55, wide: 2.4, vacLen: 1.5, cover: 0.8, veil: 0.52, glow: 0.2, soot: 0, cant: 0,
+    core: 0xffffff, mid: 0xffd96a, out: 0xff8a2e, sootC: 0xff8a2e, tint: 0xffb45a, delays: [0] },
 ];
 
 /* The shader writes its tones straight to the canvas (a raw ShaderMaterial has no output encoding), so

@@ -35,7 +35,8 @@ Read from the `keydown` handler in `js/main.js` and the hold-key reads in `js/ph
 | W / S | Pitch |
 | A / D | Yaw |
 | Q / E | Roll |
-| X | Separate the stage. A stage still holding more than 5 % of its propellant wants X twice within two seconds. Pressed on the CSM it leaves the command module flying alone |
+| X | Separate the stage. A stage still holding more than 5 % of its propellant wants X twice within two seconds. Pressed on the CSM it leaves the command module flying alone; pressed once docked with the parked CSM it drops the empty lunar ascent stage first |
+| L | In lunar orbit: the LM demates and the CSM parks itself in a 110 km orbit, alone. Coming back within 1 km of that parked CSM at under 50 m/s docks automatically and re-mates it |
 | P | SAS autopilot on / off (holds the pitch program off the pad, then the velocity vector) |
 | V | Flip SAS between prograde and retrograde |
 | H | Attitude hold on / off: stops every rotation and keeps the nose where it is; steering by hand moves the held attitude with you. Switching SAS on cancels it, and it switches SAS off |
@@ -428,9 +429,9 @@ first; three stars need the Moon. Details: `docs/reference/mission-design.md`.
 - **Open, known and not fixed:** cloud outlines shimmer by about a pixel (`tools/flicker-test.mjs`
   measures it; its gate on that view is loose). A playtest also reported dark blotches near the
   terminator in the map; that has not been re-checked.
-- **No way home from the surface.** A landed mission ends at touchdown: there is no lunar ascent
-  stage and no TEI in the game. Re-entry and splashdown exist for flights that never landed — from
-  Earth orbit, or round the Moon and back.
+- **The round trip is modelled end to end** — descent, ascent, docking, TEI and the fall home —
+  but the LM flies it only after **L** in lunar orbit; a mission that never presses it ends at
+  the Moon like it always did.
 
 - **Terrain under the vehicle can lag the planet by a frame.** Contact height is read through the
   planet mesh's drawn rotation, which is updated once per rendered frame; at high warp the physics

@@ -60,7 +60,11 @@ export const MOON_V = new THREE.Vector3().crossVectors(MOON_PLANE_N, MOON_U).nor
    figures they are compared with do: their totals read 0.034 % under the engine's own (16,274 m/s
    quoted, 16,280 at 9.81 - measured by switching the tool's constant on the shipped flight). */
 export const G0 = 9.81;
-export const MOON_PHASE0 = 4.9187044;                      // rad — 281.82° along the lunar orbit
+export const MOON_PHASE0 = 2.1597018;                      // rad — 123.74° along the lunar orbit.
+// Round-trip window: the 5-row SPECS ascend differently (16 parking orbits before TLI), and the
+// window sits ~2.76 rad from the one-way stack's 4.9187044 — which is still the phase the one-way
+// regression (landed) flies. Re-solve with `node tools/mission-sim.mjs game` after any change to
+// the ascent, the TURN table, the forces or the masses; the check walks from this value.
 let moonPhase = MOON_PHASE0;
 export function setMoonPhase(p) { moonPhase = p; }
 
@@ -74,6 +78,27 @@ export function moonPos(t, out = new THREE.Vector3()) {
 export function moonVel(t, out = new THREE.Vector3()) {
   const a = moonPhase + MOON_RATE * t;
   return out.copy(MOON_U).multiplyScalar(-Math.sin(a)).addScaledVector(MOON_V, Math.cos(a)).multiplyScalar(MOON_DIST * MOON_RATE);
+}
+/* CSM park orbit: the CSM hovers in a circular lunar orbit while the LM is on the surface
+   or in descent. Its position is analytic, not integrated — it is the parked object, not the
+   primary, and the single primary state vector is the LM (or the mated CSM on the way home).
+   Mirrors moonPos in Earth-frame: the Moon's own position plus a radius PARK_R out in the same
+   plane (MOON_U/MOON_V), sweeping at the circular rate PARK_N. P0_PARK is the single phase
+   knob that lets the LM rendezvous with it on one lap instead of waiting a lunar day. */
+export const PARK_ALT = 110, PARK_R = RM + PARK_ALT;
+export const PARK_N = Math.sqrt(MU_M / PARK_R ** 3);       // rad/s, circular — one lap every ~1 h 59 min
+export const P0_PARK = 0;
+export function csmParkPos(t, out = new THREE.Vector3()) {
+  moonPos(t, out);
+  const a = P0_PARK + PARK_N * t;
+  return out.addScaledVector(MOON_U, PARK_R * Math.cos(a)).addScaledVector(MOON_V, PARK_R * Math.sin(a));
+}
+/* d/dt of csmParkPos: the parked CSM's velocity, Moon-relative term plus the Moon's own travel.
+   The docking rule compares it against the LM's: closing faster than ~50 m/s is not docking. */
+export function csmParkVel(t, out = new THREE.Vector3()) {
+  moonVel(t, out);
+  const a = P0_PARK + PARK_N * t;
+  return out.addScaledVector(MOON_U, -PARK_R * PARK_N * Math.sin(a)).addScaledVector(MOON_V, PARK_R * PARK_N * Math.cos(a));
 }
 
 export const VS = 0.0014;                 // vehicle visual scale: 75 build units → ~105 m, Saturn-V sized
@@ -121,29 +146,36 @@ export const SAFE_EARTH = 0.012;         // km/s — 12 m/s: a splashdown under 
 export const SKY_DAY = new THREE.Color(0x79b1de), SKY_NULL = new THREE.Color(0x04060b);
 
 /* stage specs: dry/fuel in tonnes, thrust in kN, isp in seconds.
-   Verified by tools/mission-sim.mjs, which flies the whole mission through this file's own physics
-   and the controls a player has: ideal staged budget 17,090 m/s against the 15,142 m/s one-way
-   requirement (1.13x), 16,274 m/s actually spent, 7.2 t of CSM propellant left after a 3.3 m/s
-   touchdown on 3.469 days of mission clock. Full breakdown in docs/reference/mission-design.md.
+   Verified by tools/mission-sim.mjs, which flies the whole round trip through this file's own
+   physics and the controls a player has: ideal staged budget 20,192 m/s (2,129 + 6,423 + 6,810 +
+   2,117 + 2,714) against the 15,142 m/s it used to take just to reach lunar orbit (1.33x — the
+   extra is the landing, the ascent from the Moon, TEI and the ride home). Full breakdown in
+   docs/reference/mission-design.md.
    What the sizing is actually doing:
-     - pad thrust-to-weight 1.37 g. The previous stack's 1.24 g also reaches orbit, so this is
-       margin, not a cliff; drag is never the problem (mission-math.py section 8 puts it at
-       <= 174 m/s for CD_AREA 28 with the drag rise; 24 m/s measured). The one structural load
-       is the lateral limit in physics.js, which the SAS ascent stays 20x under.
-     - stage 2 over 0.95 g at ignition (1.09 g here) so the vehicle is still accelerating when it
+     - pad thrust-to-weight 1.29 g at 4,898 t ignition. Drag is never the problem
+       (mission-math.py section 8 puts it at <= 174 m/s for CD_AREA 28 with the drag rise;
+       ~24 m/s measured). The one structural load is the lateral limit in physics.js, which the
+       SAS ascent stays far under.
+     - stage 2 over 0.95 g at ignition (1.08 g here) so the vehicle is still accelerating when it
        takes over from stage 1.
-     - stage 3 is deliberately *over*-powered against Apollo's 45 kN descent propulsion system:
-       400 kN is 4.2 g_moon at the 59 t LOI mass and 7.0 g_moon at the 35 t landing mass, so
-       hovering takes 15% throttle and no setting balances lunar gravity exactly. That is
-       survivable only because the descent guidance commands a velocity envelope bounded by altitude
-       instead of trying to hover. Throttle granularity, not thrust level, is what limits a soft
-       landing.
+     - the CSM engine is the mission engine: 650 kN is 0.18 g on Earth and 1.06 g_moon at the
+       378 t LOI mass, so capture is flown at full throttle from periselene and the throttle
+       closes on the cutoff, not on the tank.
+     - the LM descent engine at 380 kN is 4.7 g_moon at the 50 t PDI mass and hovers at ~20 %
+       throttle. That is survivable only because the descent guidance commands a velocity
+       envelope bounded by altitude instead of trying to hover. Throttle granularity, not thrust
+       level, is what limits a soft landing. The ascent engine at 180 kN lifts its 19 t off the
+       surface at 5.8 g_moon — Apollo's was 1.6 g — because at 120 kN the spiral to orbit spends
+       too much propellant fighting gravity: measured, it died 2.9 km short of the parked CSM
+       with an empty tank. The spiral is fuel, not velocity.
    The 2,400/700/400 t stack this replaced had 16,303 m/s of ideal budget (1.08x) and still failed:
    it reached lunar orbit, then ran the tank dry on the descent and hit the surface at 1,264 m/s.
    Margin on paper is not margin; the descent has to be flown. */
 export const SPECS = [
-  { name: 'S-1 SATURN I', dry: 130, fuel: 1800, thrust: 46000, isp: 304 },
-  { name: 'S-2 SATURN II', dry: 90, fuel: 1200, thrust: 16000, isp: 415 },
-  { name: 'CSM ENGINE', dry: 18, fuel: 185, thrust: 400, isp: 420 },
+  { name: 'S-1 SATURN I', dry: 130, fuel: 2500, thrust: 62000, isp: 304 },
+  { name: 'S-2 SATURN II', dry: 90, fuel: 1800, thrust: 24000, isp: 415 },
+  { name: 'CSM ENGINE', dry: 18, fuel: 300, thrust: 650, isp: 440 },
+  { name: 'LM DESCENT', dry: 5, fuel: 26, thrust: 380, isp: 380 },
+  { name: 'LM ASCENT', dry: 4, fuel: 15, thrust: 180, isp: 380 },
 ];
 export const CAPSULE_MASS = 10;

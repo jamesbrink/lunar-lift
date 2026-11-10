@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { G0, RE, RM, MU_E, MU_M, SOI_M, MOON_DIST, WARPS, SPECS, CAPSULE_MASS, LAND_SAFE, SAFE_EARTH, TLI_LEAD, MOON_RATE, MOON_U, MOON_V, moonPos } from './constants.js';
 import { stages } from './saturn.js';
-import { S, getState, getSimTime, getEngineOn, getThrottle, getWarpIndex, getSasOn, getSasRetro, getDistFlown, getMaxQ, activeStage, orbitalElements, groundVel, bodyUp, navVel, surfaceAlt, aeroState, getAeroLoad, getRcsAssist, getHold, getStrain, getChute, getHeat, getCooking, isCapsule, HEAT_SHIELD, CHUTE, totalMass, landing, LOAD_LIMIT_STACK, LOAD_LIMIT_CSM } from './physics.js';
+import { S, getState, getSimTime, getEngineOn, getThrottle, getWarpIndex, getSasOn, getSasRetro, getDistFlown, getMaxQ, activeEngine, orbitalElements, groundVel, bodyUp, navVel, surfaceAlt, aeroState, getAeroLoad, getRcsAssist, getHold, getStrain, getChute, getHeat, getCooking, isCapsule, getCsmParked, getDocked, getLandedOnMoon, HEAT_SHIELD, CHUTE, totalMass, landing, LOAD_LIMIT_STACK, LOAD_LIMIT_CSM } from './physics.js';
 import { getCamMode, getMapFocus } from './camera.js';
 import { isMuted } from './audio.js';
 import { initNavball, updateNavball } from './navball.js';
@@ -92,7 +92,7 @@ export function endOverlay(title, body, btn) {
 /* The one line under the clock: what to do now, with the key that does it. Derived from the same
    state the readouts show — nothing here is scripted to a clock, so it is right for any flight. */
 const K = k => `<kbd>${k}</kbd>`;
-function nextStep({ state, engineOn, live, i, dry, altE, alt, nearMoon, el, radial, speed }) {
+function nextStep({ state, engineOn, live, i, dry, altE, alt, nearMoon, el, radial, speed, parked, docked, moonLanded }) {
   if (state === 'pad') return engineOn ? ['Liftoff — climb straight, the tower is right beside you', 'ok']
     : [`${K('SPACE')} ignite · then ${K('P')} lets SAS fly the ascent`];
   if (state !== 'flying') return [''];
@@ -111,6 +111,16 @@ function nextStep({ state, engineOn, live, i, dry, altE, alt, nearMoon, el, radi
       : [`Falling — drogues (${K('G')}) once under ${CHUTE.drogue.tear / 1000} kPa and below 12 km: now ${(q / 1000).toFixed(1)} kPa`];
   }
   if (dry) return i === 2 ? ['Out of propellant — you are a passenger now', 'bad'] : [`Tank empty — ${K('X')} drop the stage`, 'warn'];
+  /* ---- the round trip, in the order the flight meets them ---- */
+  if (nearMoon && !parked && !docked && i === 2 && !el.escape && el.pe > 100)
+    return [`Lunar orbit ✓ — ${K('L')} demates the LM: the CSM stays parked up here, you take the lander down`, 'ok'];
+  if (moonLanded) return [`${K('⇧')} open the throttle to lift off — then build speed ACROSS the ground: about 1,670 m/s at 20 km is orbit`, 'ok'];
+  if (parked && i >= 3 && live && radial > -0.002)
+    return [`Ascent — ${Math.round(speed * 1000).toLocaleString()} m/s across the ground; orbit is ~1,670. The CSM docks with you inside 1 km at under 50 m/s`, 'ok'];
+  if (parked && i >= 3 && el.pe > 60)
+    return [`Coasting at ${alt.toFixed(0)} km over the Moon — burn retrograde to go down to it, or find the parked CSM: within 1 km, under 50 m/s relative, the docks engage`, 'ok'];
+  if (docked && nearMoon && el.pe > 0 && !live)
+    return [`Docked ✓ — ${K('X')} jettisons the ascent stage. Then burn ${K('V')} ${K('P')} retrograde at perilune to fall home`, 'ok'];
   if (nearMoon) {
     const vs = -radial * 1000;
     if (el.escape || el.pe > 0 && !el.escape && el.ap > SOI_M) return [`Capture: ${K('V')} retrograde, ${K('P')} SAS, burn at the lowest point (${Math.round(el.pe)} km)`];
@@ -162,8 +172,8 @@ function nextStep({ state, engineOn, live, i, dry, altE, alt, nearMoon, el, radi
    propellant left is the efficiency; stars are thresholds, the score breaks ties, and the best
    score is kept in this browser so there is a number to beat. */
 function debrief() {
-  const { speed, tilt, fuel, home, flyby } = landing;
-  if (home) return `<div class="rating"><div class="stars">${flyby ? '★★' : '★'}<i>${flyby ? '★' : '★★'}</i></div><div class="marks">${speed.toFixed(1)} m/s splashdown${flyby ? ' · lunar flyby' : ''}</div><div class="marks dim">★★★ is a landing on the Moon.</div></div>`;
+  const { speed, tilt, fuel, home, flyby, landedOnMoon } = landing;
+  if (home) return `<div class="rating"><div class="stars">${landedOnMoon ? '★★★' : flyby ? '★★' : '★'}<i>${landedOnMoon ? '' : flyby ? '★' : '★★'}</i></div><div class="marks">${speed.toFixed(1)} m/s splashdown${landedOnMoon ? ' · walked on the Moon and came back' : flyby ? ' · lunar flyby' : ''}</div><div class="marks dim">${landedOnMoon ? 'The full round trip.' : '★★★ is a landing on the Moon.'}</div></div>`;
   const stars = 1 + (speed <= 12 && tilt <= 20 ? 1 : 0) + (speed <= 4 && tilt <= 8 ? 1 : 0);
   const score = Math.max(0, Math.round(1000 - 25 * speed - 6 * tilt + 40 * fuel));
   let best = 0;
@@ -252,11 +262,11 @@ export function updateHUD(dt) {
     $('aQ').textContent = `${(aeroState.q / 1000).toFixed(1)} kPa`;
     $('aAoa').textContent = `${aoa.toFixed(0)}°`;
     $('aLoad').textContent = `${load.toFixed(2)} g`;
-    const lim = activeStage() === 2 || activeStage() < 0 ? LOAD_LIMIT_CSM : LOAD_LIMIT_STACK;
+    const lim = activeEngine() === 2 || activeEngine() < 0 ? LOAD_LIMIT_CSM : LOAD_LIMIT_STACK;
     $('aLoad').className = load > lim || getStrain() > 0.05 ? 'bad' : load > 0.4 * lim ? 'warn' : '';
     $('aAoa').className = aoa > 15 && aeroState.q > 2000 ? 'warn' : '';
   }
-  const i = activeStage();
+  const i = activeEngine();
   const live = engineOn && throttle > .01 && i >= 0 && stages[i].fuel > 0;
   $('thrBig').innerHTML = `${Math.round(throttle * 100)}<span>%</span>`;
   $('thrGauge').firstElementChild.style.height = `${throttle * 100}%`;
@@ -309,12 +319,17 @@ export function updateHUD(dt) {
   $('mStage').classList.toggle('alert', dry && state === 'flying');
 
   /* Delta-v left in each stage: the rocket equation over what that stage still holds, carrying
-     everything stacked above it. Vacuum Isp, so the first stage reads a little generous. */
-  const dvs = [0, 0, 0];
-  for (let k = 2, above = CAPSULE_MASS; k >= 0; k--) {
+     everything stacked above it. Vacuum Isp, so the first stage reads a little generous. While the
+     CSM is parked its crew is in the LM, not stacked above the service engine, so the parked stage
+     carries nothing — and it holds nothing up, so the LM's figures do not count it either. */
+  const parked = getCsmParked();
+  const dvs = stages.map(() => 0);
+  let above = CAPSULE_MASS;
+  for (let k = stages.length - 1; k >= 0; k--) {
     if (stages[k].separated) continue;
-    const m1 = above + stages[k].dry, m0 = m1 + stages[k].fuel;
-    dvs[k] = SPECS[k].isp * G0 * Math.log(m0 / m1); above = m0;
+    const carries = parked && k === 2 ? 0 : above;
+    dvs[k] = SPECS[k].isp * G0 * Math.log((carries + stages[k].dry + stages[k].fuel) / (carries + stages[k].dry));
+    if (!(parked && k === 2)) above += stages[k].dry + stages[k].fuel;
   }
   stages.forEach((st, idx) => {
     const row = $('pip' + idx); const fill = row.querySelector('i');
@@ -334,7 +349,7 @@ export function updateHUD(dt) {
   /* 'pad' state persists through the first seconds of the burn (it flips when the tower clears),
      so nextStep keys its ignite hint on the engine, not on the state alone. */
   milestones({ state, nearMoon, el, live });
-  const g = nextStep({ state, engineOn, live, i, dry, altE, alt, nearMoon, el, radial, speed: rel.length() });
+  const g = nextStep({ state, engineOn, live, i, dry, altE, alt, nearMoon, el, radial, speed: rel.length(), parked, docked: getDocked(), moonLanded: getLandedOnMoon() });
   $('guideText').innerHTML = g[0]; $('guide').className = 'hud onmap ' + (g[1] || '');
   $('guide').style.display = state === 'won' || state === 'lost' ? 'none' : 'flex';
 

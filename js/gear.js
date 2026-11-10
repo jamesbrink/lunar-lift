@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { RM, VS, moonPos } from './constants.js';
 import { setGear, GEAR } from './saturn.js';
-import { S, getState, getSimTime, activeStage, navVel, landing } from './physics.js';
+import { S, getState, getSimTime, activeEngine, navVel, landing, getDocked } from './physics.js';
 import { moonGroundHeight } from './world.js';
 
 /* When the landing gear is down. The legs themselves are js/saturn.js's (setGear poses them); this
@@ -28,7 +28,11 @@ export function forceGear(v) { forced = v; }
 export function updateGear() {
   if (forced !== null) { setGear(forced); return; }
   const t = getSimTime(), state = getState();
-  const lander = activeStage() === 2;
+  /* The service module's gear is a one-way thing: it comes down for a direct lunar landing. On the
+     round trip the LM lands on its own feet and the CSM never sets down — not on the dock (docked)
+     and not on the way home (it is jettisoned above the atmosphere; landedOnMoon says which
+     mission this is). */
+  const lander = activeEngine() === 2 && !getDocked() && !landing.landedOnMoon;
   moonPos(t, _m); _r.subVectors(S.pos, _m);
   const alt = _r.length() - RM;
   const landed = state === 'won' && !landing.home;

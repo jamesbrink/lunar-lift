@@ -2,8 +2,8 @@ import * as THREE from 'three';
 import { RE, RM, WARPS, DTPHYS, PAD_POS, SPECS, moonPos } from './constants.js';
 import { initWorld, syncTime, updateSky, updateSunShadow, setWeatherVisible, getSpin, groundHeight, fineGroundHeight, moonGroundHeight } from './world.js';
 import { stages, lesGroup } from './saturn.js';
-import { initVehicle, spawnParticle, addDebris, detachStage, setVisible, updateParticles, updateDebris, updateBurnVisuals, clearDebris, resetStages, plumeLive } from './vehicle.js';
-import { S, keys, initPhysics, getState, getSimTime, setSimTime, getEngineOn, getThrottle, getWarpIndex, setWarpIndex, setTargetThrottle, getTargetThrottle, getSasOn, setSas, cycleWarp, warpHorizon, toggleSas, toggleSasRetro, activeStage, isBurning, accelAt, physStep, toggleIgnite, separateStage, separateLES, addDistFlown, resetSim, markTeleported, airDensity, groundVel, navVel, padIdle, omega, getControlAuthority, toggleRcsAssist, toggleHold, deployChute, getArmSwing, guardWarp, setCutoffGuard, aeroState, getAeroLoad, stability } from './physics.js';
+import { initVehicle, spawnParticle, addDebris, detachStage, setVisible, updateParticles, updateDebris, updateBurnVisuals, clearDebris, resetStages, syncParkedCsm, plumeLive } from './vehicle.js';
+import { S, keys, initPhysics, getState, getSimTime, setSimTime, getEngineOn, getThrottle, getWarpIndex, setWarpIndex, setTargetThrottle, getTargetThrottle, getSasOn, setSas, cycleWarp, warpHorizon, toggleSas, toggleSasRetro, activeEngine, isBurning, accelAt, physStep, toggleIgnite, separateStage, separateLES, addDistFlown, resetSim, markTeleported, airDensity, groundVel, navVel, padIdle, moonIdle, parkCsm, omega, getControlAuthority, toggleRcsAssist, toggleHold, deployChute, getArmSwing, guardWarp, setCutoffGuard, aeroState, getAeroLoad, stability } from './physics.js';
 import { camera, initCamera, cycleCamera, updateCamera, resetCameraView, setCamMode, setCamDist, setCamView, resizeCamera, setMap, isMap, cycleMapFocus } from './camera.js';
 import { initMapView, updateMapView } from './mapview.js';
 import { updateChutes } from './chutes.js';
@@ -138,9 +138,10 @@ addEventListener('keydown', e => {
   if (k === '?' || k === '/') { document.getElementById('helpCard').classList.toggle('on'); return; }
   if (k === 'escape' && document.getElementById('helpCard').classList.contains('on')) { document.getElementById('helpCard').classList.remove('on'); return; }
   /* Paused is for looking: the view, the map, the clock and the help work; the ship's switches wait. */
-  if (WARPS[getWarpIndex()] === 0 && [' ', 'x', 'g', 'p', 'v', 'h', 't'].includes(k)) { addLog('PAUSED — ESC OR ] TO RESUME', 'warn'); return; }
+  if (WARPS[getWarpIndex()] === 0 && [' ', 'x', 'l', 'g', 'p', 'v', 'h', 't'].includes(k)) { addLog('PAUSED — ESC OR ] TO RESUME', 'warn'); return; }
   if (k === ' ') toggleIgnite();
   else if (k === 'x') dropStage();
+  else if (k === 'l') parkCsm();
   else if (k === 'p') toggleSas();
   else if (k === 'v') toggleSasRetro();
   else if (k === 't') toggleRcsAssist();
@@ -162,7 +163,7 @@ addEventListener('blur', () => { for (const k in keys) keys[k] = false; });
    its propellant. A stage that still holds more than 5 % wants X twice within two seconds. */
 let xArmed = 0;
 function dropStage() {
-  const i = activeStage();
+  const i = activeEngine();
   if (getState() === 'flying' && i >= 0 && stages[i].fuel / SPECS[i].fuel > 0.05 && performance.now() - xArmed > 2000) {
     xArmed = performance.now();
     addLog(`${Math.round(stages[i].fuel / SPECS[i].fuel * 100)}% PROPELLANT STILL IN THIS STAGE — X AGAIN TO DROP IT ANYWAY`, 'warn');
@@ -217,7 +218,7 @@ function frame() {
        At most 20,000 steps a frame; a frame too slow for the warp falls behind it.
        One exception: standing on the pad with the engines cold and the throttle shut, a step is
        an exact rotation with the planet at any size, so the frame is one step and x10000 is free. */
-    const idle = padIdle();   // the ONE predicate physics.js's warpCap shares: the two cannot disagree now
+    const idle = padIdle() || moonIdle();   // the ONE predicates physics.js's warpCap shares: the two cannot disagree now
     if (idle) { physStep(simDt); bank = 0; prevValid = false; }
     else {
       /* at most a quarter of the way to the next place that changes the allowed warp (never less than
@@ -244,7 +245,7 @@ function frame() {
        not frame time x warp: the two agree only on average. */
     updateParticles(Math.min(1, stepped)); steppedFx = true;
     // visuals follow physics
-    updateBurnVisuals({ pos: S.pos, quat: S.q, vel: S.v, throttle: getThrottle(), activeIdx: activeStage(), burn: isBurning(), omega });
+    updateBurnVisuals({ pos: S.pos, quat: S.q, vel: S.v, throttle: getThrottle(), activeIdx: activeEngine(), burn: isBurning(), omega });
     updateDebris(stepped, accelAt);
     {
       const rho = airDensity(Math.max(0, S.pos.length() - RE)) / airDensity(0), sp = groundVel(_gv).length();
@@ -259,6 +260,7 @@ function frame() {
   if (getState() === 'won' || getState() === 'lost') updateAudio({ burning: false, throttle: 0, rho: 0, q: 0 });   // no wind under the end card
   if (!paused && !steppedFx) updateParticles(Math.min(1, dtReal * WARPS[getWarpIndex()]));
   updateCamera(dtReal, paused);
+  syncParkedCsm();   // the parked CSM is analytic: it rides csmParkPos, not the integrated state
   if (paused) updateAudio({ burning: false, throttle: 0, rho: 0, q: 0 });   // and the engine is silent
   if (getState() === 'flying') updatePredictor(camera); else clearPredictor();
   predLine.visible = !isMap();       // the map draws the whole coast itself; two paths side by side read as a fault
@@ -298,7 +300,7 @@ window.game = {
     engineOn: getEngineOn(), throttle: getThrottle(), sasOn: getSasOn(), warp: WARPS[getWarpIndex()],
     omega: [omega.x, omega.y, omega.z], authority: getControlAuthority().py,
     aero: { q: aeroState.q, mach: aeroState.mach, aoa: aeroState.aoa, load: getAeroLoad(), margin: stability() } }),
-  ignite: toggleIgnite, stage: separateStage, jettisonLES: separateLES, setSas,
+  ignite: toggleIgnite, stage: separateStage, jettisonLES: separateLES, parkLM: parkCsm, setSas,
   warp: m => { const k = WARPS.indexOf(m); if (k >= 0) setWarpIndex(k); }, camera: n => { setCamMode(n); }, map: on => { document.body.classList.toggle('map', on); setMap(on); },
   ff(sec) { toTrue(); let left = sec; while (left > 1e-9) { const h = Math.min(DTPHYS, left); physStep(h); left -= h; } retrue(); syncTime(getSimTime()); },
   setThrottle(v) { setTargetThrottle(v); },

@@ -219,9 +219,11 @@ def game_stack(specs, label, requirement):
     return total
 
 
-SHIPPED = [("S-1 SATURN I", 130, 1800, 46000, 304),
-           ("S-2 SATURN II", 90, 1200, 16000, 415),
-           ("CSM ENGINE", 18, 185, 400, 420)]
+SHIPPED = [("S-1 SATURN I", 130, 2500, 62000, 304),
+           ("S-2 SATURN II", 90, 1800, 24000, 415),
+           ("CSM ENGINE", 18, 300, 650, 440),
+           ("LM DESCENT", 5, 26, 380, 380),
+           ("LM ASCENT", 4, 15, 180, 380)]
 PREVIOUS = [("S-1 SATURN I", 130, 2400, 46000, 263),
             ("S-2 SATURN II", 120, 700, 12000, 340),
             ("CSM ENGINE", 20, 400, 3000, 420)]

@@ -1,9 +1,9 @@
 import * as THREE from 'three';
 import * as WORLD from './world.js';
 import { RE, RM, MU_E, SOI_M, MOON_DIST, EARTH_SPIN, MOON_PLANE_N, MOON_U, MOON_V, VS, PAD_SCALE, PAD_POS, PAD_UP, moonPos } from './constants.js';
-import { S, keys, fwd, getSimTime, activeStage, isBurning, getThrottle, airDensity, groundVel, navVel, orbitalElements, getChute } from './physics.js';
+import { S, keys, fwd, getSimTime, activeEngine, isBurning, getThrottle, airDensity, groundVel, navVel, orbitalElements, getChute } from './physics.js';
 import { stages } from './saturn.js';
-import { NOSE_Z, TAIL_Z, CM_TAIL_Z } from './stations.js';
+import { NOSE_Z, TAIL_Z, CM_TAIL_Z, LM_FOOT_Z, LM_ASC_TAIL_Z, LM_TOP_Z, LES_TIP_Z } from './stations.js';
 import { CAPE_SOLIDS } from './colliders.js';
 
 /* distances are km; 1 m near plane so the 105 m rocket resolves, 3 M km far plane
@@ -54,7 +54,7 @@ let focusZ = null, spanHalf = 37 * VS;
 let wantFov = 64, placedFov = false, shakeT = 0;
 const refH = new THREE.Vector3(1, 0, 0);     // the carried heading, horizontal and unit
 let refOk = false, climb = 0, frame = 1, lastSimT = 0;
-const FULL_SPAN = 0.5 * (NOSE_Z - TAIL_Z[0]) * VS; // half-length of the whole stack
+const FULL_SPAN = 0.5 * (LES_TIP_Z - TAIL_Z[0]) * VS; // half-length of the whole stack
 const saved = { yaw: PAD_YAW, pitch: 0, dist: 0.13 };
 const CAM_RANGE = { chase: [0.02, 1000, 0.13], orbit: [0.02, 1000, 0.13] };
 const range = () => mapOn ? MAP_RANGE[FOCI[focus]] : CAM_RANGE[camModes[camMode]];
@@ -371,10 +371,13 @@ export function updateCamera(dt, paused = false) {
       .addScaledVector(MOON_V, Math.cos(curYaw) * Math.cos(curPitch));
     desired.copy(_target).addScaledVector(_dir, curDist);
   } else {
-    const i = activeStage();
-    const tail = i >= 0 ? stages[i].tailZ : CM_TAIL_Z;           // capsule alone: heat shield to apex
+    const i = activeEngine();
+    /* Framing: the lowest and highest hardware still attached. The LM's footpads stand below its
+       own bell (LM_FOOT_Z is the soles); the CSM stage now flies with the LM straddling it, so the
+       top of the mated stack is the ascent cabin, not the docking tunnel. */
+    const tail = i < 0 ? CM_TAIL_Z : i === 3 ? LM_FOOT_Z : i === 4 ? LM_ASC_TAIL_Z : stages[i].tailZ;
     /* Under parachutes the vehicle is the capsule AND what it hangs from: frame both. */
-    const ch = i < 0 ? getChute() : 0, top = ch === 2 ? NOSE_Z + 36 : ch === 1 ? NOSE_Z + 18 : NOSE_Z;
+    const ch = i < 0 ? getChute() : 0, top = i >= 2 ? LM_TOP_Z : ch === 2 ? NOSE_Z + 36 : ch === 1 ? NOSE_Z + 18 : NOSE_Z;
     const wantZ = 0.5 * (tail + top) * VS;
     focusZ = focusZ === null || !placed ? wantZ : focusZ + (wantZ - focusZ) * (1 - Math.exp(-2.5 * dt));
     spanHalf = 0.5 * (top - tail) * VS;

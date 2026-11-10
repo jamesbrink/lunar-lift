@@ -90,15 +90,18 @@ extends into the interstage skirt. Ratios O/F match the engine specs (2.27 / 4.5
 
 ## The game's vehicle
 
-`js/constants.js` models one stack of three stages plus a capsule; `SPECS` entries are
+`js/constants.js` models one stack of five stages plus a capsule — the Saturn as three stages,
+the Lunar Module as the two small ones — and `SPECS` entries are
 `{dry, fuel}` in tonnes, `thrust` in kN, `isp` in seconds.
 
 | | dry / fuel (t) | thrust (kN) | Isp (s) | real counterpart |
 | --- | --- | --- | --- | --- |
-| `S-1 SATURN I` | 130 / 1,800 | 46,000 | 304 | S-IC: 130.4 / 2,145.8, 33,850 kN SL, 265–304 s |
-| `S-2 SATURN II` | 90 / 1,200 | 16,000 | 415 | S-II: 36.2 / 443.2, 5,115 kN vac, 421 s |
-| `CSM ENGINE` | 18 / 185 | 400 | 420 | neither: SPS 99 kN/314 s and DPS 45 kN/311 s in one, doing TLI, LOI, deorbit and descent |
-| `CAPSULE_MASS` | 10 | — | — | CM 5.97 t + LM 15.1 t = 21 t in reality |
+| `S-1 SATURN I` | 130 / 2,500 | 62,000 | 304 | S-IC: 130.4 / 2,145.8, 33,850 kN SL, 265–304 s |
+| `S-2 SATURN II` | 90 / 1,800 | 24,000 | 415 | S-II: 36.2 / 443.2, 5,115 kN vac, 421 s |
+| `CSM ENGINE` | 18 / 300 | 650 | 440 | SPS 99 kN/314 s scaled up: it does TLI, LOI, TEI and deorbit |
+| `LM DESCENT` | 5 / 26 | 380 | 380 | DPS 45 kN/311 s scaled ~8×: powered descent, and it is thrown away |
+| `LM ASCENT` | 4 / 15 | 180 | 380 | ascent engine 15.6 kN/311 s scaled ~11×: dock with the CSM, then jettisoned |
+| `CAPSULE_MASS` | 10 | — | — | CM 5.97 t + ballast; the LM's crew rides home in it |
 
 `tools/mission-math.py` §6 turns those numbers into the mission budget, and
 `tools/mission-sim.mjs` flies each of them through the game's own physics:
@@ -116,21 +119,26 @@ Honest caveats about this mapping, to keep the docs from overselling realism:
 - **Stage 1 Isp is the F-1 *vacuum* value (304 s) applied from sea level.** Real F-1 climbs
   265 → 304 s as ambient pressure falls, so the game *overstates* stage-1 Δv by up to 528 m/s
   (the §3 bracket: 3,380 m/s at sea-level Isp against 3,908 m/s at vacuum Isp) and the shipped
-  1.13× margin partly rests on that generosity. Altitude-dependent Isp
+  1.33× margin partly rests on that generosity. Altitude-dependent Isp
   (`Isp = Isp_sea + (pe/pa − 1)·Ae/ṁ·g0`) would be the physically honest fix, and needs only an
   exit-pressure constant.
 - **The old stage-1 number was 263 s**, close to the real sea-level value — and the old stack still
   made orbit. The change to 304 s is not what rescued the mission; the propellant loads and stage 2
-  (12,000 → 16,000 kN, 340 → 415 s) were.
-- **Upper-stage TWR is not a failure condition in vacuum**, but stage 3 now spans both regimes:
-  0.19 g on Earth, 4.2 g_moon at the 59 t LOI mass, 7.0 g_moon at the 35 t landing mass, and
-  1,905 s of full-throttle burn available. Hovering the lander takes 15% throttle. See
-  [mission-design.md](mission-design.md) for why that is survivable.
-- **Stage 2's `dry: 90` t is 2.5× the real S-II** and `fuel: 1,200` t is 2.7× — the game's stack is
-  heavier and thirstier than Apollo's, which is what the 3,433 t ignition mass buys. Real hardware
-  gets to orbit with 2,938 t; the game needs its extra mass because the descent has to be paid for
-  out of the same three stages, and because the autopilot is not as good at steering as the Apollo
-  guidance computer.
+  (12,000 → 24,000 kN, 340 → 415 s) were.
+- **Upper-stage TWR is not a failure condition in vacuum**, but the two lunar stages are chosen for
+  the Moon, not for Earth: at a full 50 t at PDI the descent engine gives 4.7 g_moon and hovers at
+  a fifth of throttle; the ascent engine lifts its own 19 t off the surface at 5.8 g_moon — far
+  from Apollo's 1.6 g, and deliberately so: at 120 kN the spiral to orbit spends half its propellant
+  fighting gravity and the terminal phase died 2.9 km short of the dock with an empty tank
+  (measured). Neither needs to be launch-class. The CSM engine — 0.18 g next to the Saturn on
+  Earth — still out-thrusters lunar gravity 1.06× at the 378 t LOI mass, which is why the LOI burn
+  is flown at full throttle from periselene. See [mission-design.md](mission-design.md) for how
+  the burn is timed.
+- **Stage 2's `dry: 90` t is 2.5× the real S-II** and `fuel: 1,800` t is 4.1× — the game's stack is
+  heavier and thirstier than Apollo's, which is what the 4,898 t ignition mass buys. Real hardware
+  gets to orbit with 2,938 t; the game needs its extra mass because the round trip — descent,
+  ascent, docking, TEI — has to be paid for out of the same stack, and because the autopilot is
+  not as good at steering as the Apollo guidance computer.
 - `CD_AREA = 28 m²` is the stack's nose-on drag area below Mach 0.8 — an axial coefficient of 0.357
   on the 10 m body. The rest of the airframe's behaviour in air (drag rise, lift, fins, static margin,
   the 0.5 g side-load limit and its strain rule) is in [atmosphere.md](atmosphere.md). The model is statically stable with

@@ -48,6 +48,9 @@ const white = toon({ color: PALETTE.hull, gradientMap: RAMP_HARD });
 white.emissive = new THREE.Color(0x2c3036);
 const black = toon({ color: PALETTE.dark });
 const shield = toon({ color: 0x6b4a34 });        // ablator brown
+/* The LM's polyimide foil: amber metal, darker and warmer than the white rocket it rides on top of,
+   with the same low emissive floor the hull has so the chase camera does not lose it in Earth shadow. */
+const gold = toon({ color: 0x8f7434, gradientMap: RAMP_HARD }); gold.emissive = new THREE.Color(0x241d10);
 const glass = toon({ color: 0x17304a }); glass.emissive = new THREE.Color(0x0a1c30);   // window glass: deep blue, never quite black
 const frame = toon({ color: 0x2b3038 });        // window and hatch frames, RCS ports
 const silver = toon({ color: PALETTE.silver, gradientMap: RAMP_HARD });
@@ -410,6 +413,90 @@ function decal(r, z0, z1, az, width, map) {
   stages[2].engines = [[0, 0]];
 }
 
+/* ---- stages 3 and 4 — the lunar module, stacked ABOVE the command module ----
+   The one layout where the LM can land on its own feet and the capsule still ride the primary
+   engine: the lander straddles the CM's apex, soles (LM_FOOT_Z, js/stations.js) hanging down past
+   the heat shield, its crew tunnel reaching down to the CM's docking rim. The descent stage is the
+   octagonal foil-wrapped box with the landing legs; the ascent stage is the cabin on top, and its
+   little bell sits recessed INSIDE the descent engine's skirt (Apollo's own arrangement — 0.09 u
+   of radial clearance, and the two exit planes 29.15/29.3 are different planes, so the coplanar
+   gate cannot see them). Legs are built deployed: Apollo's unfolded once and stayed; there is no
+   setGear for them, and gear.js never asks.
+
+   The 3-row test stacks (tools/mission-sim.mjs overrides SPECS with its own literals) have no LM
+   at all, so this whole block is guarded on the row count. */
+if (stages.length > 3) {
+  const g3 = stages[3].meshes, g4 = stages[4].meshes;
+
+  /* descent stage: octagonal tank block +29.7 .. +31.35, bell to +29.3 */
+  g3.add(cyl(1.72, 1.72, 1.65, 30.525, gold, 8, true));
+  g3.add(cyl(1.76, 1.76, 0.16, 29.78, tone, 8));              // aft frame at the tank's foot
+  g3.add(cyl(1.76, 1.76, 0.16, 31.27, tone, 8));              // and the deck the cabin bolts to
+  {
+    const dk = fuse(black, { cast: true });
+    for (const azd of [0, 90, 180, 270]) {                    // RCS quads on the four flat faces
+      const az = azd * Math.PI / 180, r = 1.72 * Math.cos(Math.PI / 8) + 0.06;
+      dk.add(new THREE.BoxGeometry(0.34, 0.34, 0.3), r, 0, 30.9, 0, 0, 0, az);
+      for (const d of [-0.11, 0.11]) dk.add(zcyl(0.05, 0.08, 0.4, 8), r + 0.05, d, 30.9, 0, 0, 0, az);
+    }
+    dk.into(g3);
+  }
+  const db = bell(0.30, 0.68, 1.4, 30.0); g3.add(db); dressBells(g3, [db]);   // exit +29.3
+
+  /* landing legs, hinged at the tank's foot, feet 4.4 u below on LM_FOOT_Z — the plane
+     js/physics.js scores contact (CONTACT_Z[3]). Each: main strut, a fore-brace, and a 0.8 u
+     footpad whose soles sit exactly at contact, out past the heat shield's widest ring (r 1.33):
+     nothing of the capsule is under a foot. */
+  {
+    const A = new THREE.Vector3(), B = new THREE.Vector3(), D = new THREE.Vector3(), YAX = new THREE.Vector3(0, 1, 0);
+    const leg = (mat, ra, za, rb, zb, r) => {                 // a strut from (ra,0,za) to (rb,0,zb); cylinder axis is Y → map Y onto the strut
+      A.set(ra, 0, za); B.set(rb, 0, zb); D.subVectors(B, A);
+      const m = new THREE.Mesh(new THREE.CylinderGeometry(r, r, D.length(), 8), mat);
+      m.position.copy(A).addScaledVector(D, 0.5);
+      m.quaternion.setFromUnitVectors(YAX, D.clone().normalize());
+      m.castShadow = true; outline(m); g3.add(m); return m;
+    };
+    for (let i = 0; i < 4; i++) {
+      const az = i * Math.PI / 2 + Math.PI / 4, c = Math.cos(az), s = Math.sin(az);
+      leg(silver, 1.85, 30.0, 1.6, 25.72, 0.10);              // main strut (hinge bracket to foot centre)
+      leg(silver, 1.7, 29.78, 1.55, 26.6, 0.055);             // fore-brace
+      const pad = new THREE.Mesh(new THREE.CylinderGeometry(0.65, 0.65, 0.14, 16), tone);
+      pad.rotation.x = Math.PI / 2;                           // the disc lies in the ground plane, not standing up
+      pad.position.set(c * 1.6, s * 1.6, 25.67); pad.castShadow = true; outline(pad); g3.add(pad);   // sole at 25.6 = LM_FOOT_Z
+      const hng = new THREE.Mesh(new THREE.CylinderGeometry(0.14, 0.14, 0.34, 10), black);
+      hng.quaternion.setFromUnitVectors(YAX, new THREE.Vector3(-s, c, 0));   // hinge pin horizontal, tangential
+      hng.position.set(c * 1.85, s * 1.85, 30.0); g3.add(hng);
+    }
+  }
+  stages[3].tailZ = TAIL_Z[3];
+  stages[3].engines = [[0, 0]];
+
+  /* ascent stage: the crew cabin +29.15 (bell exit) .. +33.4, and the docking tunnel that spans
+     down to the CM rim at +28.66. Cabin 31.35 .. 33.4: a gold octagon with the two triangle-front
+     windows the LM is known by, the hatch, and the tunnel collar. */
+  g4.add(cyl(1.0, 1.12, 2.05, 32.375, gold, 8, true));
+  g4.add(cyl(1.16, 1.16, 0.14, 31.42, tone, 8));              // its lower frame
+  g4.add(cyl(0.34, 0.34, 2.6, 30.0, silver, 16, true));       // docking tunnel +28.7 .. +31.3
+  g4.add(cyl(0.56, 0.56, 0.16, 31.24, silver, 16));           // tunnel collar at the cabin floor
+  g4.add(cyl(0.5, 0.5, 0.14, 28.78, silver, 16));             // and the capture ring at the CM end
+  {
+    const gl = fuse(glass, { edge: false }), dk = fuse(black, { cast: true });
+    for (const azd of [90, 270]) {                            // the faceted front: one window per bow face
+      const az = azd * Math.PI / 180;
+      gl.add(new THREE.PlaneGeometry(0.44, 0.3), 1.08, 0, 32.7, 0, 0, 0, az);
+    }
+    for (const azd of [45, 225]) {                            // hatch outline and RCS on the flanks
+      const az = azd * Math.PI / 180, r = 1.1 * Math.cos(Math.PI / 8) + 0.05;
+      dk.add(new THREE.BoxGeometry(0.3, 0.44, 0.05), r, 0, 32.35, 0, 0, 0, az);
+      dk.add(new THREE.BoxGeometry(0.26, 0.26, 0.26), r, 0, 31.9, 0, 0, 0, az);
+    }
+    gl.into(g4); dk.into(g4);
+  }
+  const ab = bell(0.22, 0.50, 0.9, 29.6); g4.add(ab); dressBells(g4, [ab]);   // exit +29.15, inside the descent skirt
+  stages[4].tailZ = TAIL_Z[4];
+  stages[4].engines = [[0, 0]];
+}
+
 /* ---- landing gear: four legs on the S-IVB's aft skirt, at 0°, 90°, 180° and 270° ----
    This stage is what lands on the Moon, and it used to do it standing on its engine bell. Each leg
    is a strut hinged at the foot of the tank: stowed it lies up the hull like a fairing (0.09 u
@@ -472,21 +559,23 @@ setGear(0);
 export const lesGroup = new THREE.Group(); lesGroup.name = 'les';
 stages[2].meshes.add(lesGroup);
 {
-  lesGroup.add(cyl(.50, .50, .50, 28.8, black, 14));          // seat on the CM apex +28.55 .. +29.05
-  lesGroup.add(cyl(.16, .16, 5.3, 31.6, black, 8, true));     // mast +28.95 .. +34.25
+  /* Every piece sits +4.7 u higher than Apollo's: with the LM on top of the CM (stages 3-4), the
+     escape tower launches from the LM roof, not the capsule apex. Tip at +42.3 = LES_TIP_Z. */
+  lesGroup.add(cyl(.50, .50, .50, 33.5, black, 14));          // seat on the LM roof +33.25 .. +33.75
+  lesGroup.add(cyl(.16, .16, 5.3, 36.3, black, 8, true));     // mast +33.65 .. +38.95
   for (let i = 0; i < 4; i++) {                               // four tower legs, seat rim to motor base
     const a = i * Math.PI / 2;
-    const leg = cyl(.07, .07, 5.2, 31.55, black, 5);
+    const leg = cyl(.07, .07, 5.2, 36.25, black, 5);
     leg.position.x = Math.cos(a) * 0.37; leg.position.y = Math.sin(a) * 0.37;
     leg.rotateOnWorldAxis(new THREE.Vector3(-Math.sin(a), Math.cos(a), 0), -0.023);
     lesGroup.add(leg);
   }
-  lesGroup.add(cyl(.34, .55, 2.4, 35.4, white, 16, true));    // escape motor +34.2 .. +36.6
-  lesGroup.add(cyl(.56, .56, 0.3, 34.4, black, 16));          // nozzle skirt
-  const nose = new THREE.Mesh(new THREE.ConeGeometry(.34, 1.1, 16), black);   // tip +37.6, the top of the vehicle
-  nose.rotation.x = Math.PI / 2; nose.position.z = 37.05; nose.castShadow = true; outline(nose); lesGroup.add(nose);
+  lesGroup.add(cyl(.34, .55, 2.4, 40.1, white, 16, true));    // escape motor +38.9 .. +41.3
+  lesGroup.add(cyl(.56, .56, 0.3, 39.1, black, 16));          // nozzle skirt
+  const nose = new THREE.Mesh(new THREE.ConeGeometry(.34, 1.1, 16), black);   // tip +42.3, the top of the vehicle
+  nose.rotation.x = Math.PI / 2; nose.position.z = 41.75; nose.castShadow = true; outline(nose); lesGroup.add(nose);
   const canard = new THREE.Shape();
-  canard.moveTo(.34, 34.9); canard.lineTo(1.05, 35.5); canard.lineTo(1.05, 36.2); canard.lineTo(.34, 36.2);
+  canard.moveTo(.34, 39.6); canard.lineTo(1.05, 40.2); canard.lineTo(1.05, 40.9); canard.lineTo(.34, 40.9);
   const canardGeo = new THREE.ExtrudeGeometry(canard, { depth: .1, bevelEnabled: false }); canardGeo.translate(0, 0, -.05);
   for (let i = 0; i < 2; i++) {
     const arm = new THREE.Group(); arm.rotation.z = i * Math.PI;

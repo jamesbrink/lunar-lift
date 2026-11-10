@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { VS, RE, EARTH_SPIN } from './constants.js';
-import { S, getHeat, getCooking, getState, getSimTime, activeStage } from './physics.js';
+import { S, getHeat, getCooking, getState, getSimTime, activeEngine } from './physics.js';
 import { BELL_SETS } from './exhaust-emit.js';
 import { spawnParticle } from './exhaust-pool.js';
 
@@ -175,7 +175,7 @@ export function updateEntryFx() {
   if (sp < 1e-6) { mesh.visible = false; return; }
   _v.multiplyScalar(1 / sp);
   /* The body as the air meets it: a cylinder from the active tail to the nose. */
-  const i = activeStage();
+  const i = activeEngine();
   const tail = i >= 0 ? BELL_SETS[i].tailZ : CM_TAIL_Z, rad = (i >= 0 ? BELL_SETS[i].hullR : CM_R) * VS;
   const half = 0.5 * (NOSE_Z - tail) * VS;
   _ax.copy(Z).applyQuaternion(S.q);
