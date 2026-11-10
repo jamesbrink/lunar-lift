@@ -52,7 +52,15 @@ function batcher() {
         g.setAttribute('position', new THREE.Float32BufferAttribute(b.pos, 3));
         g.setAttribute('normal', new THREE.Float32BufferAttribute(b.nrm, 3));
         const m = new THREE.Mesh(g, b.mat);
-        m.castShadow = shadows; m.receiveShadow = shadows;
+        /* The red lattice casts but does not RECEIVE. Its members are 0.6-1.8 m across and a shadow
+           texel at the pad is 1.46 m, so what one strut dropped on another was never a shape; and
+           every pair of members that happen to stand one shadow bias apart along the light is a
+           compare decided by rounding noise — under a thresholded shadow each such texel drags a
+           stretch of hard edge with it (tools/flicker-test.mjs 'pad close': 62-103 unstable pixels
+           and 15-23 flips with the lattice receiving, 0-19 and under 10 without). The moving parts
+           at the vehicle's foot (hold-downs, mast arms) are the same case. The tower is shaded by
+           its ramp; the ground, the deck, the shaft and the stack take its shadow. */
+        m.castShadow = shadows; m.receiveShadow = shadows && b.mat.name !== 'red';
         if (b.edge) outline(m);
         group.add(m);
       }
@@ -140,8 +148,8 @@ export function buildPad(glowMap) {
     for (let i = 0; i < 4; i++) {
       const a = i * Math.PI / 2, grp = new THREE.Group(), turn = new THREE.Group();
       turn.rotation.z = a;
-      const m = new THREE.Mesh(geo, dark); m.castShadow = m.receiveShadow = true; outline(m); turn.add(m);
-      const c = new THREE.Mesh(cap, red); c.position.set(9.9, 0, 2.9); c.castShadow = c.receiveShadow = true; turn.add(c);   // the release housing on the heel
+      const m = new THREE.Mesh(geo, dark); m.castShadow = true; outline(m); turn.add(m);
+      const c = new THREE.Mesh(cap, red); c.position.set(9.9, 0, 2.9); c.castShadow = true; turn.add(c);   // the release housing on the heel
       grp.add(turn); grp.userData.cx = Math.cos(a); grp.userData.cy = Math.sin(a);
       g.add(grp); holdDowns.push(grp);
     }
@@ -226,7 +234,7 @@ export function buildPad(glowMap) {
     turn.position.set(-11 + Math.cos(az) * 1.2, y + Math.sin(az) * 1.2, 7.3); turn.rotation.z = az;
     const part = (gw, gd, gh, mat, x, zz, edge) => {
       const m = new THREE.Mesh(boxGeo(gw, gd, gh), mat); m.position.set(x, 0, zz);
-      m.castShadow = m.receiveShadow = true; if (edge) outline(m); fold.add(m);
+      m.castShadow = true; if (edge) outline(m); fold.add(m);
     };
     part(10.0, 0.9, 0.9, steel, 5.0, 0, true);
     part(0.35, 1.7, 1.7, dark, 10.1, 0, true);                         // the umbilical plate

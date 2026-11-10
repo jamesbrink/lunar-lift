@@ -320,6 +320,13 @@ air. Corollaries, each read off the code or measured:
   (the tree before this: 63-78 and 0-3). What is left is single MSAA samples on silhouettes — the
   view matrix still changes in its last bits every frame — and they count as "strong" more often
   now only because white hardware against black ink is a bigger step than grey was.
+- **A thresholded shadow needs receivers a texel can describe.** Wherever a receiver stands exactly
+  one shadow bias behind a caster the depth compare is decided by rounding noise; a soft filter
+  averaged that away, a cut edge follows it, and one flipped texel moves ~50 px of edge at close
+  range. The pad's red lattice (members thinner than the 1.46 m texel) and the small moving parts at
+  the vehicle's foot therefore cast but do not receive: 'pad close' went from 62-103 unstable
+  pixels to 0-19. The residual on any idle view is the camera: its orientation still turns ~4e-8
+  rad a frame on the pad (measured from `matrixWorld`), enough to flip single MSAA samples.
 - **A mesh inside an invisible group is still `visible`.** The stowed parachutes sat at the origin
   of their hidden cluster, all three canopies in one place, and `tools/flicker-test.mjs` (which
   reads `o.visible`, not the ancestors') reported 23 coplanar pairs. Pose hidden things too.
