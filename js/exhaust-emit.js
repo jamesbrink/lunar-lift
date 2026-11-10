@@ -176,7 +176,7 @@ function spawnPlume(set, pos, quat, vel, throttle, simDt, onMoon) {
   emitAcc += set.rate * throttle * simDt;              // parcels/s: the mass flow at rendering resolution
   let n = emitAcc | 0; emitAcc -= n;
   if (n > 240) n = 240;                     // a whole second charged in one frame (warp) thins instead of flooding the pool
-  /* review3/04/06: ±74 m/s per axis of turbulence at the exit scattered the column into a
+  /* ±74 m/s per axis of turbulence at the exit scattered the column into a
      300 m-wide confetti cone — consecutive parcels left the SAME streamline 25 m apart sideways
      within 0.2 s, which no sane sprite can bridge. The bell divergence (b.th ≈ 0.28 rad ≈ 16°)
      is the real cone; this jitter only has to keep it from looking like a solid sheet —
@@ -216,7 +216,7 @@ function spawnPlume(set, pos, quat, vel, throttle, simDt, onMoon) {
     /* `rate` is a rendering-resolution knob, not mass flow (that lives in js/physics.js), so dropping
        the throttle drops the parcel count and the trail came out as separated beads at 40 %. Give the
        survivors proportionally more radius: the same exhaust column, drawn with fewer sprites.
-       The base was raised 0.8→1.6 m for review3/04/06: with the sprite now band-quantised (crisp
+       The base is 1.6 m, not 0.8: with the sprite now band-quantised (crisp
        disc out to 0.63 of its quad instead of a glowing point with a gradient skirt), the old
        birth radius put hard gaps between consecutive silhouettes — at the S-IC's 900/s the parcels
        leave 3.2 m apart at 2.9 km/s, and a banded silhouette is only ≈3× the parcel radius, so
@@ -226,7 +226,7 @@ function spawnPlume(set, pos, quat, vel, throttle, simDt, onMoon) {
     /* low throttle also shortens the parcel's life — slow flow does not carry soot to orbit.
        On the Moon the multiplier buys the long, bright, lingering spray of Apollo 11's ascent. */
     const life = (1.1 + Math.random() * 1.2) * (0.6 + 0.4 * throttle) * (onMoon ? 2.2 : 1);
-    /* Below 40 km the trail is the whole ascent read (review2/04), and the back-projection above is
+    /* Below 40 km the trail is the whole ascent read, and the back-projection above is
        the one place that could still starve it: tau grows with simDt, so a 1 s frame at warp billed
        the oldest parcels up to 1 s of age at birth and they died before they were ever drawn. The
        rope regime floors REMAINING life at 0.9 s — age and pInv stay honest, so the fade shape is
@@ -267,7 +267,7 @@ export function ejectaEvents(gx, gy, gz, nx, ny, nz, rx, ry, rz) {
   hx /= hl; hy /= hl; hz /= hl;
   /* Engine height above the ground underneath, metres: the one number that sets BOTH how much
      dust is cut and how far it can be thrown (surface momentum flux ∝ 1/footprint-area). The
-     round-5 review: at ~9 m the parcels sprinted to the horizon as an even scatter of uniform
+     measured in review: at ~9 m the parcels sprinted to the horizon as an even scatter of uniform
      bokeh discs ("not anchored to the engine, no ballistic arcs"), and at 200 m the sheet was
      nearly absent. Same defect both times: speed rode the deflected jet's own tl (2.4-4.5 km/s
      before the cap — the measured figure below) so every parcel drew the far field, and the
@@ -299,7 +299,7 @@ export function ejectaEvents(gx, gy, gz, nx, ny, nz, rx, ry, rz) {
          (10° + 58°·r²) drew a MEDIAN of 24.5° — with the cubic speed law that put the common
          parcel on an apex of tens of metres and the fast ones (v·sinβ = 27 m/s at 68°) on
          1.4 km arcs: the 6 m capture frame showed the field as cream bokeh drifting at CAMERA
-         height around the vehicle, the same defect review 4 called horizon scatter, just
+         height around the vehicle, the same defect as the horizon scatter, just
          gathered closer. Apollo's dust was a low radial sheet hugging the ground — apex is
          v²sin²β/2g_moon with g = 1.62, and 30° cubic caps the median apex at ~1 m with the
          top parcel (65 m/s @ 29°) at ~350 m, 1.7 km out, where it reads as distance, not fog. */

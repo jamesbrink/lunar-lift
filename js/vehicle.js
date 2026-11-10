@@ -58,7 +58,7 @@ export function detachStage(mesh, pos, quat) {
 
 export function addDebris(entry) {
   debris.push(entry);
-  /* Staging-seam puffs (review3/05/06 ask): the trail flag marks exactly one event in this
+  /* Staging-seam puffs: the trail flag marks exactly one event in this
      game — separateStage hands over a flying booster (separateLES and the explosion never set
      it). A real separation seam bursts a short ring of grey smoke with the flash and the
      sparks; 6-10 puffs, 0.4-0.8 s, dark and LOW ALPHA (SM_SEAM's fillBuffers pass), drawn as

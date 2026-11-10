@@ -351,7 +351,7 @@ export function separateStage() {
     S.v.clone().addScaledVector(lat, 0.02 + Math.random() * 0.05).add(new THREE.Vector3().randomDirection().multiplyScalar(0.015)),
     thin ? 0.25 + Math.random() * 0.2 : 0.6 + Math.random() * 0.5, [1, .8, .4], thin ? 2.5 + Math.random() * 2 : 10 + Math.random() * 8, 0);
   /* The 26 soft puffs alone read as "a single small soft white ellipse, no debris or spark"
-     (review2/14). A real separation event also throws hot hardware: 9 spark parcels — smoke = 0
+     in review. A real separation event also throws hot hardware: 9 spark parcels — smoke = 0
      so they draw additive like the explosion's sparks, 2 m at birth, 1.4–2.0 s — spread radially
      in the separation PLANE (⊥ the stack axis: `lat` and axis×lat are an orthonormal pair there)
      at 20–50 m/s, the range the CSM's push-off motors + spring blowout actually clears the

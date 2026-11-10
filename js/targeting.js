@@ -7,7 +7,7 @@ const AIR_R2 = (C.RE + 420) ** 2;
 
    This is the readout that the translunar coast otherwise leaves invisible. Nothing in the game
    punishes a 5 km/s pass at the Moon, and the aim is tight: measured with tools/mission-sim.mjs,
-   1e-3 rad of launch phase is worth hundreds of km of periselene, and periselene sets what LOI and
+   1e-3 rad of launch phase is worth ~130 km of periselene, and periselene sets what LOI and
    the landing cost. You cannot steer toward a number you cannot see, so this propagates the current
    state forward through the same gravity the integrator uses and reports the closest lunar approach.
 
@@ -15,31 +15,29 @@ const AIR_R2 = (C.RE + 420) ** 2;
    because "what will happen" in this game is its own 0.1 s integration. physStep advances simTime,
    evaluates gravity at the advanced time, then v += a·dt, then p += v·dt; that is what the loop
    below does, at DTPHYS, and from the shipped coast-start state it and a real physStep coast both
-   arrive at 204.43 km (run headless in Node). Two alternatives were measured from that same state
+   arrive at 345.66 km (run headless in Node). Two alternatives were measured from that same state
    and rejected:
-     - converged integration (velocity Verlet: 299.9 km at dt 0.1 s, 300.4 km at 1 s) where the game
-       flies 204.4 km. The Moon's position is sampled 0.05 s off the state on every step, which is a
-       coherent perturbation, and a lunar flyby amplifies that into ~95 km.
+     - converged integration (velocity Verlet at dt 0.1 s: 443.6 km) where the game flies 345.7 km.
+       The Moon's position is sampled 0.05 s off the state on every step, which is a coherent
+       perturbation, and a lunar flyby amplifies that into ~98 km.
      - a coarser coast step, which is what the mission tool used to take: the game's scheme at
-       dt=1 s predicts an impact 590 km under the surface. Ten times cheaper, 794 km wrong.
-   Running the game's own scheme is also what keeps this affordable: 1 + 1 gravityAt per step.
+       dt = 1 s predicts an impact 474.5 km under the surface. Ten times cheaper, ~820 km wrong.
+   Running the game's own scheme is also what keeps this affordable: one gravityAt per step.
 
-   The propagation is incremental because a 3.4-day coast is 2.9 million steps and will not fit in a
-   frame: `updateAim` spends a fixed step budget per frame and publishes the best so far. A coast
+   The propagation is incremental because a multi-day coast is millions of 0.1 s steps and will not
+   fit in a frame: `updateAim` spends a fixed step budget per frame and publishes the best so far. A coast
    does not change the answer (the trajectory is the trajectory), so it re-seeds only when something
    has actually pushed the vehicle, when the predicted encounter has been passed, or when the result
    has gone stale.
 
    CORRIDOR is the band inside which the mission has been flown to a soft touchdown, measured with
-   tools/mission-sim.mjs across launch phases (periselene -> result): 597 km 2.6 m/s, 464 km
-   2.8 m/s, 334 km 3.4 m/s, 205 km (the window) 4.2 m/s, 173 km 4.4 m/s, 142 km 4.8 m/s — all WON
-   with 6.8-7.6 t spare — then 110 km and 79 km LOST (tank dry, 81 and 72 m/s). The low edge is a
-   cliff, not a slope, so the band stops at the last flight that landed. It is a landing-safety
-   band for that autopilot, not a promise about *where* you land: that also depends on when you
-   brake. */
+   tools/mission-sim.mjs across launch phases (periselene -> result; the table is in
+   js/constants.js at MOON_PHASE0): 745 km 2.8 m/s, 477 km 2.8 m/s, 346 km (the window) 3.3 m/s,
+   218 km 4.1 m/s, 123 km 4.9 m/s — all WON with 6.6-7.6 t spare — then 110 km and 91 km LOST with
+   the tank run down (91 km: 71 m/s). The low edge is a cliff, not a slope, so the band stops at
+   the last flight that landed. It is a landing-safety band for that autopilot, not a promise
+   about *where* you land: that also depends on when you brake. */
 
-/* Widened to the measured edges after the window was re-centred: a sweep of launch phases landed
-   everything from 745 km down to 123 km (2.6-4.9 m/s); 110 km and 91 km ran the tank dry. */
 export const CORRIDOR = { lo: 120, hi: 745 };   // 120: the 123 km flight lands, and targeting reads it as 122.0 km
 
 export const aim = { status: 'na', altKm: NaN, tMet: NaN, corridor: false, steps: 0 };
