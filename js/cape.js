@@ -82,7 +82,7 @@ function batcher() {
   };
 }
 
-export function buildCape(pad) {
+export function buildCape() {
   const g = new THREE.Group();
   g.name = 'cape';
   g.scale.setScalar(PAD_SCALE);
@@ -102,11 +102,10 @@ export function buildCape(pad) {
   };
   const mat = daylit(toon({ vertexColors: true }));
   mat.name = 'cape';
-  /* The launch complex's own ground slabs (js/pad.js: hardstand, crawlerway, roads) are ground too:
-     left on the bare ramp they glowed tan beside a dark field all night. The tower and the vehicle
-     keep their light — they are floodlit. */
-  if (pad) pad.traverse((o) => { if (o.isMesh && ['hard', 'gravel', 'asphalt'].includes(o.material.name)) daylit(o.material); });
-
+  /* The launch complex's own ground slabs (js/pad.js: hardstand, crawlerway, roads) are NOT touched
+     here: they are padware materials (js/toon.js), which already go dark with the sun and take the
+     floodlights. Hanging this module's onBeforeCompile on them replaced padware's own and left its
+     light uniforms unbound — the whole apron drew black in daylight. */
   const B = batcher();
   const cube = new THREE.BoxGeometry(1, 1, 1);
   const SINK = 3;                                               // build units every solid goes into the ground

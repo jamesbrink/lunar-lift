@@ -431,7 +431,7 @@ export function initWorld(target) {
   pad.position.copy(PAD_UP).multiplyScalar(RE);
   pad.quaternion.setFromRotationMatrix(new THREE.Matrix4().makeBasis(PAD_EAST, PAD_NORTH, PAD_UP));
   earth.add(pad);
-  earth.add(buildCape(pad));       // the rest of the Cape: js/cape.js welds itself the same way       // the rest of the Cape: js/cape.js welds itself the same way
+  earth.add(buildCape());       // the rest of the Cape: js/cape.js welds itself the same way       // the rest of the Cape: js/cape.js welds itself the same way
 
   scene.fog = new THREE.FogExp2(SKY_DAY.getHex(), 0.002);
   updateSky(PAD_POS);
