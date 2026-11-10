@@ -147,8 +147,9 @@ One concern per file. Line counts are `wc -l` at the commit that last touched th
   a TLI at the first perigee after insertion arrives at the Moon).
 - `js/targeting.js` (119 lines) — the predicted lunar aim: propagates the live state forward through
   `gravityAt` at the game's own 0.1 s step and publishes the closest lunar approach, incrementally
-  (a fixed step budget per frame) and only re-seeding after thrust, past the predicted encounter, or
-  when the result goes stale. Run headless from the recorded coast-start state it reproduces the
+  (a fixed step budget per frame) and only re-seeding after thrust or past the predicted encounter —
+  a coast does not change its own answer, and a timed restart used to loop the readout through
+  "best so far" values. Run headless from the recorded coast-start state it reproduces the
   certified flights' periselene to about 1 km (476.5 / 345.7 / 217.0 km against the tool's
   477 / 346 / 218), which means it predicts what this game will do rather than the converged two-body
   answer.
@@ -232,7 +233,8 @@ One concern per file. Line counts are `wc -l` at the commit that last touched th
   on the way down to the Moon and the parachute calls on the way home), the end overlay and the
   landing debrief with its stars and score.
 - `js/navball.js` (499 lines) — the KSP-style attitude ball: an orthographic view of the sky from
-  the nose, prograde/retrograde markers, apsis markers, the Moon as a target.
+  the nose, prograde/retrograde markers, apsis markers, the Moon as a target. North is the +Y spin
+  axis.
 - `js/ribbon.js` (213 lines) — a polyline as a screen-space ribbon (a 2 px feathered core under a 9 px
   additive halo, per-point colour and opacity) rather than a thin `Line`, so it stays legible against
   both the planet and black space.
@@ -300,7 +302,13 @@ of vertical; further over is `TIPPED OVER` and lost. Two stars at 12 m/s and 20�
 4 m/s and 8°. The score is `1000 − 25 × speed (m/s) − 6 × tilt (°) + 40 × propellant left (t)`, and
 the best one is kept in the browser. On the way down the `NEXT` line under the clock gives the
 braking deadline: stopping from the current speed at full thrust takes v²/2(a − g) of path, and it
-says `BRAKE NOW` when the height in hand falls under 1.15 times that.
+says `BRAKE NOW` when the height in hand falls under 1.15 times that. The same line times the
+translunar burn: in a parking orbit it counts down (`translunar burn in m:ss`) to the moment the
+Moon leads the ship by `TLI_LEAD = 2.7742` rad, the lead at which the certified flight lights its
+injection burn. It is a cue, not a solution — it puts a hand-flown burn in the right half-hour and
+the aim readout and a trim burn do the rest. Recorded with the change that added it (commit
+213226d, not re-flown for this document): the first three opportunities gave lunar passes of 194,
+348 and −68 km, where the old advice to burn "at periapsis" gave 92,521 km.
 
 Bringing the command module home is the other ending. With every stage dropped (X on the CSM) the
 capsule flies alone. From orbital speed it settles heat shield first by itself; from lunar return
@@ -331,8 +339,8 @@ first; three stars need the Moon. Details: `docs/reference/mission-design.md`.
   346 km on the shipped window, against the simulation's 346 km — but it answers "how hard will the
   encounter be", not "where will I touch down", and it needs 865 frames of its step budget to finish
   after each manoeuvre (counted headless; about 14 s at 60 fps, not re-timed in a browser). It is
-  green between 125 and 745 km, the measured edges of the band the tool's autopilot lands from
-  (123 km still landed and reads red by 3 km; 110 km and 91 km are lost). Below 420 km the
+  green between 120 and 745 km: the band the tool's autopilot lands from (123 km, read as 122.0, to
+  745 km), with the floor set between the last landing and the first loss (110 km; 91 km is lost too). Below 420 km the
   prediction includes drag — its source records a coast from a 150 km perigee whose lunar pass
   moved 227 km once drag was counted.
   Nothing marks the launch window itself; the player finds it by waiting and warping.
@@ -348,6 +356,10 @@ first; three stars need the Moon. Details: `docs/reference/mission-design.md`.
 - **The headless tool lands on the datum sphere.** In the browser contact is against the drawn
   relief (`groundHeight` / `moonGroundHeight`); `tools/mission-sim.mjs` injects no terrain, so its
   touchdown speed is for a Moon with no hills.
+- **Open, known and not fixed** (from the playtest that produced the guide fixes): stranded states —
+  a capsule left in orbit, a ship out of propellant on an escape path — have no end card; staging in
+  vacuum still shows soft discs; the map shows dark blotches near the terminator; cloud outlines
+  shimmer by about a pixel.
 - **No way home from the surface.** A landed mission ends at touchdown: there is no lunar ascent
   stage and no TEI in the game. Re-entry and splashdown exist for flights that never landed — from
   Earth orbit, or round the Moon and back.

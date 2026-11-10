@@ -181,11 +181,11 @@ shipped configuration at eleven phases:
 | 4.9197044 (+1e-3) | 218 km | WON | 4.1 m/s | 7.4 t | 16,248 m/s | 217 km, green |
 | 4.9199544 (+1.25e-3) | 186 km | WON | 4.4 m/s | 7.5 t | 16,241 m/s | green |
 | 4.9202044 (+1.5e-3) | 154 km | WON | 4.7 m/s | 7.5 t | 16,234 m/s | green |
-| 4.9204544 (+1.75e-3) | 123 km | WON | 4.9 m/s | 7.6 t | 16,227 m/s | 122 km, red |
+| 4.9204544 (+1.75e-3) | 123 km | WON | 4.9 m/s | 7.6 t | 16,227 m/s | 122 km, green |
 | 4.9207044 (+2e-3) | 91 km | **LOST** | 71 m/s | 0.4 t | 17,160 m/s | 91 km, red |
 
 (The aim column is `js/targeting.js` run headless from the coast-start state where a number is
-given, and `CORRIDOR`'s 125–745 km test applied to the tool's periselene where it is not.)
+given, and `CORRIDOR`'s 120–745 km test applied to the tool's periselene where it is not.)
 
 So about **130 km of periselene per 1e-3 rad** (1e-3 rad is 376 s of lunar motion at
 `MOON_RATE = 2.6617e-6` rad/s), and the band is still **a slope on one side and a cliff on the
@@ -207,17 +207,19 @@ anyone has measured. Two consequences for the game:
   the integrator uses and the orbit panel shows it as `<km> km in <hh:mm:ss>`. From the shipped
   coast-start state the module's values are 345.7 km and MET 295,660.3 s, which the HUD's own
   formatting renders as `346 km in 80:50:12` (run headless; the string on screen has not been
-  read in a browser at this window). It is painted green inside `CORRIDOR = { lo: 125, hi: 745 }`
-  km — the measured edges of the table above. Every flight inside it landed; the 123 km flight
-  landed too and reads red, because the module puts it at 122.0 km. Above 745 km nothing has been
+  read in a browser at this window). It is painted green inside `CORRIDOR = { lo: 120, hi: 745 }`
+  km — the table above: every flight inside it landed, the lowest being the 123 km one, which the
+  module reads as 122.0 km; the floor sits between that and the 110 km flight that was lost (the
+  floor itself is not a flown point). Above 745 km nothing has been
   flown, so red there means "unmeasured", not "you will crash". Below 420 km the prediction now
   includes nose-on drag (`coastDrag`), so an aim read while still in a low parking orbit is no
   longer blind to the air; from the shipped coast start (888 km up) it changes nothing, and the
   numbers below were re-run to confirm that.
   The module runs incrementally — a fixed step budget per frame, 865 `updateAim()` calls from coast
-  start to `done` — and it re-seeds only when the engine has pushed the vehicle, when the predicted
-  encounter has passed, or when the result has gone stale, because a coast does not change the
-  answer. Its per-frame cost (previously 3.5 ms worst, 0.0005 ms idle, in a browser) has not been
+  start to `done` — and it re-seeds only when the engine has pushed the vehicle or the predicted
+  encounter has passed, because a coast does not change the answer. (A 20 s timed re-seed used to
+  sit there too; it looped the readout through "best so far" ranges and under ~43 fps never let a
+  scan finish — recorded in `js/targeting.js`.) Its per-frame cost (previously 3.5 ms worst, 0.0005 ms idle, in a browser) has not been
   re-timed; `gravityAt` gained one term.
 
 ### The readout predicts the game, not the textbook
@@ -448,6 +450,14 @@ calls `BRAKE NOW` when the height in hand falls below 1.15× that.
 
 ## What is not true yet
 
+- **The burn cue is coarse.** In a parking orbit the HUD counts down to the moment the Moon leads
+  the ship by `TLI_LEAD = 2.7742` rad — the lead `tools/mission-sim.mjs` prints at the certified
+  flight's ignition (`ev.tliIgn`: lead 2.7742, 245 km up; re-run here). It puts a hand-flown burn in
+  the right half-hour, no better: the commit that added it records lunar passes of 194, 348 and
+  −68 km on the first three opportunities (its measurement, not repeated here), against 92,521 km
+  for a burn "at periapsis". The aim readout and a trim burn have to do the rest.
+- **Stranded states have no end card.** A capsule left in orbit, or a ship out of propellant on an
+  escape path, flies on with nothing to say the mission is over.
 - **No way home from the surface.** A landed mission ends at touchdown. Lunar ascent and TEI are
   not modelled, so the 18,092 m/s round-trip figure is a reference number, not a game target. The
   re-entry and splashdown that are modelled serve flights that never landed.

@@ -50,7 +50,7 @@ export const MOON_V = new THREE.Vector3().crossVectors(MOON_PLANE_N, MOON_U).nor
    i.e. ~130 km of periselene per 1e-3 rad (376 s of lunar motion at MOON_RATE), a gentle slope on
    the early side and a cliff on the late one, with the window 1.75e-3 rad — eleven minutes — from
    the last late flight that lands. js/targeting.js turns that into a HUD readout, so the aim is
-   no longer invisible; the corridor it paints green (125-745 km) is the landed band.
+   no longer invisible; the corridor it paints green (120-745 km) is the landed band.
    Waiting on the pad and warping advances the Moon, so any other start time can still reach one. */
 export const MOON_PHASE0 = 4.9187044;                      // rad — 281.82° along the lunar orbit
 let moonPhase = MOON_PHASE0;

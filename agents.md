@@ -148,6 +148,13 @@ air. Corollaries, each read off the code or measured:
   (`g.warp(1)`), and never treat index 0 as ×1. `guardWarp()` caps warp by place every frame and
   drops it to ×1 at the Moon's SOI, so a browser test that sets ×1000 in the air does not get it;
   `ff(seconds)` is not capped.
+- `TLI_LEAD = 2.7742` rad is `ev.tliIgn.lead` from the shipped flight (the tool prints `lead` and
+  `altE`). It moves with anything that moves the ascent or the window — `TURN`, the forces,
+  `MOON_PHASE0`, `AIM_PERI` — so re-read it from the tool whenever those change. It is a cue for a
+  hand-flown burn, not a targeting solution.
+- **Open, known and not fixed:** stranded states (capsule left in orbit, out of propellant on an
+  escape path) have no end card; soft discs at vacuum staging; dark blotches near the terminator in
+  the map; about a pixel of shimmer on cloud outlines.
 - **Known limit, not fixed:** in the browser the terrain height under the vehicle is read through
   the planet mesh's drawn rotation, which moves once per rendered frame. At high warp the substeps
   inside a frame see the ground where it was drawn — up to a frame of spin stale. Found in review,
