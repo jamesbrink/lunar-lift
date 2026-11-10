@@ -1,17 +1,17 @@
 import * as THREE from 'three';
 import { SPECS, VS } from './constants.js';
-import { glowTex } from './textures.js';
-import { toon, outline, flameMeshes, PALETTE, RAMP_HARD } from './toon.js';
+import { toon, outline, PALETTE, RAMP_HARD } from './toon.js';
 
-/* The Saturn V as drawn hardware: three stage groups, the launch escape system, and each engine's
-   flame. Nothing here moves or burns — js/vehicle.js poses it every frame and owns the exhaust.
+/* The Saturn V as drawn hardware: three stage groups and the launch escape system. Nothing here moves
+   or burns — js/vehicle.js poses it every frame, and js/flame.js hangs a flame on every engine listed
+   in a stage's `engines`.
 
    Dimensions are real Saturn V at 1 build unit = VS km = 1.4 m (NASA SP-4029,
    docs/reference/spacecraft.md): Ø10.0 m first and second stages (r 3.57), Ø6.6 m S-IVB (r 2.36),
    Ø3.9 m service module. The axis is +z, the state point is z = 0, the F-1 exits are at z = −42 and
    the escape tower's tip at +37.6. Three numbers are contracts with other modules and must not
    drift: each stage's `tailZ` (the exit plane js/vehicle.js emits exhaust from, and which
-   js/camera.js frames by), the engine positions on their bolt circles (BELL_SETS in js/vehicle.js
+   js/camera.js frames by), the engine positions on their bolt circles (BELL_SETS in js/exhaust-emit.js
    restates them for the particle field), and the overall span (pad clearance in js/constants.js).
 
    The look is a cel drawing of the real paint scheme rather than a white tube with stripes: black
@@ -31,7 +31,7 @@ import { toon, outline, flameMeshes, PALETTE, RAMP_HARD } from './toon.js';
 export const rocketGroup = new THREE.Group(); rocketGroup.scale.setScalar(VS);
 export const capsuleGroup = new THREE.Group(); capsuleGroup.name = 'capsule';
 rocketGroup.add(capsuleGroup);
-export const stages = SPECS.map(s => ({ ...s, fuel: s.fuel, separated: false, meshes: new THREE.Group(), tailZ: 0, flames: [], glow: null }));
+export const stages = SPECS.map(s => ({ ...s, fuel: s.fuel, separated: false, meshes: new THREE.Group(), tailZ: 0, engines: [] }));
 
 const SEG = 40;                             // the hull's roundness; 24 showed its facets at the pad camera
 const white = toon({ color: PALETTE.hull, gradientMap: RAMP_HARD });
@@ -44,6 +44,7 @@ const shield = toon({ color: 0x6b4a34 });        // ablator brown
 const silver = toon({ color: PALETTE.silver, gradientMap: RAMP_HARD });
 silver.emissive = new THREE.Color(0x22262b);
 const metal = toon({ color: PALETTE.engine, side: THREE.DoubleSide });
+export const bellMetal = metal;             // every bell: js/vehicle.js warms its emissive while an engine fires
 const ink = toon({ color: PALETTE.dark, side: THREE.DoubleSide });   // paint arcs are open: both faces
 
 function cyl(rt, rb, len, z, mat, seg = SEG, edge = false) {
@@ -138,7 +139,6 @@ function decal(r, z0, z1, az, width, map) {
   }
   stages[0].tailZ = -42;
   stages[0].engines = [[0, 0], ...[0, 1, 2, 3].map(i => { const a = i * Math.PI / 2 + Math.PI / 4; return [Math.cos(a) * 2.35, Math.sin(a) * 2.35]; })];
-  stages[0].flame = { r: 1.2, len: 20, outer: 0xff8a2a, core: 0xfff1c4, glow: 0xffb060 };   // kerosene: orange
 }
 
 /* ---- stage 1 — S-II and the forward cone that hides the S-IVB bell: −11.8 .. +8.6 ---- */
@@ -161,7 +161,6 @@ function decal(r, z0, z1, az, width, map) {
   }
   stages[1].tailZ = -11.8;
   stages[1].engines = engines;
-  stages[1].flame = { r: 0.74, len: 11, outer: 0x5fa8ff, core: 0xeef6ff, glow: 0x9cc8ff };  // hydrogen: pale blue
 }
 
 /* ---- stage 2 — S-IVB, instrument unit, adapter, service and command modules: +6.8 .. +28.6.
@@ -188,7 +187,6 @@ function decal(r, z0, z1, az, width, map) {
   capsuleGroup.add(cyl(1.33, 1.05, 0.34, 26.2, shield, 32, true));  // heat shield, hidden inside the SM until then
   stages[2].tailZ = 6.8;
   stages[2].engines = [[0, 0]];
-  stages[2].flame = { r: 0.86, len: 11, outer: 0x5fa8ff, core: 0xeef6ff, glow: 0x9cc8ff };
 }
 
 /* ---- launch escape system: its own group, so it can leave as a unit. Children carry absolute
@@ -219,19 +217,4 @@ stages[2].meshes.add(lesGroup);
   }
 }
 
-/* One flame per engine, born at its bell, plus one glow per stage. js/vehicle.js scales and swings
-   them; here they only exist. Additive, so they are not occluders and cast nothing. */
-stages.forEach((st) => {
-  for (const [x, y] of st.engines) {
-    const { outer } = flameMeshes(st.meshes, st.flame.outer, st.flame.core);
-    outer.rotation.order = 'YXZ';             // the gimbal's yaw must turn the already-pitched flame
-    outer.rotation.x = -Math.PI / 2;          // the flame's +y is aft
-    outer.position.set(x, y, st.tailZ + 0.5); // just inside the exit, so the bell's lip hides its start
-    outer.visible = false;
-    st.flames.push(outer);
-  }
-  const glow = new THREE.Sprite(new THREE.SpriteMaterial({ map: glowTex(), color: st.flame.glow, transparent: true, opacity: .8, blending: THREE.AdditiveBlending, depthWrite: false }));
-  glow.position.z = st.tailZ - 0.5; glow.visible = false;
-  st.meshes.add(glow); st.glow = glow;
-  rocketGroup.add(st.meshes);
-});
+stages.forEach((st) => rocketGroup.add(st.meshes));

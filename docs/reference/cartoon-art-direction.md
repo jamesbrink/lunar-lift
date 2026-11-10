@@ -67,17 +67,16 @@ These are the rules the frames enforced, in the order they were learned.
   nothing, and the patch's rim became a colour cliff — the plate the zoom-out view showed. Both now
   share `js/haze.js`, keyed to the camera's altitude, so the haze is gone by orbit. The Moon, the
   stars, the dome and the weather shell stay unhazed.
-- **One sprite cannot be both fire and cloud.** Alpha holds a plateau to 0.62 of the radius and falls
-  steeply after it: a sprite that ramps down from its centre composites into cotton wool, and a blast
-  cloud needs lobes with a silhouette. Cloud discs then draw at 5.75× parcel radius against the flame's
-  2.5× — parcels are metres across and hundreds of metres apart, and at 2.5× nothing ever merged.
-- **Screen size gets two caps.** 220 px for coverage-dominant parcels, 80 px where additive glow
-  dominates. At one shared 512 px cap a single glowing puff a metre from the lens bloomed into a lantern
-  a tenth of the frame, and the flame trench read as a dozen separate lamps.
+- **Fire is a shape; smoke is a pile of solid puffs.** The flame is a mesh with hard tone bands
+  (`js/flame.js`); smoke, steam and dust are opaque clumps shaded in three flat tones that occlude one
+  another by depth (`js/exhaust-draw.js`). Both replaced blended sprites: additive fire over a pale sky
+  washes to white, and alpha smoke composites into fog with no silhouette. A puff leaves by shrinking.
+- **Screen size is capped.** A puff a few metres from the lens would be the whole frame, so points
+  are capped on screen and shrink away inside 35 m of the camera.
 - **Ejecta must be lighter than the ground it lifts.** The lunar dust band was specified "brighter than
   regolith" and sampled at the same 8-bit value as the rendered surface, so the whole sheet vanished
   into the ground. Out there there is no shadow and no atmosphere to separate them with; the tone does
-  it alone (now `0xdce1e6`). In vacuum the *gas* is faint and the dust is the visible event, so lunar
+  it alone (now `0xf5eedd`). In vacuum the *gas* is faint and the dust is the visible event, so lunar
   parcels also lose their incandescence faster than Earth parcels lose theirs to air.
 
 
