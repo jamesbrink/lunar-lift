@@ -188,13 +188,12 @@ export function voteLabels(lab, land, w, h, rad) {
   }
 }
 
-/* Separable box mean over a wrapping longitude and a clamped latitude. Sliding windows (round 8):
-   the naive per-pixel loop is O(rad) and paintMoon's kernels are now r 28 + r 20 on 8.4 Mpx —
-   O(n) sliding makes the canvas size a rounding error (measured: the rewrite also speeds up the
-   Earth's r-3 passes). The horizontal window wraps; the vertical window clamps, and the multiset
-   it carries is rebuilt by count, so border rows contribute their clamped multiplicity exactly.
-   Rounding differs from the direct sum in the last ulp only; the mare cut is quantile-recomputed
-   on the same field, so nothing downstream depends on the order. */
+/* Separable box mean over a wrapping longitude and a clamped latitude, O(n) by sliding windows.
+   The latitude window used to keep a per-row multiplicity count and added each entering row twice:
+   a constant field of 1 came back as high as 11 at r 1 and 5.0 at r 3 (measured against a brute-force
+   sum, max error 5.18 and 2.04). Every smoothed signal the classifiers read — biome, mare cut — had
+   been running on that. The window is now the plain one: add the clamped row entering, subtract the
+   clamped row leaving; max error against brute force 0 to float rounding at r 1, 2, 3 and 9. */
 export function boxSignal(a, w, h, rad) {
   const tmp = new Float32Array(a.length);
   const n = 2 * rad + 1;
@@ -207,25 +206,13 @@ export function boxSignal(a, w, h, rad) {
       s += a[row + (x + rad + 1) % w] - a[row + ((x - rad) % w + w) % w];
     }
   }
-  const cnt = new Int32Array(h);
+  const cl = (y) => (y < 0 ? 0 : y > h - 1 ? h - 1 : y);
   for (let x = 0; x < w; x++) {
-    cnt.fill(0);
     let s = 0;
-    for (let k = -rad; k <= rad; k++) {
-      const yy = k < 0 ? 0 : k > h - 1 ? h - 1 : k;
-      s += tmp[yy * w + x]; cnt[yy]++;
-    }
+    for (let k = -rad; k <= rad; k++) s += tmp[cl(k) * w + x];
     for (let y = 0; y < h; y++) {
       a[y * w + x] = s / n;
-      const outY = y - rad, inY = y + rad + 1;
-      const oy = outY < 0 ? 0 : outY > h - 1 ? h - 1 : outY;
-      const iy = inY < 0 ? 0 : inY > h - 1 ? h - 1 : inY;
-      const vOut = tmp[oy * w + x], vIn = tmp[iy * w + x];
-      // A leaving row the entering row clamps to is replaced in the window by the same texel.
-      if (oy !== iy || cnt[oy] > 1) { s += vIn - vOut; cnt[oy]--; }
-      else { cnt[oy]--; }
-      if (cnt[iy] === 0) s += vIn;
-      cnt[iy]++;
+      s += tmp[cl(y + rad + 1) * w + x] - tmp[cl(y - rad) * w + x];
     }
   }
 }
@@ -247,36 +234,6 @@ export function quantile(a, share) {
   let acc = 0;
   for (let k = 0; k < N; k++) { acc += hist[k]; if (acc >= want) return (k + 1) / N; }
   return 1;
-}
-
-/* Plain separable box mean over RGBA; used where there is no coastline to protect (the Moon). */
-export function boxBlurRGBA(src, dst, w, h, rad) {
-  const tmp = new Float32Array(w * h * 3);
-  const n = 2 * rad + 1;
-  for (let y = 0; y < h; y++) {
-    const row = y * w;
-    for (let x = 0; x < w; x++) {
-      let r = 0, g = 0, b = 0;
-      for (let k = -rad; k <= rad; k++) {
-        const o = (row + ((x + k) % w + w) % w) * 4;
-        r += src[o]; g += src[o + 1]; b += src[o + 2];
-      }
-      const t = (row + x) * 3;
-      tmp[t] = r / n; tmp[t + 1] = g / n; tmp[t + 2] = b / n;
-    }
-  }
-  for (let y = 0; y < h; y++) {
-    for (let x = 0; x < w; x++) {
-      let r = 0, g = 0, b = 0;
-      for (let k = -rad; k <= rad; k++) {
-        const yy = y + k < 0 ? 0 : y + k > h - 1 ? h - 1 : y + k;
-        const j = (yy * w + x) * 3;
-        r += tmp[j]; g += tmp[j + 1]; b += tmp[j + 2];
-      }
-      const o = (y * w + x) * 4;
-      dst[o] = r / n; dst[o + 1] = g / n; dst[o + 2] = b / n; dst[o + 3] = 255;
-    }
-  }
 }
 
 /* Deterministic lattice hash and the value noise built on it: longitude wraps — the dateline is not

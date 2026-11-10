@@ -10,8 +10,8 @@ import { padWeight, padShoreWeight, padAuthored } from './padsite.js';
    the signed coast distance — one decode, several products. js/toonmap.js owns the registry that
    hands them out. */
 
-export async function paintEarthJob(diffusePath, maskPath) {
-  const [dif, spec] = await Promise.all([pixels(diffusePath), pixels(maskPath)]);
+export async function paintEarthJob(diffusePath, maskPath, normalPath) {
+  const [dif, spec, nrm] = await Promise.all([pixels(diffusePath), pixels(maskPath), pixels(normalPath)]);
   const w = dif.w, h = dif.h, d = dif.data, s = spec.data;
   const sea = new Uint8Array(w * h);
   for (let i = 0; i < w * h; i++) sea[i] = s[i * 4] > 110 ? 1 : 0;         // specular white is water
@@ -75,7 +75,8 @@ export async function paintEarthJob(diffusePath, maskPath) {
      every coast: at those slants the MAP texture is what the eye has, so smoothing the SDF the
      shader reads fixed nothing the canvas drew. Blending each band edge over ~1 texel of SDF
      turns every boundary into a graded iso-line; bilinear sampling carries it to a curve. */
-  const sdf = earthCoast(cleaned, w, h).km;
+  const coast = earthCoast(cleaned, w, h);
+  const sdf = coast.km;
   const ss = (a, b, x) => { const t = Math.min(1, Math.max(0, (x - a) / (b - a))); return t * t * (3 - 2 * t); };
   /* Round 6b: H 14 -> 60 km. With a 28 km blend the shelf-break iso-line (sd ≈ 175) read at
      160 km as a dark curve running parallel to the limb — the "floating tear" again. A 120 km
@@ -134,19 +135,11 @@ export async function paintEarthJob(diffusePath, maskPath) {
     }
   }
   bakePadCoast(out, w, h);
-  /* The ground's own copy of the paint, blurred — built AFTER the launch-site bake so the blurred map
-     carries the authored tones too. Blurring first put the global forest tone under and around the pad
-     while the mesh itself wore authored grassland, and the blend between them read as a straight tonal
-     line crossing the plain. See canvasDataSoft. */
-  let lr = 0, lg = 0, lb = 0, lc = 0;
-  for (let i = 0; i < w * h; i++) if (cleaned[i]) { const o = i * 4; lr += out[o]; lg += out[o + 1]; lb += out[o + 2]; lc++; }
-  const soft = new Uint8ClampedArray(out.length);
-  blurForGround(out, soft, w, h, cleaned, lc ? [lr / lc, lg / lc, lb / lc] : null);
-  /* handed back for js/toonmap.js's registry (canvasDataSoft) */
   const cv = document.createElement('canvas');
   cv.width = w; cv.height = h;
   cv.getContext('2d').putImageData(new ImageData(out, w, h), 0, 0);
-  return { canvas: cv, soft, ...buildEarthField(cleaned, w, h) };
+  const rug = ruggedness(nrm, cleaned, w, h);
+  return { canvas: cv, data: { w, h, bytes: surfaceFields(lab, cleaned, rug, w, h) }, ...buildEarthField(cleaned, rug, coast, w, h) };
 }
 
 /* The painted map takes the authored launch-site geography too: inside the blend radius the texels
@@ -194,52 +187,9 @@ function bakePadCoast(out, w, h) {
   }
 }
 
-function blurForGround(src, dst, w, h, land, mean) {
-  const tmp = new Float32Array(w * h * 3);
-  const rad = 8;                                       // ≈160 km of longitude
-  for (let y = 0; y < h; y++) {                       // longitude: wrapping, land-weighted
-    const row = y * w;
-    for (let x = 0; x < w; x++) {
-      let r = 0, g = 0, b = 0, c = 0;
-      for (let k = -rad; k <= rad; k++) {
-        const j = row + ((x + k) % w + w) % w;
-        if (!land[j]) continue;
-        const o = j * 4;
-        r += src[o]; g += src[o + 1]; b += src[o + 2]; c++;
-      }
-      const t = (row + x) * 3;
-      if (c) { tmp[t] = r / c; tmp[t + 1] = g / c; tmp[t + 2] = b / c; }
-      else {                                          // no land in this row: keep the paint itself
-        const o = (row + x) * 4;
-        tmp[t] = src[o]; tmp[t + 1] = src[o + 1]; tmp[t + 2] = src[o + 2];
-      }
-    }
-  }
-  for (let y = 0; y < h; y++) {                       // latitude: clamped
-    for (let x = 0; x < w; x++) {
-      let r = 0, g = 0, b = 0, c = 0;
-      for (let k = -rad; k <= rad; k++) {
-        const yy = y + k < 0 ? 0 : y + k > h - 1 ? h - 1 : y + k;
-        const j = (yy * w + x) * 3;
-        if (!land[yy * w + x]) continue;
-        r += tmp[j]; g += tmp[j + 1]; b += tmp[j + 2]; c++;
-      }
-      const o = (y * w + x) * 4;
-      let R = r, G = g, B = b;
-      if (!c) { R = src[o]; G = src[o + 1]; B = src[o + 2]; c = 1; }     // offshore: keep the paint
-      R /= c; G /= c; B /= c;
-      if (mean && land[y * w + x]) {                  // ease the mosaic toward one land tone
-        R += (mean[0] - R) * 0.15; G += (mean[1] - G) * 0.15; B += (mean[2] - B) * 0.15;
-      }
-      dst[o] = R; dst[o + 1] = G; dst[o + 2] = B;
-      dst[o + 3] = 255;
-    }
-  }
-}
-
 /* ---- Earth: land only, oceans and shelf exactly 0, pad neighbourhood exactly 0 ---- */
 
-function buildEarthField(land, sw, sh) {
+function buildEarthField(land, rug, coast, sw, sh) {
   const w = FW, h = FH;
   const km = new Float32Array(w * h);
   /* Downsample the cleaned mask, then dilate the sea side of it on the SMALL grid: land touching
@@ -255,6 +205,7 @@ function buildEarthField(land, sw, sh) {
       sea[y * w + x] = l ? 0 : 1;
     }
   }
+  const srowOf = (y) => ((y * sh / h) | 0) * sw;
   const near1 = dilate(sea, w, h, [1]);
   const near2 = dilate(sea, w, h, [2]);
   for (let y = 0; y < h; y++) {
@@ -265,14 +216,16 @@ function buildEarthField(land, sw, sh) {
       if (!on[i]) continue;                      // ocean and the shelf stay at exactly 0: splashdown lands on the sphere
       const u = (x + 0.5) / w;
       const wgt = near1[i] ? 0.12 : near2[i] ? 0.45 : 1;
+      /* Where the mountains are is DATA now: `rug` is the slope magnitude of the shipped normal
+         sheet (see ruggedness), so the Himalaya, the Andes, the Alps and the Rockies stand where
+         they stand and the plains are plains. The seeded swell that used to be the whole field is
+         kept at a third of its amplitude so a continent's interior is not a billiard table. */
       const broad = fbm(u, v * 2, 16, 2, 5);     // ~1300–2600 km continental swells
-      const rn = noise(u, v * 2, 48, 9);
-      const ridge = 1 - Math.abs(rn * 2 - 1);    // ridged octave: spines, not noise mush
-      km[i] = wgt * (0.42 * broad + 0.6 * ridge * ridge + 0.12 * noise(u, v * 2, 160, 17))
+      const r = rug[srowOf(y) + ((x * sw / w) | 0)];
+      km[i] = wgt * (0.14 * broad + 1.25 * r + 0.04 * noise(u, v * 2, 160, 17))
             + (aLat > 72 ? 0.5 : 0);             // the ice sheets really are plateaus; Greenland, Antarctica
     }
   }
-  const coast = earthCoast(land, sw, sh);
   /* Shore feather: land eases to exactly 0 over the last 180 km toward the sea, using the same
      1-Lipschitz SDF the colours read. Without it a half-km continent meets zero-height ocean on a
      one-cell step and the far mesh draws that step as a staircase cliff — measured as the w25 dark
@@ -360,4 +313,55 @@ function earthCoast(land, w, h) {
     km.set(sm);
   }
   return { w, h, km };
+}
+
+/* Ruggedness, 0..1 per texel of the 2048 grid: the tangent-plane tilt of the shipped normal sheet,
+   read as DATA (no pixel of it is ever drawn). Measured on the sheet, 5×5 mean tilt in 8-bit units:
+   Himalaya 72.6, Alps 71.1, Andes 36.7, Rockies 30.9, Tibet 29.6 against Sahara 7.0, Amazon 4.1,
+   Florida 2.0 and open ocean 2.0 — so a floor of 6 and a ceiling of 66 puts every range on the map
+   and leaves the plains at exactly zero. One r-1 box pass takes the JPEG ringing out. */
+function ruggedness(nrm, land, w, h) {
+  const r = new Float32Array(w * h), d = nrm.data;
+  if (nrm.w !== w || nrm.h !== h) return r;
+  for (let i = 0, o = 0; i < w * h; i++, o += 4) r[i] = land[i] ? Math.hypot(d[o] - 128, d[o + 1] - 128) : 0;
+  boxSignal(r, w, h, 2);
+  for (let i = 0; i < w * h; i++) r[i] = land[i] ? Math.min(1, Math.max(0, (r[i] - 6) / 60)) : 0;
+  boxSignal(r, w, h, 1);
+  return r;
+}
+
+/* The fields js/surface.js draws from, RGBA8 on the 2048 grid, rows SOUTH first (a DataTexture's
+   row 0 is v = 0): R aridity, G tree cover, B cold, A ruggedness.
+
+   They are the voted biome labels turned back into smooth memberships: each label votes a value on
+   three axes, and a land-weighted box mean (r 2, ~100 km) makes the result a field the shader can
+   threshold — at any zoom, with its own noise on the threshold — instead of a 20 km lattice of
+   decisions. Sea texels inherit the nearest land's values so a coast the shader moves a few
+   kilometres still finds a biome under it. */
+const AXES = [    // label → [arid, tree, cold]
+  [0, 0, 0], [0, 0, 1], [0, 0, 0.8], [1, 0, 0], [0.6, 0, 0], [0.2, 0, 0.55], [0, 1, 0.3], [0, 1, 0], [0.15, 0, 0],
+];
+function surfaceFields(lab, land, rug, w, h) {
+  const out = new Uint8Array(w * h * 4);
+  const wt = new Float32Array(w * h), wide = new Float32Array(w * h);
+  for (let i = 0; i < w * h; i++) wt[i] = wide[i] = land[i] ? 1 : 0;
+  boxSignal(wt, w, h, 2); boxSignal(wide, w, h, 9);
+  const f = new Float32Array(w * h), fw = new Float32Array(w * h);
+  for (let ax = 0; ax < 3; ax++) {
+    for (let i = 0; i < w * h; i++) f[i] = fw[i] = land[i] ? AXES[lab[i]][ax] : 0;
+    boxSignal(f, w, h, 2); boxSignal(fw, w, h, 9);
+    for (let y = 0; y < h; y++) {
+      const orow = (h - 1 - y) * w;
+      for (let x = 0; x < w; x++) {
+        const i = y * w + x;
+        const v = wt[i] > 0.04 ? f[i] / wt[i] : wide[i] > 1e-4 ? fw[i] / wide[i] : 0;
+        out[(orow + x) * 4 + ax] = Math.round(255 * Math.min(1, Math.max(0, v)));
+      }
+    }
+  }
+  for (let y = 0; y < h; y++) {
+    const orow = (h - 1 - y) * w;
+    for (let x = 0; x < w; x++) out[(orow + x) * 4 + 3] = Math.round(255 * rug[y * w + x]);
+  }
+  return out;
 }

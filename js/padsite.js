@@ -169,3 +169,35 @@ export function fineEarth(u, v) {
   const f2 = noise(u, v * 2, period(EARTH_CIRC, 0.19), 211);
   return (f1 - 0.5) * 0.034 + (f2 - 0.5) * 0.013;                  // ±~24 m of ground the 20 km grid cannot show
 }
+
+/* The fine ground, as ONE function: km above the relief grid at a point, given the land fraction's
+   coast field. The near patch's vertices (js/terrain.js) and fineGroundHeight (js/world.js, which
+   physics lands on) both call this, so the drawn ground and the contact surface are the same number.
+   Positive only, zero at sea, zero in the launch site's flat zone. */
+export function fineRelief(coast, u, v) {
+  const pw = padWeight(u, v);
+  if (pw <= 0) return 0;
+  const fine = fineEarth(u, v);
+  if (fine <= 0) return 0;
+  const t = THREE.MathUtils.clamp((shoreDistance(coast, u, v) + 0.06) / 0.12, 0, 1);
+  return fine * (1 - t * t * (3 - 2 * t)) * pw;
+}
+
+/* The authored shore as a grid for the ground shader: signed km (negative = land) over a square of
+   ±PAD_SDF_HALF km in the pad's tangent frame, x east, y north, row 0 south. The same five lines
+   padShoreSd answers from, sampled at 0.28 km so the shader's bilinear zero line is the drawn curve. */
+export const PAD_SDF_HALF = 72;
+export function padSdfGrid(n) {
+  const km = new Float32Array(n * n);
+  for (let j = 0; j < n; j++) {
+    const y = ((j + 0.5) / n * 2 - 1) * PAD_SDF_HALF;
+    const lx = [lineX(0, y), lineX(1, y), lineX(2, y), lineX(3, y), lineX(4, y)];
+    for (let i = 0; i < n; i++) {
+      const x = ((i + 0.5) / n * 2 - 1) * PAD_SDF_HALF;
+      let best = 1e9, z = 0;
+      for (let k = 0; k < 5; k++) { best = Math.min(best, Math.abs(x - lx[k])); if (x > lx[k]) z++; }
+      km[j * n + i] = (z & 1) ? best : -best;
+    }
+  }
+  return km;
+}

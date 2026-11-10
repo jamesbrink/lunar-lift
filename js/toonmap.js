@@ -1,10 +1,9 @@
 import * as THREE from 'three';
-import { boxBlurRGBA, sampleGrid } from './paintkit.js';
+import { sampleGrid } from './paintkit.js';
 import { paintEarthJob } from './earthpaint.js';
 import { paintMoonJob } from './moonpaint.js';
 
 export { sampleGrid } from './paintkit.js';
-export { moonPatchDetail } from './moonpaint.js';
 export { padWeight, padShoreWeight, padAuthored, padShoreSd, padShoreZone, shoreDistance, fineEarth } from './padsite.js';
 
 /* The planets are painted, not photographed.
@@ -28,16 +27,14 @@ export { padWeight, padShoreWeight, padAuthored, padShoreSd, padShoreZone, shore
    vertices (js/world.js) and are differenced into tangent-space normal maps; see the relief section
    below the painting code. */
 
-const loaded = new Map();
-
 /* The Earth's painted map: 2 048 × 1 024, one output pixel per source texel. The height field and
    the signed coastline hang off the same decode: one paint job, several products. */
-export function paintEarth(diffusePath, maskPath) {
-  const job = paintEarthJob(diffusePath, maskPath);
+export function paintEarth(diffusePath, maskPath, normalPath) {
+  const job = paintEarthJob(diffusePath, maskPath, normalPath);
   if (!fields.has('earth')) {
     fields.set('earth', job.then((r) => r.field));
     coasts.set('earth', job.then((r) => r.coast));
-    job.then((r) => softOf.set('earth', r.soft));
+    datas.set('earth', job.then((r) => r.data));
   }
   registerCanvas('earth', job);
   return job.then((r) => r.canvas);
@@ -48,7 +45,7 @@ export function paintEarth(diffusePath, maskPath) {
    spots the highlands and ray systems, which is exactly how a cartoon Moon is drawn. */
 export function paintMoon(path) {
   const job = paintMoonJob(path);
-  if (!fields.has('moon')) fields.set('moon', job.then((r) => r.field));
+  if (!fields.has('moon')) { fields.set('moon', job.then((r) => r.field)); datas.set('moon', job.then((r) => r.data)); }
   registerCanvas('moon', job);
   return job.then((r) => r.canvas);
 }
@@ -75,8 +72,7 @@ export function paintMoon(path) {
 const fields = new Map();                  // key → Promise<{w,h,km}>      heights in km
 const coasts = new Map();                  // key → Promise<{w,h,km}>      signed shore distance in km
 const canvases = new Map();                // key → Promise<HTMLCanvasElement>
-const softOf = new Map();                  // key → Uint8ClampedArray, blurred at paint time
-const softPx = new Map();                  // key → Promise<ImageData> of the blurred copy
+const datas = new Map();                   // key → Promise<{w,h,bytes,…}>  the fields js/surface.js draws from
 const painted = new Map();                 // key → canvas, once landed (paintedCanvas)
 const pixelsOf = new Map();                // key → Promise<ImageData>     raw authored pixels
 
@@ -93,29 +89,10 @@ export function paintedCanvas(key) { return painted.get(key) || null; }
 export function reliefField(key) { return fields.get(key) || null; }
 export function coastField() { return coasts.get('earth') || null; }
 
-/* Raw ImageData of the painted map, extracted once per body: the near patch colours itself from
-   exactly these bytes so a biome on the ground is the biome the orbit showed. getImageData is the
-   one unavoidable readback; it costs ~10 ms and happens once per body off the paint promise. */
-/* A blurred copy of the paint, for the GROUND to sample instead of the crisp map. The map is
-   classified on a ~20 km grid: perfect when it is wrapped around a 40 000 km sphere, wrong under a
-   vehicle, where a hundred kilometres of grass meeting a hundred kilometres of forest at a hard edge
-   reads as cut-out rectangles rather than landscape. Averaging seven texels keeps every biome where it
-   is and turns each border into the soft transition a real landscape has. Averaging is done over LAND
-   ONLY: an ordinary blur would drag the navy of the sea 140 km inland and tint the coastal plain blue.
-   The orbit keeps the crisp canvas; only js/terrain.js reads this. */
-export function canvasDataSoft(key) {
-  if (!softPx.has(key)) {
-    softPx.set(key, Promise.all([canvasData(key), softOf.has(key) ? softOf.get(key) : null])
-      .then(([src, pre]) => {
-        const out = new ImageData(src.width, src.height);
-        if (pre) out.data.set(pre);
-        else boxBlurRGBA(src.data, out.data, src.width, src.height, 3);
-        return out;
-      }));
-  }
-  return softPx.get(key);
-}
+/* The shader's data fields (rows south first), null before the paint is requested. */
+export function surfaceData(key) { return datas.get(key) || null; }
 
+/* Raw ImageData of the painted map, extracted once per body. */
 export function canvasData(key) {
   if (!pixelsOf.has(key)) {
     pixelsOf.set(key, canvases.get(key).then((cv) =>
@@ -162,32 +139,4 @@ function weldSeamNormals(geometry) {
     nrm.setXYZ(i0, a.x, a.y, a.z);
     nrm.setXYZ(i1, a.x, a.y, a.z);
   }
-}
-
-/* A texture now, the real paint later. The placeholder canvas MUST already be the size the paint
-   will be, because WebGL2 gives a canvas texture immutable storage (texStorage2D) at its first
-   upload size: a 2×2 placeholder makes every later texSubImage2D of the 2048×1024 canvas a silent
-   GL error, and the body then samples one ocean-blue texel forever — flat continents-looking-blue
-   from orbit while the painted canvas itself is perfect. Copy into the existing surface instead of
-   swapping the image. */
-export function paintedTexture(promise, key, w, h) {
-  let t = loaded.get(key);
-  if (t) return t;
-  const cv = document.createElement('canvas');
-  cv.width = w; cv.height = h;
-  const cx = cv.getContext('2d');
-  cx.fillStyle = '#1c4a8c';
-  cx.fillRect(0, 0, w, h);
-  t = new THREE.CanvasTexture(cv);
-  t.colorSpace = THREE.SRGBColorSpace;
-  t.wrapS = THREE.RepeatWrapping;
-  t.wrapT = THREE.ClampToEdgeWrapping;
-  t.anisotropy = 4;
-  loaded.set(key, t);
-  promise.then((painted) => {
-    cx.clearRect(0, 0, w, h);
-    cx.drawImage(painted, 0, 0, w, h);   // scaled only if an asset arrives at an unexpected size
-    t.needsUpdate = true;
-  });
-  return t;
 }

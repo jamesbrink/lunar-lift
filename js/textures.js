@@ -1,23 +1,36 @@
 import * as THREE from 'three';
-import { paintEarth, paintMoon, paintedTexture } from './toonmap.js';
+import { paintEarth, paintMoon, surfaceData, coastField } from './toonmap.js';
+import { padSdfGrid } from './padsite.js';
+import { fillField, fillCoast, fillPadSdf, surface, PAD_N } from './surface.js';
 
 /* Everything the planets wear is drawn, not photographed.
 
    The blue-marble and lunar sheets in assets/ are 2 km-to-20 km-per-pixel satellite data: correct
    geography, but soft, muddy and far too low-resolution to stretch over a sphere and still look
    intentional — and a cel ramp only quantises the mud. So they are read as *data*: the specular
-   sheet yields a land mask, the diffuse sheet yields biome hue, and the lunar sheet yields albedo
-   contrast. What gets uploaded is authored colour — flat ocean, a shallow shelf hugging every
-   coastline, a coastline stroke, sorted biomes, and a four-tone Moon. js/toonmap.js does the painting.
+   sheet yields a land mask, the diffuse sheet a biome signal, the normal sheet where the mountains
+   are, and the lunar sheet albedo contrast. No pixel of any of them reaches the screen: the paint
+   jobs (js/earthpaint.js, js/moonpaint.js) turn them into smooth fields, and js/surface.js draws
+   the ground from those per fragment.
    The cloud decks were never photographs either, so both are generated here from seeded noise: the
    PNG that used to stand in for weather carried its density in the alpha channel while the material
    sampled green, which covered the entire planet in an opaque white tablecloth. */
 
-// Sizes are the paint output's own (earth: the 2048 source; moon: painted at 4× the 1024 source —
-// see paintMoonJob). paintedTexture's placeholder MUST match these or WebGL pins the small size.
-export const earthTex = () => paintedTexture(
-  paintEarth('assets/earth_atmos_2048.jpg', 'assets/earth_specular_2048.jpg'), 'earth', 2048, 1024);
-export const moonTex = () => paintedTexture(paintMoon('assets/moon_1024.jpg'), 'moon', 4096, 2048);
+/* Start both paint jobs and pour what they produce into the ground shader's textures as it lands.
+   Those textures already exist at their final size (js/surface.js), so nothing recompiles and the
+   bodies are plain ocean and plain regolith for the frames before the paint arrives. */
+export function startPlanetPaint() {
+  paintEarth('assets/earth_atmos_2048.jpg', 'assets/earth_specular_2048.jpg', 'assets/earth_normal_2048.jpg');
+  paintMoon('assets/moon_1024.jpg');
+  fillPadSdf(padSdfGrid(PAD_N));
+  surfaceData('earth').then((d) => fillField('earth', d.bytes));
+  coastField().then((c) => fillCoast(c));
+  surfaceData('moon').then((d) => {
+    fillField('moon', d.bytes);
+    const S = surface('moon');
+    S.globe.sfMareCut.value = S.patch.sfMareCut.value = d.mareCut;
+  });
+}
 
 /* Deterministic value noise, shared by both cloud decks. The lattice wraps in longitude and clamps at
    the poles, so there is no seam at the dateline and nothing weird at the poles, and the same run
