@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { RE, RM, MU_E, MU_M, SOI_M, moonPos } from './constants.js';
-import { S, getSimTime, isBurning, orbitalElements, navVel, fwd } from './physics.js';
+import { S, getSimTime, isBurning, orbitalElements, navVel, groundVel, fwd } from './physics.js';
 /* One-directional: js/hud.js draws the navball and js/world.js paints the canvases this plot
    blits; world never imports navball, so this edge does not close a cycle. */
 import * as WORLD from './world.js';
@@ -222,7 +222,12 @@ export function drawNavball() {
     const pp = marker(c, cx, cy, vel, R, '#5ddc9a', 6);
     marker(c, cx, cy, vel.clone().negate(), R, '#ffb45c', 5);
     if (pp) {
-      offDeg = Math.acos(Math.min(1, Math.max(-1, toBody(vel.clone().normalize()).z))) * 57.2958;
+      /* The figure a pilot reads is against the air while there is air: over the ground below
+         60 km (inertial 'prograde' on the pad is 409 m/s of planet spin, and the label said
+         '90° off prograde' for a rocket going straight up), orbital above it. Under 20 m/s there
+         is no direction to be off. */
+      const gv = !nearMoon && S.pos.length() - RE < 60 ? groundVel(new THREE.Vector3()) : vel;
+      offDeg = gv.length() < 0.02 ? 0 : Math.acos(Math.min(1, Math.max(-1, toBody(gv.clone().normalize()).z))) * 57.2958;
       c.strokeStyle = 'rgba(93,220,154,.4)'; c.lineWidth = 1; c.setLineDash([2, 3]);
       c.beginPath(); c.moveTo(cx, cy); c.lineTo(cx + pp.x, cy + pp.y); c.stroke(); c.setLineDash([]);
     }

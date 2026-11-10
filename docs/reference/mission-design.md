@@ -203,6 +203,11 @@ anyone has measured. Two consequences for the game:
   until the geometry works. Small along-track correction burns would work too, and the tool has
   machinery for them, but it is gated on `fuel > 60 t` and the shipped CSM has 44.7 t left after
   TLI, so for this vehicle the encounter is decided at injection and cannot be repaired later.
+- **This entry and the section after it describe the aim module as it was** — a replay of the
+  game's own 0.1 s steps, a fixed budget per frame. `js/targeting.js` has since been rewritten: a
+  velocity-Verlet integration from the velocity advanced half a game step, run four times a second,
+  with a trim hint and an SAS injection cutoff. Its header holds the current measurements; the
+  figures below are the old module's and have not been re-run against the new one.
 - **Aim is visible.** `js/targeting.js` propagates the live state forward through the same gravity
   the integrator uses and the orbit panel shows it as `<km> km in <hh:mm:ss>`. From the shipped
   coast-start state the module's values are 345.7 km and MET 295,660.3 s, which the HUD's own

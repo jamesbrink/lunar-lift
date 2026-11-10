@@ -1,55 +1,76 @@
 import * as THREE from 'three';
 import * as C from './constants.js';
-import { S, getState, getSimTime, getEngineOn, getThrottle, gravityAt, orbitalElements, coastDrag } from './physics.js';
 import { ATMO_TOP } from './aero.js';
-const AIR_R2 = (C.RE + ATMO_TOP) ** 2;
+import { S, getState, getSimTime, getEngineOn, getThrottle, gravityAt, orbitalElements, coastDrag } from './physics.js';
 
-/* Will the trajectory you are on meet the Moon, and how hard?
+/* Will the trajectory you are on meet the Moon, and how close?
 
-   This is the readout that the translunar coast otherwise leaves invisible. Nothing in the game
-   punishes a 5 km/s pass at the Moon, and the aim is tight: measured with tools/mission-sim.mjs,
-   1e-3 rad of launch phase is worth ~130 km of periselene, and periselene sets what LOI and
-   the landing cost. You cannot steer toward a number you cannot see, so this propagates the current
-   state forward through the same gravity the integrator uses and reports the closest lunar approach.
+   The translunar aim is tight — measured with tools/mission-sim.mjs, 1e-3 rad of launch phase is
+   worth ~130 km of periselene — and periselene sets what capture and the landing cost. You cannot
+   steer toward a number you cannot see, so this predicts the closest lunar approach of the coast
+   from the present state, continuously, and says which way a trim burn would move it.
 
-   It deliberately reproduces the GAME's discretisation rather than the true two-body solution,
-   because "what will happen" in this game is its own 0.1 s integration. physStep advances simTime,
-   evaluates gravity at the advanced time, then v += a·dt, then p += v·dt; that is what the loop
-   below does, at DTPHYS, and from the shipped coast-start state it and a real physStep coast both
-   arrive at 345.66 km (run headless in Node). Two alternatives were measured from that same state
-   and rejected:
-     - converged integration (velocity Verlet at dt 0.1 s: 443.6 km) where the game flies 345.7 km.
-       The Moon's position is sampled 0.05 s off the state on every step, which is a coherent
-       perturbation, and a lunar flyby amplifies that into ~98 km.
-     - a coarser coast step, which is what the mission tool used to take: the game's scheme at
-       dt = 1 s predicts an impact 474.5 km under the surface. Ten times cheaper, ~820 km wrong.
-   Running the game's own scheme is also what keeps this affordable: one gravityAt per step.
-
-   The propagation is incremental because a multi-day coast is millions of 0.1 s steps and will not
-   fit in a frame: `updateAim` spends a fixed step budget per frame and publishes the best so far. A coast
-   does not change the answer (the trajectory is the trajectory), so it re-seeds only when something
-   has actually pushed the vehicle, when the predicted encounter has been passed, or when the result
-   has gone stale.
-
-   CORRIDOR is the band inside which the mission has been flown to a soft touchdown, measured with
-   tools/mission-sim.mjs across launch phases (periselene -> result; the table is in
-   js/constants.js at MOON_PHASE0): 745 km 2.8 m/s, 477 km 2.8 m/s, 346 km (the window) 3.3 m/s,
-   218 km 4.1 m/s, 123 km 4.9 m/s — all WON with 6.6-7.6 t spare — then 110 km and 91 km LOST with
-   the tank run down (91 km: 71 m/s). The low edge is a cliff, not a slope, so the band stops at
-   the last flight that landed. It is a landing-safety band for that autopilot, not a promise
-   about *where* you land: that also depends on when you brake. */
+   CORRIDOR is the band of periselene the mission has been flown to a soft touchdown in (a sweep of
+   launch phases with the tool's autopilot): everything from 745 km down to 123 km landed at
+   2.6-4.9 m/s; 110 km and 91 km ran the tank dry. The low edge is a cliff, not a slope. It is a
+   landing-safety band for that autopilot, not a promise about where you land. */
 
 export const CORRIDOR = { lo: 120, hi: 745 };   // 120: the 123 km flight lands, and targeting reads it as 122.0 km
 
-export const aim = { status: 'na', altKm: NaN, tMet: NaN, corridor: false, steps: 0 };
+export const aim = { status: 'na', altKm: NaN, tMet: NaN, corridor: false, steps: 0, trim: 0 };
 
-const p = new THREE.Vector3(), u = new THREE.Vector3(), a = new THREE.Vector3(), moon = new THREE.Vector3();
-/* Separate scratch for the tests below: p and u are the propagated state, and reuse here would
-   silently restart the integration from the live vehicle position on every frame. */
-const _q = new THREE.Vector3(), _m = new THREE.Vector3();
-const seed = { pos: new THREE.Vector3(), v: new THREE.Vector3(), t: -1e9 };
-const DT = C.DTPHYS, HORIZON = 6 * 86400, MAX_STEPS = 7000000, BUDGET = 6000;
-let tCur = 0, t0 = 0, steps = 0, bestR = Infinity, bestT = 0, running = false, finished = false, lastStart = -1e9, seedRange = Infinity;
+/* THE PREDICTOR. It used to replay the game's own scheme — 0.1 s steps, 5 million of them for a
+   translunar coast, a fixed budget per frame — which took 6-14 s to answer, went blank whenever the
+   engine burned, and left a player to cut a 13-minute injection burn blind.
+
+   The game's step (v += a·dt, then p += v·dt) is the leapfrog scheme with its velocity written half
+   a step late: the state (p, v) the game holds evolves, to second order, like a true trajectory
+   started from p with velocity v + a(p)·dt/2. So a velocity-Verlet integration from THAT state,
+   with a step that follows the local radius (1/1000 of it per step, 0.5-300 s), lands on the game's
+   own future: measured from the certified coast start, 344.87 km against the game scheme's 345.66
+   (and 442.74 without the half-step term — the ~100 km 'Verlet disagrees with the game' of earlier
+   notes was exactly that term). It costs about a millisecond, so it runs four times a second, with
+   the engine lit or not: while burning, the figure is the pass you would get by cutting now. */
+const p = new THREE.Vector3(), u = new THREE.Vector3(), a = new THREE.Vector3(), moon = new THREE.Vector3(), _q = new THREE.Vector3(), _m = new THREE.Vector3();
+const AIR_R = C.RE + ATMO_TOP;
+export function lunarPass(pos, vel, t0, out) {
+  p.copy(pos); u.copy(vel);
+  let t = t0, best = Infinity, bestT = t0, hit = false;
+  gravityAt(p, a, t); if (p.length() < AIR_R) coastDrag(a, p, u);
+  u.addScaledVector(a, C.DTPHYS / 2);                       // the game's velocity is half a step behind
+  for (let n = 0; n < 60000; n++) {
+    C.moonPos(t, moon);
+    const rE = p.length(), rM = p.distanceTo(moon);
+    if (rM < best) { best = rM; bestT = t; }
+    else if (n > 200 && rM > best * 1.5 && rE > C.MOON_DIST * 0.5) break;      // past the Moon and leaving
+    if (rM < C.RM) { hit = true; break; }
+    if (rE < C.RE || t - t0 > 8 * 86400 || rE > 1.5e6) break;
+    const dt = Math.min(Math.max(0.001 * Math.min(rE, rM) / Math.max(u.length(), 1e-3), 0.5), 300);
+    u.addScaledVector(a, dt / 2); p.addScaledVector(u, dt); t += dt;
+    gravityAt(p, a, t); if (rE < AIR_R) coastDrag(a, p, u);
+    u.addScaledVector(a, dt / 2);
+  }
+  out.alt = hit ? -1 : best - C.RM; out.t = bestT;
+  return out;
+}
+
+/* Guidance cutoff. At full CSM thrust the lunar pass moves through the whole 625 km corridor in
+   about a tenth of a second of burn: no hand can cut on it. With SAS on (prograde), js/physics.js
+   asks this every step of an injection burn and shuts the engine down when the pass is inside the
+   corridor with 60 km in hand — what an Apollo guidance computer did. With SAS off the cut is the
+   pilot's, and the trim burn afterwards is how it is repaired. Evaluated every step once the pass is
+   within 30,000 km, every tenth step before that. */
+let guardN = 0, guardLast = Infinity;
+const _g = { alt: 0, t: 0 };
+export function cutoffNow() {
+  if (guardLast > 30000 && (guardN++ % 10)) return false;
+  C.moonPos(getSimTime(), _m);
+  const el = orbitalElements(S.pos, S.v, C.MU_E, C.RE);
+  if (isFinite(el.ap) && el.ap < C.MOON_DIST * 0.9) { guardLast = Infinity; return false; }
+  guardLast = lunarPass(S.pos, S.v, getSimTime(), _g).alt;
+  if (guardLast < 0) guardLast = 0;
+  return _g.alt >= CORRIDOR.lo + 60 && _g.alt <= CORRIDOR.hi - 60;
+}
 
 function applicable() {
   if (getState() !== 'flying') return false;
@@ -59,64 +80,29 @@ function applicable() {
   return !isFinite(el.ap) || el.ap >= C.MOON_DIST * 0.9;     // otherwise the Moon is not on the list
 }
 
-function needsSeed() {
-  if (seed.t < 0) return true;
-  if (getEngineOn() && getThrottle() > 0.02) return true;    // thrust invalidates the prediction
-  /* Only a FINISHED scan can have its encounter pass. While one is still running and the Moon is
-     receding, the best range so far is the starting one and bestT sits at t0: tested unconditionally
-     this abandoned and re-seeded the scan every 400 ms for as long as the ship moved away from the
-     Moon (reviewer: 428 restarts in 3,000 frames, the readout stuck on 'scanning'). */
-  if (finished && getSimTime() > bestT) return true;
-  /* (A 20 s 'belt and braces' re-seed used to sit here. A coast does not change its own answer, and
-     the restart republished 'best so far' ranges on a loop — 92,570 → 170,146 → 139,093 → … — and at
-     under ~43 fps never let a scan finish at all.) */
-  return false;
-}
+export function resetAim() { aim.status = 'na'; aim.altKm = NaN; aim.tMet = NaN; aim.corridor = false; aim.trim = 0; last = -1e9; }
 
-/* Forget everything. The game calls this on mission reset and on a debug teleport: a prediction of
-   the previous vehicle's trajectory must not survive into the new mission, and the module's own
-   re-seed rules deliberately do not fire for a state that was replaced rather than flown into. */
-export function resetAim() {
-  running = false; finished = false; steps = 0; bestR = Infinity; bestT = 0; seedRange = Infinity;
-  seed.t = -1e9; aim.status = 'na'; aim.altKm = NaN; aim.tMet = NaN; aim.corridor = false; aim.steps = 0;
-}
-
+/* aim.trim: metres per second of prograde (+) or retrograde (−) burn that would bring the pass to
+   the middle of the corridor, from the slope of the pass against a 1 m/s nudge either way; 0 when
+   on course or when a small trim cannot do it. */
+let last = -1e9;
+const _r = { alt: 0, t: 0 }, _vp = new THREE.Vector3(), _dir = new THREE.Vector3();
 export function updateAim() {
-  if (!applicable()) { aim.status = 'na'; aim.altKm = NaN; running = false; return; }
-  if (running && needsSeed()) running = false;               // abandon a prediction under thrust
-  if (!running && needsSeed()) {
-    if (performance.now() - lastStart < 400) return;         // do not thrash the solver at high warp
-    lastStart = performance.now();
-    p.copy(S.pos); u.copy(S.v); t0 = getSimTime(); tCur = t0; steps = 0; finished = false;
-    bestR = Infinity; bestT = t0;
-    C.moonPos(t0, moon); seedRange = p.distanceTo(moon);
-    seed.pos.copy(S.pos); seed.v.copy(S.v); seed.t = t0;
-    running = true; aim.status = 'running';
+  if (!applicable()) { if (aim.status !== 'na') resetAim(); return; }
+  const now = performance.now();
+  if (now - last < 250) return;
+  last = now;
+  lunarPass(S.pos, S.v, getSimTime(), _r);
+  aim.altKm = _r.alt; aim.tMet = _r.t; aim.steps++;
+  aim.corridor = aim.altKm >= CORRIDOR.lo && aim.altKm <= CORRIDOR.hi;
+  aim.status = getEngineOn() && getThrottle() > 0.02 ? 'burning' : 'done';
+  aim.trim = 0;
+  if (!aim.corridor && aim.altKm < 60000) {
+    _dir.copy(S.v).normalize();
+    const up = lunarPass(S.pos, _vp.copy(S.v).addScaledVector(_dir, 0.001), getSimTime(), { alt: 0, t: 0 }).alt;
+    const dn = lunarPass(S.pos, _vp.copy(S.v).addScaledVector(_dir, -0.001), getSimTime(), { alt: 0, t: 0 }).alt;
+    const here = aim.altKm < 0 ? 0 : aim.altKm, slope = ((up < 0 ? 0 : up) - (dn < 0 ? 0 : dn)) / 2;      // km of pass per m/s
+    const want = (CORRIDOR.lo + CORRIDOR.hi) / 2 - here;
+    if (Math.abs(slope) > 1) aim.trim = THREE.MathUtils.clamp(want / slope, -60, 60);
   }
-  if (!running) return;
-  const stop = Math.min(steps + BUDGET, MAX_STEPS);
-  for (; steps < stop; steps++) {
-    const t = tCur + DT;
-    gravityAt(p, a, t);                     // the advanced time, exactly as physStep does it
-    /* and the air, while there is any: a coast that starts at a 150 km perigee loses enough to
-       drag to move the lunar pass by 227 km (measured against a physStep coast). */
-    if (p.lengthSq() < AIR_R2) coastDrag(a, p, u);
-    u.addScaledVector(a, DT);
-    p.addScaledVector(u, DT);
-    C.moonPos(t, moon);
-    const rM = p.distanceTo(moon);
-    if (rM < bestR) { bestR = rM; bestT = t; }
-    /* Past the Moon and clearly leaving, or out of look-ahead: either way the answer is final. */
-    if ((steps > 5000 && p.length() > C.MOON_DIST * 1.15 && rM > bestR * 1.5) || t > t0 + HORIZON) { finished = true; break; }
-    tCur = t;
-  }
-  /* Do not publish while the propagation is still in the "best so far" phase before the Moon is in
-     sight: the best range then is simply how far away the Moon currently is, which reads as a
-     prediction of a 376,000 km miss. Publish once the closest approach so far is genuinely inside
-     the lunar region, or once the propagation is complete; until then the HUD says "scanning". */
-  const resolved = finished || bestR < 0.5 * seedRange;
-  if (resolved) { aim.altKm = bestR - C.RM; aim.tMet = bestT; }
-  aim.steps = steps;
-  aim.corridor = isFinite(aim.altKm) && aim.altKm >= CORRIDOR.lo && aim.altKm <= CORRIDOR.hi;
-  aim.status = finished ? 'done' : 'running';
 }

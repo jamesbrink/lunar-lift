@@ -66,9 +66,9 @@ and the camera, the map and the HUD stay live. (Before commit 55f18fa the game s
 time below ×6 — 1/60 s at ×1 — while this paragraph claimed otherwise; a review flew the certified
 window that way and hit the Moon at 2,559 m/s instead of passing it at 346 km.)
 
-Warp is capped by place — ×4 in the air (below 70 km) or within 15 km of the Moon, ×16 below
-140 km, ×32 within 150 km of the Moon, ×1000 otherwise — and drops to ×1 on crossing the Moon's
-sphere of influence. The one exception to the fixed step is standing on the pad with the engines
+Warp is capped by place — ×4 in the air (below 70 km; ×16 under open mains) or within 15 km of the
+Moon, ×32 within 50 km of it, ×128 within 400 km, ×16 below 140 km of the Earth, ×8 while the
+engine burns, ×1000 otherwise — and drops to ×1 on crossing the Moon's sphere of influence. The one exception to the fixed step is standing on the pad with the engines
 cold and the throttle shut: there a step is an exact rotation with the planet at any size, so time
 is free up to ×10000 (a day in 8.6 s). The sun's bearing is fixed in inertial space and the planet
 turns under it, so that is how you wait for the launch window, or watch night fall: the sky, the
@@ -161,14 +161,13 @@ One concern per file.
   lights its injection burn — 2.7742 rad, the cue the `NEXT` line counts down to),
   and `MOON_PHASE0` — the solved launch window (the Moon's angle along its orbit at MET 0 for which
   a TLI at the first perigee after insertion arrives at the Moon).
-- `js/targeting.js` — the predicted lunar aim: propagates the live state forward through
-  `gravityAt` at the game's own 0.1 s step and publishes the closest lunar approach, incrementally
-  (a fixed step budget per frame) and only re-seeding after thrust or past the predicted encounter —
-  a coast does not change its own answer, and a timed restart used to loop the readout through
-  "best so far" values. Run headless from the recorded coast-start state it reproduces the
-  certified flights' periselene to about 1 km (476.5 / 345.7 / 217.0 km against the tool's
-  477 / 346 / 218), which means it predicts what this game will do rather than the converged two-body
-  answer.
+- `js/targeting.js` — the predicted lunar aim: `lunarPass()` integrates the present state forward to
+  its closest lunar approach, four times a second, engine lit or not (while burning, the figure is
+  the pass you would get by cutting now). It is a velocity-Verlet integration started from the
+  velocity advanced half a game step, which is what makes it land on the game's own trajectory
+  rather than the textbook one; its header has the measurements. It also publishes `aim.trim` — the
+  prograde or retrograde m/s that would centre the pass in the corridor — and `cutoffNow()`, which
+  lets SAS end an injection burn when the pass is inside the corridor with 60 km in hand.
 - `js/predictor.js` — where the vehicle is going. Integrates the path five times a second,
   draws it every frame from the ship's current position: it starts a short gap ahead of the ship, fades
   in, dims with time ahead, and stops after one lap of a closed orbit. Places the `Ap`/`Pe` markers
@@ -392,15 +391,11 @@ first; three stars need the Moon. Details: `docs/reference/mission-design.md`.
 
 ## Known gaps
 
-- **The aim readout gives the closest approach, not the landing site.** `js/targeting.js` propagates
-  the live state at the game's own 0.1 s step and the orbit panel prints the predicted periselene —
-  346 km on the shipped window, against the simulation's 346 km — but it answers "how hard will the
-  encounter be", not "where will I touch down", and it needs 865 frames of its step budget to finish
-  after each manoeuvre (counted headless; about 14 s at 60 fps, not re-timed in a browser). It is
-  green between 120 and 745 km: the band the tool's autopilot lands from (123 km, read as 122.0, to
-  745 km), with the floor set between the last landing and the first loss (110 km; 91 km is lost too). Below 420 km the
-  prediction includes drag — its source records a coast from a 150 km perigee whose lunar pass
-  moved 227 km once drag was counted.
+- **The aim readout gives the closest approach, not the landing site.** `js/targeting.js` predicts
+  the periselene of the coast you are on and the orbit panel prints it; it answers "how hard will
+  the encounter be", not "where will I touch down". It is green between 120 and 745 km: the band
+  the tool's autopilot lands from (123 km to 745 km), with the floor set between the last landing
+  and the first loss (110 km; 91 km is lost too). Below 420 km the prediction includes drag.
   Nothing marks the launch window itself; the player finds it by waiting and warping.
 - **The Moon is a parametric circular orbit**, not an ephemeris: fixed 384 400 km radius, sidereal
   rate `MOON_RATE`, fixed 28.5° inclination, no eccentricity, no node regression.

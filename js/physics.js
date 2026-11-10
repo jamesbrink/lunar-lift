@@ -65,6 +65,7 @@ export const addDistFlown = d => { distFlown += d; };
 /* How fast time may run here. Warp through thick air, a burn close to the ground or the last
    kilometres over the Moon is how a flight ends in two real seconds; out in the open it is free.
    Returns the highest allowed entry of WARPS. */
+let capWhy = '';
 export function warpCap() {
   if (state !== 'flying' && state !== 'pad') return 1;
   moonPos(simTime, _moon);
@@ -72,9 +73,13 @@ export function warpCap() {
   /* Standing on the pad with the engines cold, time is free: warp through the day and the night
      and launch when the Moon is where you want it. */
   if (state === 'pad' && !engineOn && !keys['shift'] && targetThrottle < 0.05) return 10000;            // a day in 8.6 s: the hold-down step is an exact rotation at any size
-  if (altE < 70) return 4;                                   // in the air
-  if (altM < 15) return 4; if (altM < 150) return 32;        // low over the Moon
-  if (altE < 140) return 16;
+  if (altE < 70) { capWhy = chute === 2 && chuteOpen >= 1 ? 'UNDER PARACHUTES' : 'IN THE AIR'; return chute === 2 && chuteOpen >= 1 ? 16 : 4; }
+  if (altM < 15) { capWhy = 'THIS LOW OVER THE MOON'; return 4; }
+  if (altM < 50) { capWhy = 'THIS LOW OVER THE MOON'; return 32; }
+  if (altM < 400) { capWhy = 'IN LOW LUNAR ORBIT'; return 128; }
+  if (altE < 140) { capWhy = 'THIS LOW OVER THE EARTH'; return 16; }
+  if (isBurning()) { capWhy = 'WITH THE ENGINE BURNING'; return 8; }
+  capWhy = 'THE FASTEST THERE IS IN FLIGHT';
   return 1000;                                               // flight tops out here: 0.1 s steps, at most 600 a frame
 }
 /* Called every frame: time drops back when the place demands it, and at the Moon's doorstep. */
@@ -84,12 +89,11 @@ export function guardWarp() {
   moonPos(simTime, _moon);
   const near = S.pos.distanceTo(_moon) < SOI_M;
   if (near !== wasNearMoon) { wasNearMoon = near; if (WARPS[warpIdx] > 1 && state === 'flying') { warpIdx = WARP_ONE; hooks.addLog(near ? 'TIME WARP OFF — ENTERING THE MOON\'S SPHERE OF INFLUENCE' : 'TIME WARP OFF — LEAVING THE MOON', 'warn'); } }
-  if (WARPS[warpIdx] > cap) { while (WARPS[warpIdx] > cap) warpIdx--; hooks.addLog(`TIME WARP LIMITED TO ×${WARPS[warpIdx]} HERE`, 'warn'); }
+  if (WARPS[warpIdx] > cap) { while (WARPS[warpIdx] > cap) warpIdx--; hooks.addLog(`TIME WARP DOWN TO ×${WARPS[warpIdx]} — ${state === 'pad' ? 'ENGINES LIT' : capWhy}`, 'warn'); }
 }
 export function cycleWarp(delta) {
   if (delta > 0 && WARPS[Math.min(WARPS.length - 1, warpIdx + 1)] > warpCap()) {
-    const why = warpIdx === WARPS.length - 1 || WARPS[warpIdx] >= 1000 && state !== 'pad' ? 'THE FASTEST THERE IS IN FLIGHT' : state === 'pad' ? 'WITH THE ENGINES LIT' : 'THIS CLOSE TO THE GROUND';
-    hooks.addLog(`TIME WARP ×${WARPS[warpIdx]} IS ${why}`, 'warn'); return;
+    hooks.addLog(`TIME WARP ×${WARPS[warpIdx]} IS THE LIMIT ${state === 'pad' ? 'WITH THE ENGINES LIT' : capWhy}`, 'warn'); return;
   }
   if (delta > 0) warpIdx = Math.min(WARPS.length - 1, warpIdx + 1);
   else warpIdx = Math.max(0, warpIdx - 1);
@@ -250,6 +254,9 @@ let gLoad = 0, gOver = 0;
 /* Swing arms: 0 across the stack, 1 swung clear. They start to move at ignition and take
    ARM_TIME; until they are most of the way round they are solid (js/colliders.js). */
 let armSwing = 0, strandTick = 0;
+/* Optional: js/targeting.js's guidance cutoff, wired by main.js (the headless tools fly without it). */
+let cutoffGuard = null;
+export function setCutoffGuard(fn) { cutoffGuard = fn; }
 /* Mission time at which the hold-down let go. The pitch program runs on time SINCE then: waiting
    on the pad is how the launch window is moved, and a program on the mission clock tipped a
    late launch into the swing arms half a second after ignition. */
@@ -492,8 +499,8 @@ export function physStep(dt) {
   const yawIn = (keys['a'] ? 1 : 0) - (keys['d'] ? 1 : 0);
   const rollIn = (keys['e'] ? 1 : 0) - (keys['q'] ? 1 : 0);
   const manual = pitchIn !== 0 || yawIn !== 0 || rollIn !== 0;
-  omega.x += pitchIn * 0.12 * ratio * dt;                          // commanded angular acceleration
-  omega.y += yawIn * 0.12 * ratio * dt;
+  omega.x += pitchIn * 0.18 * ratio * dt;                          // commanded angular acceleration (hands only: SAS has its own servo)
+  omega.y += yawIn * 0.18 * ratio * dt;
   omega.z += rollIn * 0.25 * ratioR * dt;
 
   if (chute > 0 && aeroState.q > 5) {                              // the canopy hauls the apex round to trail
@@ -584,8 +591,14 @@ export function physStep(dt) {
      before 'flying' is declared, is exactly where the tower is. A launch vehicle does not bounce:
      contact with steel is the end of the flight. */
   if (S.pos.length() - RE < 1) {
-    const hit = padHit(S.pos, _fw.copy(UP_REF).applyQuaternion(S.q), simTime, tailStation(), NOSE_Z, armSwing < 0.6);
+    /* The escape tower is part of the hull while it is on: 8.9 u of mast above the apex. */
+    const hit = padHit(S.pos, _fw.copy(UP_REF).applyQuaternion(S.q), simTime, tailStation(), lesSeparated ? NOSE_Z : 37.6, armSwing < 0.6);
     if (hit) return collide(hit);
+  }
+
+  if (cutoffGuard && burning && i === 2 && sasOn && !sasRetro && altE > 140 && cutoffGuard()) {
+    engineOn = false; targetThrottle = 0; throttle = 0;
+    hooks.addLog('GUIDANCE CUTOFF — THE LUNAR PASS IS IN THE CORRIDOR', 'good');
   }
 
   // liftoff bookkeeping
@@ -670,6 +683,7 @@ function impact(onMoon) {
       hooks.addLog(`IMPACT WITH EARTH AT ${disp.toFixed(0)} m/s — MISSION LOST`, 'bad');
       hooks.showEndOverlay(disp > 1000 ? 'RE-ENTRY DISASTER' : 'HARD LANDING', i < 0
         ? `The capsule hit at ${disp.toFixed(0)} m/s. Drogues (G) once the air has slowed you under ${CHUTE.drogue.tear / 1000} kPa, mains (G again) under ${CHUTE.mains.tear / 1000} kPa — down at under ${SAFE_EARTH * 1000} m/s.`
+        : !stages[0].separated && fwd().dot(bodyUp(_rad)) < 0.5 ? `The stack fell over and hit the ground at ${disp.toFixed(0)} m/s, ${Math.round(Math.acos(Math.max(-1, Math.min(1, fwd().dot(bodyUp(_rad))))) * 57.2958)}° from vertical. Off the pad it must keep pointing up until it has speed: SAS (P) holds the vertical.`
         : !stages[0].separated ? `The stack came down at ${disp.toFixed(0)} m/s. Keep it pointing up until it has speed: SAS (P) holds the vertical off the pad.`
         : `The vehicle hit the ground at ${disp.toFixed(0)} m/s. Only the command module comes home: drop the rest (X) and open the parachutes (G).`, 'RETRY');
     }

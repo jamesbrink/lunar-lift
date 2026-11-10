@@ -3,15 +3,15 @@ import { RE, RM, WARPS, DTPHYS, PAD_POS, SPECS, moonPos } from './constants.js';
 import { initWorld, syncTime, updateSky, updateSunShadow, setWeatherVisible, getSpin, groundHeight, fineGroundHeight, moonGroundHeight } from './world.js';
 import { stages, lesGroup } from './saturn.js';
 import { initVehicle, spawnParticle, addDebris, detachStage, setVisible, updateParticles, updateDebris, updateBurnVisuals, clearDebris, resetStages, plumeLive } from './vehicle.js';
-import { S, keys, initPhysics, getState, getSimTime, setSimTime, getEngineOn, getThrottle, getWarpIndex, setWarpIndex, setTargetThrottle, getTargetThrottle, getSasOn, setSas, cycleWarp, toggleSas, toggleSasRetro, activeStage, isBurning, accelAt, physStep, toggleIgnite, separateStage, separateLES, addDistFlown, resetSim, markTeleported, airDensity, groundVel, omega, getControlAuthority, toggleRcsAssist, toggleHold, deployChute, getArmSwing, guardWarp, aeroState, getAeroLoad, stability } from './physics.js';
+import { S, keys, initPhysics, getState, getSimTime, setSimTime, getEngineOn, getThrottle, getWarpIndex, setWarpIndex, setTargetThrottle, getTargetThrottle, getSasOn, setSas, cycleWarp, toggleSas, toggleSasRetro, activeStage, isBurning, accelAt, physStep, toggleIgnite, separateStage, separateLES, addDistFlown, resetSim, markTeleported, airDensity, groundVel, omega, getControlAuthority, toggleRcsAssist, toggleHold, deployChute, getArmSwing, guardWarp, setCutoffGuard, aeroState, getAeroLoad, stability } from './physics.js';
 import { camera, initCamera, cycleCamera, updateCamera, resetCameraView, setCamMode, setCamDist, setCamView, resizeCamera, setMap, isMap, cycleMapFocus } from './camera.js';
 import { initMapView, updateMapView } from './mapview.js';
 import { updateChutes } from './chutes.js';
 import { setOrigin } from './origin.js';
 import { setArmSwing } from './pad.js';
-import { initHUD, addLog, updateHUD, toggleMapView, endOverlay, setWarn, hideOverlay, clearLog } from './hud.js';
+import { initHUD, addLog, updateHUD, toggleMapView, resetMilestones, endOverlay, setWarn, hideOverlay, clearLog } from './hud.js';
 import { audioInit, audioEngine, audioThud, audioExplosion, audioWin, updateAudio } from './audio.js';
-import { updateAim, resetAim } from './targeting.js';
+import { updateAim, resetAim, cutoffNow } from './targeting.js';
 import { initHalfRes, occlude, renderHalfRes } from './halfres.js';
 import { initPredictor, predict, updatePredictor, clearPredictor, predLine } from './predictor.js';
 
@@ -73,7 +73,7 @@ scene.fog = new THREE.FogExp2(0x04060b, 0);
 function resetMission() {
   clearDebris();
   resetStages();
-  resetSim(); retrue();
+  resetSim(); retrue(); resetMilestones();
   syncTime(getSimTime());   // resetSim zeroes the mission clock; the bodies have to move back too
   resetCameraView();
   hideOverlay();
@@ -99,6 +99,7 @@ initPhysics({
   vehicleOps: { spawnParticle, addDebris, detachStage, setVisible, les: lesGroup },
 });
 initPredictor({ scene, groundE: groundHeight, groundM: moonGroundHeight, setWarn });
+setCutoffGuard(cutoffNow);
 initCamera(canvas, addLog);
 scene.add(camera);                        // so it takes the floating-origin shift with everything else
 initMapView(scene);
@@ -116,7 +117,10 @@ addEventListener('keydown', e => {
   if (!audioArmed) { audioArmed = true; audioInit(); }          // browsers gate sound on a user gesture
   const mode = getState();
   if (mode === 'won' || mode === 'lost') {
-    if (k === 'enter' || k === ' ' || k === 'r') resetMission();
+    if (k === 'enter' || k === ' ' || k === 'r') { resetMission(); return; }
+    /* the flight is over, the view is not: camera, map, focus and help still answer */
+    if (k === 'c') cycleCamera(); else if (k === 'm') setMap(toggleMapView()); else if (k === 'f') cycleMapFocus();
+    else if (k === '?' || k === '/') document.getElementById('helpCard').classList.toggle('on');
     return;
   }
   if (k === '?' || k === '/') { document.getElementById('helpCard').classList.toggle('on'); return; }
@@ -234,6 +238,7 @@ function frame() {
   updateCamera(dtReal, paused);
   if (paused) updateAudio({ burning: false, throttle: 0, rho: 0, q: 0 });   // and the engine is silent
   if (getState() === 'flying') updatePredictor(camera); else clearPredictor();
+  predLine.visible = !isMap();       // the map draws the whole coast itself; two paths side by side read as a fault
   updateHUD(dtReal);
   /* The sky belongs to where the EYE is: on the map that is space, whatever air the ship is in. */
   setWeatherVisible(!isMap() && !window.__noWeather);   // __noWeather: tools/flicker-test.mjs isolates the weather

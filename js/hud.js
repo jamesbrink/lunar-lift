@@ -3,7 +3,6 @@ import { RE, RM, MU_E, MU_M, SOI_M, MOON_DIST, WARPS, SPECS, CAPSULE_MASS, LAND_
 import { stages } from './saturn.js';
 import { S, getState, getSimTime, getEngineOn, getThrottle, getWarpIndex, getSasOn, getSasRetro, getDistFlown, getMaxQ, activeStage, orbitalElements, groundVel, bodyUp, navVel, surfaceAlt, aeroState, getAeroLoad, getRcsAssist, getHold, getStrain, getChute, getHeat, getCooking, isCapsule, HEAT_SHIELD, CHUTE, totalMass, landing, LOAD_LIMIT_STACK, LOAD_LIMIT_CSM } from './physics.js';
 import { getCamMode, getMapFocus } from './camera.js';
-import { coarseAim } from './mapview.js';
 import { initNavball, updateNavball } from './navball.js';
 import { aim, CORRIDOR } from './targeting.js';
 
@@ -77,7 +76,7 @@ export function setWarn(text) {
   el.style.display = 'block'; el.textContent = text;
 }
 
-export function hideOverlay() { $('overlay').classList.add('hidden'); }
+export function hideOverlay() { $('overlay').classList.add('hidden'); $('again').style.display = 'none'; }
 export function clearLog() { $('log').innerHTML = ''; }
 
 export function endOverlay(title, body, btn) {
@@ -106,6 +105,7 @@ function nextStep({ state, engineOn, live, i, dry, altE, alt, nearMoon, el, radi
     if (ch === 1) return q < CHUTE.mains.tear * 0.8 && altE < 6 ? [`${K('G')} MAIN PARACHUTES — now`, 'ok']
       : [`Drogues out — mains (${K('G')}) below 6 km and under ${CHUTE.mains.tear / 1000} kPa: now ${altE.toFixed(1)} km, ${(q / 1000).toFixed(1)} kPa`];
     if (q < CHUTE.drogue.tear * 0.8 && altE < 12 && radial < 0) return [`${K('G')} DROGUE CHUTES — now`, 'ok'];
+    if (altE > 12 && altE <= 120 && getHeat() <= HEAT_SHIELD) return [`Falling through ${altE.toFixed(0)} km — nothing to do yet: heat shield first, drogues (${K('G')}) below 12 km`];
     return getHeat() > HEAT_SHIELD ? [`Entry — heat shield is taking it. Ride it out; drogues under ${CHUTE.drogue.tear / 1000} kPa (now ${(q / 1000).toFixed(0)})`, 'warn']
       : [`Falling — drogues (${K('G')}) once under ${CHUTE.drogue.tear / 1000} kPa and below 12 km: now ${(q / 1000).toFixed(1)} kPa`];
   }
@@ -138,10 +138,18 @@ function nextStep({ state, engineOn, live, i, dry, altE, alt, nearMoon, el, radi
   if (altE < 120 && el.ap < 140) return getSasOn() ? ['SAS is flying the gravity turn — watch apoapsis climb', 'ok']
     : [`${K('P')} SAS flies the gravity turn — or pitch east by hand with ${K('D')}`];
   if (el.escape || el.ap > MOON_DIST * 0.9) {
-    if (!isFinite(aim.altKm)) { const c = coarseAim(); return isFinite(c) && c < 2e5 ? [`${live ? 'Burning' : 'Translunar'} — rough lunar pass ${c < 0 ? 'IMPACT' : Math.round(c).toLocaleString() + ' km'} (want ${CORRIDOR.lo}–${CORRIDOR.hi}); exact figure when the engine is off`, c >= CORRIDOR.lo && c <= CORRIDOR.hi ? 'ok' : 'warn'] : [`Translunar — ${K('M')} map; computing your lunar aim…`]; }
-    if (aim.altKm < 0) return ['Lunar aim is an IMPACT — trim with a short retrograde burn', 'bad'];
-    return aim.corridor ? [`On course: ${Math.round(aim.altKm)} km lunar pass — warp with ${K(']')} and coast`, 'ok']
-      : [`Lunar pass ${Math.round(aim.altKm).toLocaleString()} km — want ${CORRIDOR.lo}–${CORRIDOR.hi}: trim pro/retrograde`, 'warn'];
+    /* The pass figure is live, engine lit or not (js/targeting.js): while burning it is the pass you
+       would get by cutting NOW, which is how the burn is ended — on the number, not on a guess. */
+    const pass = aim.altKm, txt = !isFinite(pass) ? '…' : pass < 0 ? 'IMPACT' : Math.round(pass).toLocaleString() + ' km';
+    const rMoon = S.pos.distanceTo(moonPos(getSimTime(), new THREE.Vector3()));
+    if (isFinite(aim.tMet) && aim.tMet - getSimTime() < 300 && rMoon > SOI_M && !live)
+      return [`The Moon is behind you — closest pass was ${txt}. ${K('R')} restarts the mission`, 'bad'];
+    if (live && getSasOn() && !getSasRetro() && !aim.corridor) return [`Translunar burn — SAS guidance cuts the engine on the lunar pass (now ${txt}) · apoapsis ${el.escape ? 'ESCAPE' : Math.round(el.ap).toLocaleString() + ' of 384,400 km'}`, 'ok'];
+    if (live) return aim.corridor ? [`CUT THE ENGINE NOW — ${K('SPACE')} — lunar pass ${txt} is in the corridor`, 'ok']
+      : [`Translunar burn — pass if you cut now: ${txt} (want ${CORRIDOR.lo}–${CORRIDOR.hi}) · apoapsis ${el.escape ? 'ESCAPE' : Math.round(el.ap).toLocaleString() + ' of 384,400 km'}`, pass < 0 || el.escape ? 'bad' : ''];
+    if (aim.corridor) return [`On course: ${txt} lunar pass — warp with ${K(']')} and coast`, 'ok'];
+    const t = aim.trim, how = Math.abs(t) < 0.3 ? '' : ` — trim ${t > 0 ? 'PROGRADE' : 'RETROGRADE'} about ${Math.abs(t) < 10 ? Math.abs(t).toFixed(1) : Math.round(Math.abs(t))} m/s (${t > 0 ? K('P') : K('V') + ' ' + K('P')}, a touch of ${K('⇧')}, watch this number)`;
+    return [`Lunar pass ${txt} — want ${CORRIDOR.lo}–${CORRIDOR.hi}${how || ': too far off for a small trim'}`, pass < 0 ? 'bad' : 'warn'];
   }
   if (el.pe < 140) return live ? [`Keep burning prograde until periapsis clears 150 km (now ${el.pe < 0 ? 'below ground' : Math.round(el.pe) + ' km'})`]
     : [`Not in orbit yet — burn prograde (${K('P')} + ${K('⇧')}) near apoapsis to raise periapsis`, 'warn'];
@@ -185,6 +193,25 @@ function tliCue() {
   return [`Parking orbit ✓ — translunar burn in ${m}:${String(sec).padStart(2, '0')} (${K('P')} prograde, then ${K('⇧')}) · warp with ${K(']')}`, s < 120 ? 'warn' : ''];
 }
 
+/* Milestones, graded as they happen — the landing is not the only thing a pilot did well or badly.
+   Orbit: by the CSM propellant it cost to get there (the certified ascent arrives with 124 t).
+   Injection: by where the cut left the lunar pass. Each is announced once per flight. */
+const done = { orbit: false, tli: false };
+export function resetMilestones() { done.orbit = done.tli = false; }
+function milestones({ state, nearMoon, el, live }) {
+  if (state !== 'flying' || nearMoon) return;
+  if (!done.orbit && !el.escape && el.pe >= 140 && el.ap < MOON_DIST * 0.5) {
+    done.orbit = true;
+    const csm = stages[2].separated ? 0 : stages[2].fuel, stars = csm >= 118 ? 3 : csm >= 95 ? 2 : 1;
+    addLog(`ORBIT ${'★'.repeat(stars)}${'☆'.repeat(3 - stars)} — ${Math.round(el.pe)} × ${Math.round(el.ap).toLocaleString()} km with ${csm.toFixed(0)} t of CSM propellant`, 'good');
+  }
+  if (!done.tli && !live && (el.escape || el.ap > MOON_DIST * 0.9) && isFinite(aim.altKm) && aim.status === 'done') {
+    done.tli = true;
+    const p = aim.altKm, stars = aim.corridor ? (p > 200 && p < 500 ? 3 : 2) : p >= 0 && p < 5000 ? 1 : 0;
+    addLog(`INJECTION ${'★'.repeat(stars)}${'☆'.repeat(3 - stars)} — lunar pass ${p < 0 ? 'IMPACT' : Math.round(p).toLocaleString() + ' km'}${aim.corridor ? '' : ' — needs a trim'}`, stars >= 2 ? 'good' : 'warn');
+  }
+}
+
 let hudTick = 0;
 let prevFlight = '', prevSoi = null, prevSep = -1;   // toast-purge transition sentinels
 
@@ -206,15 +233,15 @@ export function updateHUD(dt) {
   /* Altitude is the height of the lowest attached point over the ground underneath — the number
      contact is judged by (js/physics.js surfaceAlt) — in metres once that is what matters. */
   const alt = Math.max(0, surfaceAlt(nearMoon));
-  $('tAlt').textContent = alt < 10 ? `${Math.round(alt * 1000).toLocaleString()} m` : `${alt.toFixed(alt < 100 ? 1 : 0)} km`;
+  $('tAlt').textContent = alt < 10 ? `${Math.round(alt * 1000).toLocaleString()} m` : alt < 100 ? `${alt.toFixed(1)} km` : `${Math.round(alt).toLocaleString()} km`;
   /* The speed worth reading changes with where you are: over the ground while there is ground to
      hit or air to push through, around the body once you are in orbit of it. */
   const rel = groundVel(new THREE.Vector3());
   const orbital = !nearMoon && altE > 120;
-  const speed = orbital ? navVel(new THREE.Vector3()).length() : rel.length();
+  const speed = state === 'won' ? 0 : orbital ? navVel(new THREE.Vector3()).length() : rel.length();     // down is down: no frozen last reading
   $('tVelL').textContent = orbital ? 'orbital speed' : nearMoon ? 'surface speed' : 'ground speed';
   $('tVel').textContent = `${Math.round(speed * 1000).toLocaleString()} m/s`;
-  const radial = rel.dot(bodyUp(new THREE.Vector3()));
+  const radial = state === 'won' ? 0 : rel.dot(bodyUp(new THREE.Vector3()));
   $('tVs').textContent = `${radial >= 0 ? '+' : '−'}${Math.abs(radial * 1000).toFixed(0)} m/s`;
   const inAir = aeroState.q > 50 && state === 'flying';
   $('air').classList.toggle('on', inAir);
@@ -250,7 +277,9 @@ export function updateHUD(dt) {
     navVel(new THREE.Vector3()), nearMoon ? MU_M : MU_E, nearMoon ? RM : RE);
   $('oBody').textContent = nearMoon ? 'MOON' : 'EARTH';
   const km = n => !isFinite(n) ? 'ESCAPE' : n < 0 ? 'IMPACT' : n >= 1000000 ? (n / 1000).toFixed(1) + ' Mm' : Math.round(n).toLocaleString() + ' km';
-  $('oPe').textContent = km(el.pe); $('oAp').textContent = km(el.ap);
+  /* Standing on the pad there is no orbit to describe: 'apoapsis 0 km, periapsis IMPACT' is noise. */
+  const grounded = state === 'pad' || state === 'won';
+  $('oPe').textContent = grounded ? '—' : km(el.pe); $('oAp').textContent = grounded ? '—' : km(el.ap);
   $('oMoon').textContent = Math.round(rM).toLocaleString() + ' km' + (nearMoon ? ' · SOI' : '');
   /* Predicted closest lunar approach, from js/targeting.js. The translunar aim is worth about
      130 km of periselene per 1e-3 rad of launch phase and periselene decides whether the landing is
@@ -262,7 +291,7 @@ export function updateHUD(dt) {
   else if (aim.altKm < 0) { aimEl.textContent = 'IMPACT in ' + fmtMET(aim.tMet - getSimTime()); aimEl.className = 'impact'; }
   else {
     aimEl.textContent = Math.round(aim.altKm).toLocaleString() + ' km · ' + fmtMET(aim.tMet - getSimTime());
-    aimEl.className = (aim.corridor ? 'ok' : 'bad') + (aim.status === 'running' ? ' run' : '');
+    aimEl.className = aim.corridor ? 'ok' : 'bad';
   }
   $('oSas').textContent = getSasOn() ? 'ON' : 'OFF'; $('mSas').classList.toggle('on', getSasOn());
   $('mDirV').textContent = getSasRetro() ? 'RETRO' : 'PRO'; $('mDir').classList.toggle('on', getSasOn());
@@ -302,6 +331,7 @@ export function updateHUD(dt) {
 
   /* 'pad' state persists through the first seconds of the burn (it flips when the tower clears),
      so nextStep keys its ignite hint on the engine, not on the state alone. */
+  milestones({ state, nearMoon, el, live });
   const g = nextStep({ state, engineOn, live, i, dry, altE, alt, nearMoon, el, radial, speed: rel.length() });
   $('guideText').innerHTML = g[0]; $('guide').className = 'hud onmap ' + (g[1] || '');
   $('guide').style.display = state === 'won' || state === 'lost' ? 'none' : 'flex';
@@ -321,6 +351,10 @@ export function initHUD({ resetMission }) {
   buildStagePips();
   initNavball($('navball'), $('orbit'));
   $('bigBtn').addEventListener('click', () => resetMission());
+  /* The card covers the thing you just did. LOOK AROUND puts it away and leaves the camera and the
+     map live; R (or the chip) restarts. */
+  $('lookBtn').addEventListener('click', () => { $('overlay').classList.add('hidden'); $('again').style.display = 'flex'; });
+  $('again').addEventListener('click', () => resetMission());
   $('helpBtn').addEventListener('click', () => $('helpCard').classList.toggle('on'));
   /* Every chip is the key it names: clicking sends that key through the same handler. */
   for (const b of document.querySelectorAll('button[data-key]')) b.addEventListener('click', () => {

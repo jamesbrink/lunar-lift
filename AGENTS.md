@@ -161,9 +161,10 @@ always and says so in its source; anything that certifies a mission must use the
 - **Pause** (`WARPS[0] = 0`, ESC or `[`): nothing steps — not the physics, the planets, the exhaust
   or the debris — and `S` keeps the drawn state; the camera, the map and the HUD stay live.
   **×0.25** is the same 0.1 s steps, fewer per second; the interpolation is what makes it smooth.
-- Warp is capped by place (`warpCap()`, enforced every frame by `guardWarp()`): ×4 below 70 km or
-  within 15 km of the Moon, ×32 within 150 km of the Moon, ×16 below 140 km, ×1000 otherwise in
-  flight; it drops to ×1 on crossing the Moon's sphere of influence either way.
+- Warp is capped by place (`warpCap()`, enforced every frame by `guardWarp()`): ×4 below 70 km
+  (×16 under fully open mains), ×4 within 15 km of the Moon, ×32 within 50 km, ×128 within 400 km,
+  ×16 below 140 km of the Earth, ×8 while the engine burns, ×1000 otherwise in flight; it drops to
+  ×1 on crossing the Moon's sphere of influence either way. `capWhy` carries the reason to the log.
 
 History, because these notes were wrong about it: before commit 55f18fa the step was
 `min(0.1, simDt / steps)` — the frame time itself below ×6, 1/60 s at ×1 — while this file, the
@@ -182,12 +183,14 @@ step, the drag model or `gravityAt` and the window constant is wrong. The flight
 it by 0.036 rad (4.9561012 → 4.9198031 for the same 200 km aim), twenty times the 1.75e-3 rad
 between today's window and the last late flight that lands.
 
-A corollary for anything that *predicts* the game: reproduce its discretisation. `simTime += dt`,
-gravity at the advanced time, `v += a·dt`, `p += v·dt`. `js/targeting.js` does exactly that: from the
-shipped coast-start state it and a real `physStep` coast both arrive at 345.66 km (run headless), and
-it is within ~1 km of the tool's whole-km periselene on six certified flights. A converged
-velocity-Verlet integration of the same state says 443.6 km — 98 km from the ship's real trajectory,
-which would make the readout lie.
+A corollary for anything that *predicts* the game: account for its discretisation. The step is
+`simTime += dt`, gravity at the advanced time, `v += a·dt`, `p += v·dt` — leapfrog with the velocity
+written half a step late. `js/targeting.js` (`lunarPass`) does not replay those steps; it starts a
+velocity-Verlet integration from `(p, v + a·dt/2)` with a step that follows the local radius, which
+lands on the game's own future in about a millisecond. A converged integration from the raw
+`(p, v)` does not: the half-step term is worth about 100 km of periselene at the Moon. The
+measured figures for both are in that file's header (they were not re-run for this note); change
+the step, or predict from the raw state, and the readout lies.
 
 ## Rule: one aerodynamic evaluation feeds both the trajectory and the attitude
 
@@ -478,15 +481,15 @@ await tab.evaluate(`(async () => {
   const g = window.game;
   g.ignite(); g.ff(20); g.stage();                      // stage() cuts the engine: throttle really 0
   g.teleport(pos, vel, simTime);                        // time included: the Moon is a function of it
-  const T = await import('/js/targeting.js');           // same module instance the game uses
-  while (T.aim.status !== 'done') T.updateAim();
+  const T = await import('/js/targeting.js'), P = await import('/js/physics.js');   // the game's own module instances
+  const pass = T.lunarPass(P.S.pos, P.S.v, P.getSimTime(), { alt: 0, t: 0 }).alt;   // km; -1 is an impact
 })()`);
 ```
 
 - Read HUD text only after `await new Promise(r => setTimeout(r, 700))`. A hidden tab throttles
-  `requestAnimationFrame`, so counting frames or awaiting rAF gives stale text like `0 m/s ground`,
-  and long `ff()`-free propagations finish ~10× slower than the 865 calls they take (counted
-  headless, from the shipped coast start) when you drive `updateAim()` directly.
+  `requestAnimationFrame`, so counting frames or awaiting rAF gives stale text like `0 m/s ground`.
+  `updateAim()` refreshes `aim` at most every 250 ms of wall clock; for a number now, call
+  `lunarPass()` yourself.
 - `ff(seconds)` steps the shipped `physStep` at 0.1 s without rendering; it is how a multi-day coast
   is crossed in a test. It leaves `S` true; between rendered frames `S` and `getSimTime()` are the
   DRAWN, interpolated state (see "the step is part of the trajectory"), up to 0.1 s behind.
@@ -542,7 +545,7 @@ One concern per file; no god files.
 - `js/physics.js` — the integrator (`physStep`), frames (`navVel` / `groundVel` / `bodyUp`), staging, SAS and hold, loads, entry, parachutes, contact, end states. Display-free.
 - `js/aero.js` — density, `airVel`, Mach drag rise, the one `aeroForce()` evaluation. Display-free.
 - `js/colliders.js` — the one table of pad solids and swing arms: what `pad.js` draws and what `physics.js` hits. Display-free.
-- `js/targeting.js` — predicted closest lunar approach, by the game's own discretisation.
+- `js/targeting.js` — predicted closest lunar approach (`lunarPass`), the trim hint (`aim.trim`) and the SAS injection cutoff (`cutoffNow`).
 - `js/predictor.js` — the trajectory ribbon ahead of the ship, apsis markers, the impact warning.
 
 **Vehicle and exhaust**
