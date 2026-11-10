@@ -144,9 +144,14 @@ export function resetCameraView() {
 const AXIS = new THREE.Vector3(0, 1, 0);
 let placed = false;
 
+/* The instrument cluster owns the bottom-centre of the screen, so the optical centre is lifted
+   8 % of the height: the ship the camera aims at stands above the attitude ball, not behind it. */
 export function resizeCamera() {
-  camera.aspect = innerWidth / innerHeight; camera.updateProjectionMatrix();
+  camera.aspect = innerWidth / innerHeight;
+  camera.setViewOffset(innerWidth, innerHeight, 0, Math.round(innerHeight * 0.08), innerWidth, innerHeight);
+  camera.updateProjectionMatrix();
 }
+resizeCamera();
 
 // "up" follows the nearest body's radial direction, cross-blended near the SOI boundary:
 // the horizon stays level and the view can never roll or flip, whatever the rocket does.

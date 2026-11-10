@@ -4,79 +4,103 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>LUNAR LIFT — a three-stage lunar mission</title>
+<link rel="icon" href="data:,">
 <link rel="stylesheet" href="css/style.css">
 </head>
 <body>
 <canvas id="gl"></canvas>
 
+<!-- Top centre: clock, then the one line that says what to do next. -->
 <div id="clock" class="hud onmap">MET <b id="met">00:00:00</b> &nbsp;·&nbsp; <span id="warpInd">×1</span></div>
+<div id="guide" class="hud onmap"><span id="guideTag">NEXT</span><span id="guideText"></span></div>
 <div id="log" class="hud onmap"></div>
 <div id="warn" class="hud flightonly"></div>
 <div id="desc" class="hud flightonly"></div>
-<div id="igniteHint" class="hud flightonly">PRESS <b>SPACE</b> TO IGNITE — hold <b>⇧ SHIFT</b> FOR FULL THROTTLE</div>
-<div id="throttle" class="hud flightonly">
-  <div id="thrBig">0<span> %</span></div>
-  <div id="thrGauge"><i></i></div>
-  <div id="engState">FLAMEOUT</div>
-</div>
 
+<!-- Top left: where am I and how fast. The air row appears only while there is air. -->
 <div id="tel" class="hud panel onmap">
-  <h3>Telemetry</h3>
+  <h3>Flight</h3>
   <div class="kv">
-    <span>altitude</span><b id="tAlt">0 km</b>
-    <span>velocity</span><b id="tVel">0 m/s</b>
+    <span id="tAltL">altitude</span><b id="tAlt">0 km</b>
+    <span id="tVelL">speed</span><b id="tVel">0 m/s</b>
     <span>vertical</span><b id="tVs">0 m/s</b>
+  </div>
+  <div id="air" class="kv">
+    <span>mach</span><b id="aMach">0.00</b>
+    <span>dyn. pressure</span><b id="aQ">0 kPa</b>
+    <span>angle of attack</span><b id="aAoa">0°</b>
+    <span>side load</span><b id="aLoad">0.00 g</b>
   </div>
 </div>
 
+<!-- Top right: the orbit — the numbers a burn is flown by — in flight and on the map alike. -->
+<div id="orb" class="hud panel onmap">
+  <h3>Orbit · <span id="oBody">EARTH</span></h3>
+  <canvas id="orbit" class="flightonly"></canvas>
+  <div class="kv">
+    <span>apoapsis</span><b id="oAp">—</b>
+    <span>periapsis</span><b id="oPe">—</b>
+    <span>moon range</span><b id="oMoon">—</b>
+    <span>lunar aim</span><b id="oAim">—</b>
+  </div>
+</div>
+
+<!-- Bottom left: what is left in the tanks, as propellant and as delta-v. -->
 <div id="stages" class="hud panel flightonly">
+  <h3>Stages <span id="dvTotal"></span></h3>
   <div id="stagePips"></div>
   <div id="stageHint"></div>
 </div>
 
-<div id="nav" class="hud panel flightonly">
-  <h3>Attitude &amp; orbit</h3>
-  <canvas id="navball"></canvas>
-  <canvas id="orbit"></canvas>
-  <div class="kv" style="margin-top:6px">
-    <span>heading</span><b id="nHeading">—</b>
-    <span>pitch</span><b id="nPitch">—</b>
-    <span>burn</span><b id="nBurn">idle</b>
+<!-- Bottom centre: the instrument you fly by. Throttle, attitude ball, and the modes that steer it. -->
+<div id="cockpit" class="hud flightonly">
+  <div id="throttle" class="panel">
+    <div id="thrGauge"><i></i></div>
+    <div id="thrBig">0<span>%</span></div>
+    <div class="keys"><kbd>⇧</kbd><kbd>CTRL</kbd></div>
+  </div>
+  <div id="nav" class="panel">
+    <canvas id="navball"></canvas>
+    <div id="navRead"><span>HDG <b id="nHeading">—</b></span><span>PITCH <b id="nPitch">—</b></span></div>
+    <div id="engState">ENGINE OFF</div>
+    <b id="nBurn" hidden>idle</b>
+  </div>
+  <div id="modes" class="panel">
+    <button id="mSas" data-key="p"><kbd>P</kbd><span>SAS</span><b id="oSas">OFF</b></button>
+    <button id="mDir" data-key="v"><kbd>V</kbd><span>HOLD</span><b id="mDirV">PRO</b></button>
+    <button id="mRcs" data-key="t"><kbd>T</kbd><span>RCS</span><b id="mRcsV">ON</b></button>
+    <button id="mStage" data-key="x"><kbd>X</kbd><span>STAGE</span><b id="mStageV">S-1</b></button>
   </div>
 </div>
 
-<!-- M toggles body.map: the whole screen becomes the orbital map; the flight computer rides
-     along because periapsis/lunar-aim are the numbers you steer by. MET/velocity live in the
-     shared .onmap readouts above. -->
+<!-- Bottom right: view and time. Every chip is a button and names its key. -->
+<div id="views" class="hud onmap">
+  <button data-key="c"><kbd>C</kbd><span>CAM</span><b id="vCam">ORBIT</b></button>
+  <button data-key="m"><kbd>M</kbd><span>MAP</span></button>
+  <button data-key="["><kbd>[</kbd><span>SLOWER</span></button>
+  <button data-key="]"><kbd>]</kbd><span>FASTER</span><b id="vWarp">×1</b></button>
+  <button id="helpBtn"><kbd>?</kbd><span>KEYS</span></button>
+</div>
+<span id="oCtrl" hidden></span>
+
+<!-- M toggles body.map: the whole screen becomes the orbital map. The shared .onmap panels
+     (clock, guide, flight, orbit, views) ride above it. -->
 <div id="mapview">
   <canvas id="mapCanvas"></canvas>
-  <div id="orb" class="panel">
-    <h3>Flight computer</h3>
-    <div class="kv">
-      <span>body</span><b id="oBody">EARTH</b>
-      <span>periapsis</span><b id="oPe">—</b>
-      <span>apoapsis</span><b id="oAp">—</b>
-      <span>range → moon</span><b id="oMoon">—</b>
-      <span>lunar aim</span><b id="oAim">—</b>
-      <span>sas</span><b id="oSas">off</b>
-      <span>authority</span><b id="oCtrl">×1.0</b>
-    </div>
-  </div>
 </div>
 
-<button id="helpBtn" class="flightonly" title="controls">? controls</button>
-<div id="helpCard" class="panel flightonly">
+<div id="helpCard" class="panel">
   <div class="cols">
-    <div><kbd>SPACE</kbd>ignite booster</div><div><kbd>Q</kbd><kbd>E</kbd>roll</div>
-    <div><kbd>⇧</kbd>throttle up</div><div><kbd>W</kbd><kbd>S</kbd>pitch</div>
-    <div><kbd>CTRL</kbd>throttle down</div><div><kbd>A</kbd><kbd>D</kbd>yaw</div>
-    <div><kbd>X</kbd>separate stage</div><div><kbd>C</kbd>camera</div>
-    <div><kbd>P</kbd>SAS autopilot</div><div><kbd>V</kbd>pro / retro grade</div>
-    <div><kbd>[</kbd><kbd>]</kbd>time warp ×1→×1000</div><div><kbd>R</kbd>restart mission</div>
-    <div><kbd>M</kbd>orbital map</div>
+    <div><kbd>SPACE</kbd>ignite / cut engine</div><div><kbd>W</kbd><kbd>S</kbd>pitch</div>
+    <div><kbd>⇧</kbd><kbd>CTRL</kbd>throttle up / down</div><div><kbd>A</kbd><kbd>D</kbd>yaw</div>
+    <div><kbd>X</kbd>drop the spent stage</div><div><kbd>Q</kbd><kbd>E</kbd>roll</div>
+    <div><kbd>P</kbd>SAS autopilot on / off</div><div><kbd>V</kbd>SAS prograde / retrograde</div>
+    <div><kbd>T</kbd>RCS stability assist</div><div><kbd>C</kbd>camera: orbit / chase / system</div>
+    <div><kbd>[</kbd><kbd>]</kbd>time warp ×1 → ×1000</div><div><kbd>M</kbd>orbital map</div>
+    <div><kbd>R</kbd>restart mission</div><div>drag · wheel · double-click: look · zoom · re-centre</div>
   </div>
-  <p>The <b style="color:var(--fg)">S-1 solid booster</b> burns at 100% once lit and sheds itself at burnout; the S-2 and CSM engines are throttled with <b style="color:var(--fg)">⇧ / CTRL</b>. Chase the <b style="color:var(--fg)">green trajectory line</b>: pitch toward the Moon while climbing (gravity turn), build an apoapsis past the Moon's dashed sphere of influence, then flip <b style="color:var(--fg)">V + P</b> and burn retrograde at encounter to land softer than <b style="color:var(--fg)">32 m/s</b>.</p>
-  <p>Controls are inertial: the keys apply torque, so the fully fueled stack turns slowly and control authority climbs as propellant burns off.</p>
+  <p>The <b>S-1 solid booster</b> burns at full thrust once lit and drops itself at burnout; the S-2 and CSM engines throttle. <b>SAS</b> flies the gravity turn for you and then holds the velocity vector — prograde to speed up, retrograde to brake. In thick air keep the nose near the airflow: the <b>side load</b> readout turns red before the stack breaks.</p>
+  <p>The keys apply torque, so a full stack turns slowly and gets livelier as it empties. With <b>RCS assist</b> off nothing damps a rotation in vacuum but you.</p>
 </div>
 
 <div id="overlay" class="hidden">

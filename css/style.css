@@ -25,16 +25,10 @@
   .panel h3{font-size:10px;letter-spacing:.14em;color:var(--muted);text-transform:uppercase;margin-bottom:6px}
   .kv{display:grid;grid-template-columns:1fr auto;gap:2px 14px;font-family:var(--mono);font-size:13px}
   .kv b{font-weight:600;color:var(--fg)} .kv span{color:var(--muted)}
-  #tel{left:14px;top:14px;min-width:210px}
   /* flight computer lives inside #mapview only, so it positions against the overlay */
-  #orb{position:absolute;right:14px;top:14px;min-width:215px}
   /* predicted closest lunar approach: green inside the flown corridor, amber outside it,
      dim while the forward propagation is still running, red for a surface intersection */
   #oAim.ok{color:var(--ok)} #oAim.bad{color:var(--warn)} #oAim.run{color:var(--muted)} #oAim.impact{color:var(--err)}
-  #stages{left:14px;bottom:14px;width:250px}
-  #nav{left:14px;top:calc(50% - 155px);width:196px}
-  #navball{display:block;margin:0 auto}
-  #orbit{display:block;margin:8px auto 0;border-radius:6px;background:#0a1017}
   /* M overlay: the orbital map replaces the flight screen. .onmap readouts (MET, alt, vel, log)
      ride above it; #overlay (win/lose, z10) stays the topmost layer. */
   #mapview{position:fixed;inset:0;z-index:6;background:#05070d;pointer-events:none}
@@ -46,7 +40,7 @@
   #clock{left:50%;top:6px;transform:translateX(-50%);font-family:var(--mono);font-size:12px;
     color:var(--ob-muted);letter-spacing:.08em;white-space:nowrap;text-shadow:var(--ob-halo)}
   #clock b{color:var(--ob-fg)} #warpInd{color:var(--ob-accent)}
-  #log{left:50%;top:64px;transform:translateX(-50%);display:flex;flex-direction:column;align-items:center;gap:4px;width:520px}
+  #log{left:50%;top:78px;transform:translateX(-50%);display:flex;flex-direction:column;align-items:center;gap:4px;width:520px}
   /* Toast lifecycle lives in hud.js (cap 2 live, ~4.5 s life); CSS only carries the two short
      ramps. The old single 9 s `logfade` ramped opacity 70%→100% over 2.7 s — measured 10 of 40
      250 ms samples with an element strictly mid-alpha, the reviewer's "mid-fade ghost banner".
@@ -60,7 +54,7 @@
   .logline.bad{border-color:rgba(255,106,92,.55);color:var(--err)}
   @keyframes logfadein{0%{opacity:0;transform:translateY(6px)}100%{opacity:1;transform:none}}
   @keyframes logfadeout{0%{opacity:1}100%{opacity:0}}
-  #warn{left:50%;top:150px;transform:translateX(-50%);font-family:var(--mono);font-size:15px;color:var(--ob-err);
+  #warn{left:50%;top:164px;transform:translateX(-50%);font-family:var(--mono);font-size:15px;color:var(--ob-err);
     text-shadow:var(--ob-halo);display:none;letter-spacing:.06em}
   /* DESCENT gets its own vertical slot, clear of #thrBig at every window height. The throttle
      column is a fixed bottom-anchored box: offset 78 + engState 16 (11px×1.45) + gauge 20
@@ -70,7 +64,7 @@
      strip's own 22px height of clearance. 192 = stack top + one full line of margin, and
      because every offset is bottom-anchored the gap is the same at any window height. Raising
      the strip instead of moving the numeral: one number, zero DOM churn. */
-  #desc{left:50%;bottom:192px;transform:translateX(-50%);font-family:var(--mono);font-size:15px;display:none;text-align:center;
+  #desc{left:50%;bottom:236px;transform:translateX(-50%);font-family:var(--mono);font-size:15px;display:none;text-align:center;
     color:var(--ob-fg);text-shadow:var(--ob-halo)}
   /* Round-6: the centre banners carry their OWN background now. Review 5 measured the shipped
      --ob-* inks against bright regolith directly — the IMPACT red hit 2.08:1 and the DESCENT
@@ -86,7 +80,7 @@
      it cannot invent contrast on night. The plate makes them legible on any background. Padding
      grows OUTWARD: #clock top 10→6 and #throttle bottom 78→72 with 4/6 px padding put the text
      exactly where it was measured before (DESCENT clearance at 192 px unchanged). */
-  #warn,#desc,#igniteHint{background:rgba(240,244,250,.9);border:1px solid rgba(16,24,36,.28);
+  #warn,#desc{background:rgba(240,244,250,.9);border:1px solid rgba(16,24,36,.28);
     border-radius:7px;padding:5px 12px}
   #clock{background:rgba(240,244,250,.9);border:1px solid rgba(16,24,36,.28);
     border-radius:7px;padding:4px 12px}
@@ -110,11 +104,7 @@
   .stageRow .name{font-family:var(--mono);font-size:11px;color:var(--muted);min-width:88px}
   .stageRow.active .name{color:var(--fg)}
   #stageHint{margin-top:6px;font-size:12px;color:var(--warn);font-family:var(--mono)}
-  #helpBtn{position:fixed;right:16px;bottom:14px;z-index:7;pointer-events:auto;
-    background:var(--panel);border:1px solid var(--panel-border);color:var(--muted);border-radius:8px;
-    padding:6px 12px;font:inherit;font-size:12px;cursor:pointer}
-  #helpBtn:hover{color:var(--fg)}
-  #helpCard{position:fixed;right:16px;bottom:52px;z-index:7;display:none;width:440px}
+  #helpCard{position:fixed;right:14px;bottom:62px;z-index:9;display:none;width:470px}
   #helpCard.on{display:block}
   #helpCard .cols{display:grid;grid-template-columns:1fr 1fr;gap:2px 18px;font-family:var(--mono);font-size:12px}
   #helpCard kbd{display:inline-block;min-width:22px;text-align:center;padding:1px 6px;margin-right:6px;
@@ -135,15 +125,65 @@
   #bigBtn{pointer-events:auto;background:linear-gradient(180deg,#8fdcff,#4cb8e8);border:0;color:#06222f;
     font:inherit;font-weight:700;font-size:15px;letter-spacing:.12em;padding:11px 34px;border-radius:9px;cursor:pointer}
   #bigBtn:hover{filter:brightness(1.1)}
-  #throttle{left:50%;bottom:72px;transform:translateX(-50%);text-align:center;pointer-events:none;
-    background:rgba(240,244,250,.9);border:1px solid rgba(16,24,36,.28);border-radius:9px;padding:6px 16px}
-  #thrBig{font-family:var(--mono);font-size:30px;font-weight:700;letter-spacing:.04em;
-    color:var(--ob-fg);text-shadow:var(--ob-halo)}
-  #thrBig span{font-size:15px;color:var(--ob-muted);font-weight:500}
-  #thrGauge{width:170px;height:10px;margin:6px auto 4px;border-radius:5px;background:rgba(10,14,22,.72);
-    border:1px solid var(--panel-border);overflow:hidden}
-  #thrGauge i{display:block;height:100%;width:0%;background:linear-gradient(90deg,#8fdcff,#4cb8e8);transition:width .12s}
-  #engState{font-family:var(--mono);font-size:11px;letter-spacing:.14em;color:var(--ob-muted);text-shadow:var(--ob-halo)}
-  #engState.live{color:var(--ob-accent)}
-  #igniteHint{left:50%;bottom:168px;transform:translateX(-50%);font-family:var(--mono);font-size:14px;
-    color:var(--ob-accent);text-shadow:var(--ob-halo);display:none;letter-spacing:.06em}
+
+  /* ---- layout: corners carry reference, the bottom centre carries the instrument ----
+     top-left flight numbers · top-centre clock + next step · top-right orbit
+     bottom-left tanks · bottom-centre throttle | attitude ball | modes · bottom-right view + time
+     The middle of the frame belongs to the ship and nothing is drawn over it. */
+  #tel{left:14px;top:14px;width:236px}
+  #tel .kv b{text-align:right}
+  #air{margin-top:6px;padding-top:6px;border-top:1px solid var(--panel-border);display:none}
+  #air.on{display:grid}
+  #aLoad.warn,#aAoa.warn{color:var(--warn)} #aLoad.bad{color:var(--err)}
+  #orb{right:14px;top:14px;width:236px}
+  #orb .kv b{text-align:right}
+  #orbit{display:block;margin:0 auto 8px;border-radius:6px;background:#0a1017}
+  #stages{left:14px;bottom:14px;width:292px}
+  #stages h3 span{float:right;letter-spacing:.04em;color:var(--fg);font-family:var(--mono);text-transform:none}
+  .stageRow{grid-template-columns:auto auto 1fr auto !important}
+  .stageRow .dv{font-family:var(--mono);font-size:11px;color:var(--muted);min-width:64px;text-align:right}
+  .stageRow.active .dv{color:var(--accent)}
+  .stageRow .name{min-width:0}
+
+  #guide{left:50%;top:38px;transform:translateX(-50%);white-space:nowrap;font-size:14px;font-weight:600;
+    background:rgba(240,244,250,.94);color:var(--ob-fg);border:1px solid rgba(16,24,36,.28);border-radius:8px;
+    padding:5px 14px 5px 6px;display:flex;align-items:center;gap:10px;max-width:calc(100vw - 540px)}
+  #guideText{overflow:hidden;text-overflow:ellipsis}
+  #guideText kbd{display:inline-block;min-width:20px;text-align:center;padding:0 6px;margin:0 2px;border-radius:5px;
+    border:1px solid rgba(16,24,36,.45);border-bottom-width:2px;background:#fff;font-family:var(--mono);font-size:12px}
+  #guideTag{font-family:var(--mono);font-size:10px;letter-spacing:.14em;padding:3px 7px;border-radius:5px;
+    background:var(--ob-accent);color:#fff}
+  #guide.warn #guideTag{background:var(--ob-warn)} #guide.bad #guideTag{background:var(--ob-err)}
+  #guide.ok #guideTag{background:var(--ob-ok)}
+
+  #cockpit{left:50%;bottom:14px;transform:translateX(-50%);display:flex;align-items:flex-end;gap:8px}
+  #throttle{display:flex;flex-direction:column;align-items:center;gap:6px;padding:10px 10px 8px;width:62px}
+  #thrGauge{width:16px;height:118px;border-radius:8px;background:#222b3a;border:1px solid var(--panel-border);
+    overflow:hidden;display:flex;align-items:flex-end}
+  #thrGauge i{display:block;width:100%;height:0%;background:linear-gradient(0deg,#4cb8e8,#8fdcff);transition:height .12s}
+  #thrGauge.live i{background:linear-gradient(0deg,#ff9a3c,#ffe08a)}
+  #thrBig{font-family:var(--mono);font-size:17px;font-weight:700;color:var(--fg)}
+  #thrBig span{font-size:11px;color:var(--muted);font-weight:500;margin-left:1px}
+  #cockpit .keys kbd,#modes kbd,#views kbd{display:inline-block;min-width:20px;text-align:center;padding:0 5px;
+    border:1px solid var(--panel-border);border-bottom-width:2px;border-radius:5px;background:#1a2230;
+    font-family:var(--mono);font-size:10px;color:var(--muted)}
+  #cockpit .keys{display:flex;flex-direction:column;gap:3px}
+  #nav{padding:8px 10px 8px;text-align:center}
+  #navball{display:block;margin:0 auto}
+  #navRead{display:flex;justify-content:space-between;font-family:var(--mono);font-size:11px;color:var(--muted);margin-top:4px}
+  #navRead b{color:var(--fg)}
+  #engState{font-family:var(--mono);font-size:10px;letter-spacing:.12em;color:var(--muted);margin-top:3px}
+  #engState.live{color:#ffc978}
+  #modes{display:flex;flex-direction:column;gap:5px;padding:8px}
+  #modes button,#views button{pointer-events:auto;cursor:pointer;display:flex;align-items:center;gap:7px;
+    background:rgba(26,34,48,.9);border:1px solid var(--panel-border);border-radius:7px;color:var(--muted);
+    font:600 11px/1 var(--mono);letter-spacing:.08em;padding:6px 8px;min-width:118px}
+  #modes button b,#views button b{margin-left:auto;color:var(--fg)}
+  #modes button:hover,#views button:hover{border-color:var(--accent);color:var(--fg)}
+  #modes button.on{border-color:rgba(93,220,154,.65);background:rgba(20,56,40,.9)} #modes button.on b{color:var(--ok)}
+  #modes button.alert{border-color:var(--warn);animation:pulse 1s infinite} #modes button.alert b{color:var(--warn)}
+  @keyframes pulse{50%{background:rgba(96,58,0,.9)}}
+  #views{right:14px;bottom:14px;display:flex;gap:5px;z-index:8}
+  #views button{min-width:0;background:var(--panel);backdrop-filter:blur(6px)}
+  #helpCard b{color:var(--fg)}
+  @media (max-width:1100px){ #modes button{min-width:96px} #guide{max-width:calc(100vw - 40px);top:44px} #tel,#orb{width:200px} }

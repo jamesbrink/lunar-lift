@@ -1,7 +1,9 @@
 import * as THREE from 'three';
-import { RE, RM, MU_E, MU_M, SOI_M, MOON_DIST, PAD_UP, PAD_POS, WARPS, SPECS, moonPos } from './constants.js';
+import { RE, RM, MU_E, MU_M, SOI_M, MOON_DIST, PAD_UP, PAD_POS, WARPS, SPECS, CAPSULE_MASS, LAND_SAFE, moonPos } from './constants.js';
 import { stages } from './saturn.js';
-import { S, getState, getSimTime, getEngineOn, getThrottle, getWarpIndex, getSasOn, getSasRetro, getDistFlown, getMaxQ, getTrail, activeStage, orbitalElements, getControlAuthority, groundVel, bodyUp, navVel } from './physics.js';
+import { S, getState, getSimTime, getEngineOn, getThrottle, getWarpIndex, getSasOn, getSasRetro, getDistFlown, getMaxQ, getTrail, activeStage, orbitalElements, getControlAuthority, groundVel, bodyUp, navVel, surfaceAlt, aeroState, getAeroLoad, getRcsAssist, LOAD_LIMIT_STACK, LOAD_LIMIT_CSM } from './physics.js';
+import { getCamMode } from './camera.js';
+import { CORRIDOR } from './targeting.js';
 import { drawn } from './predictor.js';
 import * as WORLD from './world.js';
 import { initNavball, updateNavball } from './navball.js';
@@ -62,7 +64,7 @@ export function buildStagePips() {
   const box = $('stagePips'); box.innerHTML = '';
   stages.forEach((st, i) => {
     const row = document.createElement('div'); row.className = 'stageRow'; row.id = 'pip' + i;
-    row.innerHTML = `<span class="pip"></span><span class="bar"><i style="width:100%"></i></span><span class="name">${SPECS[i].name}</span>`;
+    row.innerHTML = `<span class="pip"></span><span class="name">${SPECS[i].name}</span><span class="bar"><i style="width:100%"></i></span><span class="dv"></span>`;
     box.appendChild(row);
   });
 }
@@ -90,6 +92,36 @@ export function endOverlay(title, body, btn) {
   $('overlay').classList.remove('hidden');
 }
 
+/* The one line under the clock: what to do now, with the key that does it. Derived from the same
+   state the readouts show — nothing here is scripted to a clock, so it is right for any flight. */
+const K = k => `<kbd>${k}</kbd>`;
+function nextStep({ state, engineOn, live, i, dry, altE, alt, nearMoon, el, radial, speed }) {
+  if (state === 'pad') return engineOn ? ['Engines building thrust — hold on', 'ok']
+    : [`${K('SPACE')} ignite · then ${K('P')} lets SAS fly the ascent`];
+  if (state !== 'flying') return [''];
+  if (dry) return i === 2 ? ['Out of propellant — you are a passenger now', 'bad'] : [`Tank empty — ${K('X')} drop the stage`, 'warn'];
+  if (nearMoon) {
+    const vs = -radial * 1000;
+    if (el.escape || el.pe > 0 && !el.escape && el.ap > SOI_M) return [`Capture: ${K('V')} retrograde, ${K('P')} SAS, burn at the lowest point (${Math.round(el.pe)} km)`];
+    if (el.pe > 0) return [`In lunar orbit — burn retrograde to drop periapsis below the surface`, 'ok'];
+    if (alt > 30) return [`Descent: stay retrograde (${K('V')} ${K('P')}); start braking by ~30 km up`];
+    return vs > LAND_SAFE * 1000 ? [`BRAKE — ${vs.toFixed(0)} m/s down, touch under ${LAND_SAFE * 1000} m/s`, 'bad']
+      : [`Good descent: ${vs.toFixed(0)} m/s — keep it under ${LAND_SAFE * 1000} m/s and upright`, 'ok'];
+  }
+  if (altE < 120 && el.ap < 140) return getSasOn() ? ['SAS is flying the gravity turn — watch apoapsis climb', 'ok']
+    : [`${K('P')} SAS flies the gravity turn — or pitch east by hand with ${K('D')}`];
+  if (el.escape || el.ap > MOON_DIST * 0.9) {
+    if (!isFinite(aim.altKm)) return [`Translunar — ${K('M')} map; computing your lunar aim…`];
+    if (aim.altKm < 0) return ['Lunar aim is an IMPACT — trim with a short retrograde burn', 'bad'];
+    return aim.corridor ? [`On course: ${Math.round(aim.altKm)} km lunar pass — warp with ${K(']')} and coast`, 'ok']
+      : [`Lunar pass ${Math.round(aim.altKm).toLocaleString()} km — want ${CORRIDOR.lo}–${CORRIDOR.hi}: trim pro/retrograde`, 'warn'];
+  }
+  if (el.pe < 140) return live ? [`Keep burning prograde until periapsis clears 150 km (now ${el.pe < 0 ? 'below ground' : Math.round(el.pe) + ' km'})`]
+    : [`Not in orbit yet — burn prograde (${K('P')} + ${K('⇧')}) near apoapsis to raise periapsis`, 'warn'];
+  return live ? [`Translunar burn — hold prograde until apoapsis reaches the Moon (${Math.round(el.ap).toLocaleString()} km)`]
+    : [`Parking orbit ✓ — at periapsis, burn prograde (${K('P')} + ${K('⇧')}) to reach the Moon · ${K('M')} map`, 'ok'];
+}
+
 let hudTick = 0;
 let prevFlight = '', prevSoi = null, prevSep = -1;   // toast-purge transition sentinels
 
@@ -108,30 +140,45 @@ export function updateHUD(dt) {
   if ((prevFlight && state !== prevFlight) || (prevSoi !== null && nearMoon !== prevSoi)
     || (prevSep >= 0 && sepMask !== prevSep)) purgeToasts();
   prevFlight = state; prevSoi = nearMoon; prevSep = sepMask;
-  const alt = nearMoon ? altM : altE;
-  // KSP-style: the speed you read is the speed over the surface underneath — the co-rotating
-  // ground near Earth, the travelling Moon near the Moon (see groundVel in physics.js)
+  /* Altitude is the height of the lowest attached point over the ground underneath — the number
+     contact is judged by (js/physics.js surfaceAlt) — in metres once that is what matters. */
+  const alt = Math.max(0, surfaceAlt(nearMoon));
+  $('tAlt').textContent = alt < 10 ? `${Math.round(alt * 1000).toLocaleString()} m` : `${alt.toFixed(alt < 100 ? 1 : 0)} km`;
+  /* The speed worth reading changes with where you are: over the ground while there is ground to
+     hit or air to push through, around the body once you are in orbit of it. */
   const rel = groundVel(new THREE.Vector3());
-  const speed = rel.length();
-  $('tAlt').textContent = `${Math.max(0, alt).toFixed(alt < 100 ? 1 : 0)} km`;
-  $('tVel').textContent = `${(speed * 1000).toFixed(0)} m/s ${nearMoon ? 'surface' : 'ground'}`;
-  /* Vertical speed against the surface underneath. Dotting against (pos − centre) is the
-     radial direction; the previous version passed S.pos for both arguments on Earth, which made
-     the product identically zero. */
+  const orbital = !nearMoon && altE > 120;
+  const speed = orbital ? navVel(new THREE.Vector3()).length() : rel.length();
+  $('tVelL').textContent = orbital ? 'orbital speed' : nearMoon ? 'surface speed' : 'ground speed';
+  $('tVel').textContent = `${Math.round(speed * 1000).toLocaleString()} m/s`;
   const radial = rel.dot(bodyUp(new THREE.Vector3()));
-  $('tVs').textContent = `${(radial * 1000).toFixed(0)} m/s`;
+  $('tVs').textContent = `${radial >= 0 ? '+' : '−'}${Math.abs(radial * 1000).toFixed(0)} m/s`;
+  const inAir = aeroState.q > 50 && state === 'flying';
+  $('air').classList.toggle('on', inAir);
+  if (inAir) {
+    const load = getAeroLoad(), aoa = aeroState.aoa * 57.2958;
+    $('aMach').textContent = aeroState.mach.toFixed(2);
+    $('aQ').textContent = `${(aeroState.q / 1000).toFixed(1)} kPa`;
+    $('aAoa').textContent = `${aoa.toFixed(0)}°`;
+    $('aLoad').textContent = `${load.toFixed(2)} g`;
+    const lim = activeStage() === 2 || activeStage() < 0 ? LOAD_LIMIT_CSM : LOAD_LIMIT_STACK;
+    $('aLoad').className = load > 0.6 * lim ? 'bad' : load > 0.25 * lim ? 'warn' : '';
+    $('aAoa').className = aoa > 15 && aeroState.q > 2000 ? 'warn' : '';
+  }
   const i = activeStage();
   const live = engineOn && throttle > .01 && i >= 0 && stages[i].fuel > 0;
   // accel and the duplicated throttle bar left the telemetry card (KSP-simplified HUD); the
   // centre-bottom throttle widget below is the one readout for that number now.
-  $('thrBig').innerHTML = `${Math.round(throttle * 100)}<span> %</span>`;
-  $('thrGauge').firstChild.style.width = `${throttle * 100}%`;
+  $('thrBig').innerHTML = `${Math.round(throttle * 100)}<span>%</span>`;
+  $('thrGauge').firstElementChild.style.height = `${throttle * 100}%`;
+  $('thrGauge').classList.toggle('live', live);
   const es = $('engState');
-  es.textContent = live ? `MAIN ENGINE ${Math.round(SPECS[i].thrust * throttle)} kN`
-    : (engineOn ? 'IGNITING…' : 'FLAMEOUT');
+  es.textContent = live ? `${Math.round(SPECS[i].thrust * throttle).toLocaleString()} kN`
+    : (engineOn ? 'IGNITING…' : 'ENGINE OFF');
   es.classList.toggle('live', live);
   $('met').textContent = fmtMET(getSimTime());
-  $('warpInd').textContent = `×${WARPS[getWarpIndex()]}`;
+  $('warpInd').textContent = $('vWarp').textContent = `×${WARPS[getWarpIndex()]}`;
+  $('vCam').textContent = getCamMode().toUpperCase();
 
   /* Elements must be computed in one frame: near the Moon the position is lunar-relative, so the
      velocity has to be too. Passing inertial S.v with a Moon-centred position made the Ap/Pe
@@ -154,10 +201,23 @@ export function updateHUD(dt) {
     aimEl.textContent = Math.round(aim.altKm).toLocaleString() + ' km in ' + fmtMET(aim.tMet - getSimTime());
     aimEl.className = (aim.corridor ? 'ok' : 'bad') + (aim.status === 'running' ? ' run' : '');
   }
-  $('oSas').textContent = getSasOn() ? (getSasRetro() ? 'RETRO' : 'PRO') : 'off';
+  $('oSas').textContent = getSasOn() ? 'ON' : 'OFF'; $('mSas').classList.toggle('on', getSasOn());
+  $('mDirV').textContent = getSasRetro() ? 'RETRO' : 'PRO'; $('mDir').classList.toggle('on', getSasOn());
+  $('mRcsV').textContent = getRcsAssist() ? 'ON' : 'OFF'; $('mRcs').classList.toggle('on', getRcsAssist());
+  const dry = i >= 0 && stages[i].fuel <= 0;
+  $('mStageV').textContent = i >= 0 ? (dry ? 'DROP' : SPECS[i].name.split(' ')[0]) : '—';
+  $('mStage').classList.toggle('alert', dry && state === 'flying');
   const auth = getControlAuthority().py;
   $('oCtrl').textContent = '×' + (auth > 9.95 ? '9.9' : auth.toFixed(1));
 
+  /* Delta-v left in each stage: the rocket equation over what that stage still holds, carrying
+     everything stacked above it. Vacuum Isp, so the first stage reads a little generous. */
+  const dvs = [0, 0, 0];
+  for (let k = 2, above = CAPSULE_MASS; k >= 0; k--) {
+    if (stages[k].separated) continue;
+    const m1 = above + stages[k].dry, m0 = m1 + stages[k].fuel;
+    dvs[k] = SPECS[k].isp * 9.80665 * Math.log(m0 / m1); above = m0;
+  }
   stages.forEach((st, idx) => {
     const row = $('pip' + idx); const fill = row.querySelector('i');
     row.classList.toggle('gone', st.separated);
@@ -165,24 +225,21 @@ export function updateHUD(dt) {
     const frac = st.separated ? 0 : st.fuel / SPECS[idx].fuel;
     fill.style.width = `${frac * 100}%`;
     fill.classList.toggle('low', frac < .35);
+    row.querySelector('.dv').textContent = st.separated ? '' : `${Math.round(dvs[idx]).toLocaleString()} m/s`;
   });
+  $('dvTotal').textContent = `Δv ${Math.round(dvs.reduce((a, c, k) => a + (stages[k].separated ? 0 : c), 0)).toLocaleString()} m/s`;
   const hint = $('stageHint');
   if (i >= 0 && !stages[i].separated && stages[i].fuel <= 0) hint.textContent = `⚠ ${SPECS[i].name} is dry — press X`;
   else if (i >= 0 && stages[i].fuel / SPECS[i].fuel < .2) hint.textContent = `${SPECS[i].name} propellant low`;
-  else hint.textContent = nearMoon && altM < 500 ? `descent ${(-radial * 1000).toFixed(0)} m/s — land under 32` : '';
+  else hint.textContent = '';
 
-  const desc = $('desc');
-  if (nearMoon && altM < 400 && state === 'flying') {
-    desc.style.display = 'block';
-    const vs = -radial * 1000;
-    desc.innerHTML = vs > 0
-      ? `<span style="color:${vs > 120 ? 'var(--ob-err)' : vs > 32 ? 'var(--ob-warn)' : 'var(--ob-ok)'}">DESCENT ${vs.toFixed(0)} m/s — LIMIT 32 m/s</span>`
-      : `ALTITUDE ${altM.toFixed(0)} km`;
-  } else desc.style.display = 'none';
+  $('desc').style.display = 'none';      // the descent call-out lives in the guide line now
   /* 'pad' state persists through the first ~10 s of the pillar burn (it flips when the tower
      clears), so the state alone re-printed "PRESS SPACE TO IGNITE" under a rocket at 100 % —
      caught in the round-6 blast frame. The hint is for an engine that has not been lit. */
-  $('igniteHint').style.display = (state === 'pad' && !getEngineOn()) ? 'block' : 'none';
+  const g = nextStep({ state, engineOn, live, i, dry, altE, alt, nearMoon, el, radial, speed: rel.length() });
+  $('guideText').innerHTML = g[0]; $('guide').className = 'hud onmap ' + (g[1] || '');
+  $('guide').style.display = state === 'won' || state === 'lost' ? 'none' : 'flex';
 
   // trajectory warning already handled in predict()
   updateNavball();
@@ -434,4 +491,10 @@ export function initHUD({ resetMission }) {
   initNavball($('navball'), $('orbit'));
   $('bigBtn').addEventListener('click', () => resetMission());
   $('helpBtn').addEventListener('click', () => $('helpCard').classList.toggle('on'));
+  /* Every chip is the key it names: clicking sends that key through the same handler. */
+  for (const b of document.querySelectorAll('button[data-key]')) b.addEventListener('click', () => {
+    dispatchEvent(new KeyboardEvent('keydown', { key: b.dataset.key }));
+    dispatchEvent(new KeyboardEvent('keyup', { key: b.dataset.key }));
+    b.blur();
+  });
 }
