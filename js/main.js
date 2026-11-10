@@ -193,6 +193,7 @@ function frame() {
   guardWarp();
   const paused = WARPS[getWarpIndex()] === 0;
   if (!paused) toTrue();
+  let steppedFx = false;
   if (!paused && (getState() === 'pad' || getState() === 'flying')) {
     const simDt = dtReal * WARPS[getWarpIndex()];
     /* THE STEP IS ALWAYS DTPHYS. Frame time is banked and spent in whole 0.1 s steps, so the
@@ -221,6 +222,13 @@ function frame() {
     const tDraw = getSimTime(), stepped = Math.max(0, Math.min(tDraw - lastDraw, simDt + DTPHYS)); lastDraw = tDraw;
     syncTime(tDraw);
 
+    /* Parcels are stepped to the drawn instant BEFORE this frame's are born at it. Stepped after,
+       every new puff had already ridden the air one frame past the vehicle it was laid behind —
+       409 m/s of planet spin times a frame of mission time, so the column began 7.5 m off the axis at
+       x1 and a frame of mission time further at every warp (tools/trail-offset.mjs: newborn puffs
+       now 1.6, 1.5 and 1.2 m off at x1, x4 and x10). And by the drawn clock's own advance,
+       not frame time x warp: the two agree only on average. */
+    updateParticles(Math.min(1, stepped)); steppedFx = true;
     // visuals follow physics
     updateBurnVisuals({ pos: S.pos, quat: S.q, vel: S.v, throttle: getThrottle(), activeIdx: activeStage(), burn: isBurning(), omega });
     updateDebris(stepped, accelAt);
@@ -235,7 +243,7 @@ function frame() {
   }
   else if (!paused) { syncTime(getSimTime()); }
   if (getState() === 'won' || getState() === 'lost') updateAudio({ burning: false, throttle: 0, rho: 0, q: 0 });   // no wind under the end card
-  if (!paused) updateParticles(Math.min(1, dtReal * WARPS[getWarpIndex()]));
+  if (!paused && !steppedFx) updateParticles(Math.min(1, dtReal * WARPS[getWarpIndex()]));
   updateCamera(dtReal, paused);
   if (paused) updateAudio({ burning: false, throttle: 0, rho: 0, q: 0 });   // and the engine is silent
   if (getState() === 'flying') updatePredictor(camera); else clearPredictor();

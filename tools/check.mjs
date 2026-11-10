@@ -3,7 +3,7 @@
 
    Headless: shader-lint, the shipped mission (must WIN), the recorded retro stack (must LOSE),
    mission-math. Browser (needs a GPU and a Playwright Chromium, so not in CI): shots (console must
-   be clean), clip-test, flicker-test — run against a private dev server on its own port, so a file
+   be clean), clip-test, trail-offset, flicker-test — run against a private dev server on its own port, so a file
    saved in an editor cannot reload the page mid-measurement the way it does on the shared one. */
 import { spawn, spawnSync } from 'node:child_process';
 import { createServer } from 'node:net';
@@ -32,6 +32,7 @@ if (browser) {
   try {
     run('shots (console clean)', 'node', ['tools/shots.mjs', out, String(port)]);
     run('clip-test', 'node', ['tools/clip-test.mjs', String(port)]);
+    run('trail-offset', 'node', ['tools/trail-offset.mjs', String(port)]);
     run('flicker-test', 'node', ['tools/flicker-test.mjs', String(port), out]);
   } finally { server.kill(); }
   console.log(`screenshots and diff maps: ${out}`);
