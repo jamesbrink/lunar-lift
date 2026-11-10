@@ -105,7 +105,7 @@ extends into the interstage skirt. Ratios O/F match the engine specs (2.27 / 4.5
 
 | stack | ignition mass | stage Δv (m/s) | TWR | burn times | ideal total | vs 15,142 m/s requirement | flown |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| **shipped `SPECS`** | 3,433 t | 2,215 / 6,518 / 8,357 | 1.37 / 1.09 / 0.19 | 117 / 305 / 1,905 s | **17,090 m/s** | 1.13× | **WON**, 4.2 m/s, 7.4 t spare |
+| **shipped `SPECS`** | 3,433 t | 2,215 / 6,518 / 8,357 | 1.37 / 1.09 / 0.19 | 117 / 305 / 1,905 s | **17,090 m/s** | 1.13× | **WON**, 3.3 m/s, 7.2 t spare |
 | previous (`retro`) | 3,780 t | 2,599 / 2,737 / 10,967 | 1.24 / 0.98 / 0.71 | 135 / 194 / 549 s | 16,303 m/s | 1.08× | LOST — 1,264 m/s impact, tank dry |
 | NOVA candidate | 5,475 t | 2,569 / 4,304 / 13,734 | 1.30 / 0.96 / 0.83 | 139 / 288 / 526 s | 20,608 m/s | 1.36× | not flown |
 
@@ -133,7 +133,7 @@ Honest caveats about this mapping, to keep the docs from overselling realism:
   guidance computer.
 - `CD_AREA = 28 m²` is the stack's nose-on drag area below Mach 0.8 — an axial coefficient of 0.357
   on the 10 m body. The rest of the airframe's behaviour in air (drag rise, lift, fins, static margin,
-  the 0.5 g side-load limit) is in [atmosphere.md](atmosphere.md). The model is statically stable with
+  the 0.5 g side-load limit and its strain rule) is in [atmosphere.md](atmosphere.md). The model is statically stable with
   its fins; **the real Saturn V was not**, and flew on engine gimbal.
 - The mass and aerodynamic geometry (`GEOM` in `js/physics.js`) is the drawn vehicle's: S-1 42 m long
   and 10 m across, S-2 26 m, CSM body and adapter 22 m at 6.2 m across, command module 8.4 m — 99 m

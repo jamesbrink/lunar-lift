@@ -36,22 +36,23 @@ export const MOON_V = new THREE.Vector3().crossVectors(MOON_PLANE_N, MOON_U).nor
    first perigee after insertion arrives at the Moon instead of thousands of km past it. Solved
    numerically by tools/mission-sim.mjs (bisecting the first periselene altitude) at the step the
    game can actually run — see the note in that tool about coast step size: from the shipped
-   coast-start state the game's scheme reaches 204 km at 0.1 s substeps and an impact 590 km under
-   the surface at 1 s steps, so this number is only valid for the step it was solved at.
+   coast-start state the game's scheme reaches 346 km at 0.1 s substeps and an impact 475 km under
+   the surface at 1 s steps, so this number is only valid for the step it was solved at. The tool
+   aims at AIM_PERI = 350 km, the middle of the band its autopilot lands from.
 
    Measured sensitivity near the window (shipped vehicle, game's own step):
-     phase -3e-3    rad -> periselene 597 km, touchdown 2.6 m/s, 6.8 t spare
-     phase -1e-3    rad -> periselene 334 km, touchdown 3.4 m/s, 7.2 t spare
-     phase 4.9198031    -> periselene 205 km, touchdown 4.2 m/s, 7.4 t spare
-     phase +0.5e-3  rad -> periselene 142 km, touchdown 4.8 m/s, 7.6 t spare
-     phase +0.75e-3 rad -> periselene 110 km, LOST at 81 m/s, 0.2 t left
-     phase +1e-3    rad -> periselene  79 km, LOST at 72 m/s, 0.4 t left
+     phase -3e-3    rad -> periselene 745 km, touchdown 2.8 m/s, 6.6 t spare
+     phase -1e-3    rad -> periselene 477 km, touchdown 2.8 m/s, 7.0 t spare
+     phase 4.9187044    -> periselene 346 km, touchdown 3.3 m/s, 7.2 t spare
+     phase +1e-3    rad -> periselene 218 km, touchdown 4.1 m/s, 7.4 t spare
+     phase +1.75e-3 rad -> periselene 123 km, touchdown 4.9 m/s, 7.6 t spare
+     phase +2e-3    rad -> periselene  91 km, LOST at 71 m/s, 0.4 t left
    i.e. ~130 km of periselene per 1e-3 rad (376 s of lunar motion at MOON_RATE), a gentle slope on
-   the early side and a cliff on the late one: the window sits 0.5e-3 rad, about three minutes,
-   from the last flight that lands. js/targeting.js turns that into a HUD readout, so the aim is
-   no longer invisible; the corridor it paints green (140-600 km) is the landed flights above.
+   the early side and a cliff on the late one, with the window 1.75e-3 rad — eleven minutes — from
+   the last late flight that lands. js/targeting.js turns that into a HUD readout, so the aim is
+   no longer invisible; the corridor it paints green (140-600 km) is inside the landed band.
    Waiting on the pad and warping advances the Moon, so any other start time can still reach one. */
-export const MOON_PHASE0 = 4.9187044;                      // rad — 281.88° along the lunar orbit
+export const MOON_PHASE0 = 4.9187044;                      // rad — 281.82° along the lunar orbit
 let moonPhase = MOON_PHASE0;
 export const getMoonPhase = () => moonPhase;
 export function setMoonPhase(p) { moonPhase = p; }
@@ -82,12 +83,12 @@ export const DTPHYS = 0.1, WARPS = [1, 2, 4, 8, 16, 32, 64, 128, 256, 512, 1000]
 /* SAS pitch program. A real launch vehicle does not chase "prograde" off the pad: it
    holds the local vertical, then sweeps the nose toward the launch-plane east direction
    (the plane that contains the Moon's orbit), then trims to the inertial velocity.
-   Verified with the stack below: a 151 x 760 km parking orbit at 7.37 km/s, and 7.4 t of CSM
+   Verified with the stack below: a 151 x 760 km parking orbit at 7.37 km/s, and 7.2 t of CSM
    propellant left on the Moon. The pitch-over here reaches 66 degrees rather than horizontal; a
    steeper table (t0 60, ramp 200, max pi/2, --turn=steep in the tool) also completes the mission and
-   lands with 7.9 t spare for 16,190 m/s instead of 16,245, so the exact shape is not what makes the
+   lands with 7.7 t spare for 16,216 m/s instead of 16,274, so the exact shape is not what makes the
    mission fly - the propellant load is. MOON_PHASE0 is solved for whichever table is in here
-   (4.9198031 for this one, 4.9472816 for the steep one), so changing one without re-running
+   (4.9187044 for this one, 4.9463355 for the steep one), so changing one without re-running
    tools/mission-sim.mjs mis-aims the translunar injection by tens of thousands of km. */
 export const TURN = { t0: 55, ramp: 190, max: 1.15 };
 
@@ -99,8 +100,8 @@ export const SKY_DAY = new THREE.Color(0x79b1de), SKY_NULL = new THREE.Color(0x0
 /* stage specs: dry/fuel in tonnes, thrust in kN, isp in seconds.
    Verified by tools/mission-sim.mjs, which flies the whole mission through this file's own physics
    and the controls a player has: ideal staged budget 17,090 m/s against the 15,142 m/s one-way
-   requirement (1.13x), 16,245 m/s actually spent, 7.4 t of CSM propellant left after a 4.2 m/s
-   touchdown on 3.461 days of mission clock. Full breakdown in docs/reference/mission-design.md.
+   requirement (1.13x), 16,274 m/s actually spent, 7.2 t of CSM propellant left after a 3.3 m/s
+   touchdown on 3.469 days of mission clock. Full breakdown in docs/reference/mission-design.md.
    What the sizing is actually doing:
      - pad thrust-to-weight 1.37 g. The previous stack's 1.24 g also reaches orbit, so this is
        margin, not a cliff; drag is never the problem (mission-math.py section 8 puts it at

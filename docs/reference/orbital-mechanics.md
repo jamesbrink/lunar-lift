@@ -206,9 +206,10 @@ the same stations.
 | Moon contact, speed ≤ 32 m/s, within 60° of vertical | `impact(true)` with `speed ≤ LAND_SAFE` and `fwd·up > 0.5` | **win** |
 | Moon contact, speed ≤ 32 m/s, tipped further | same | lost — `TIPPED OVER` |
 | Moon contact, faster | same | lost |
-| Earth contact, speed ≤ 120 m/s | `impact(false)` with `speed ≤ SAFE_EARTH` | "splashdown", lost (the Moon was the target) |
-| Earth contact, faster | same | lost |
-| Lateral aerodynamic load > 0.5 g (6 g for the bare CSM) | `breakup()` from `physStep` | lost — `AERODYNAMIC BREAKUP` ([atmosphere.md](atmosphere.md)) |
+| Earth contact, command module alone, speed ≤ 12 m/s | `impact(false)` with `speed ≤ SAFE_EARTH` and no stage attached | **success** — `SPLASHDOWN`, or `AROUND THE MOON AND HOME` after a pass through the lunar SOI |
+| Earth contact, faster, or with a stage attached | same | lost — `HARD LANDING` (`RE-ENTRY DISASTER` above 1,000 m/s) |
+| Heat proxy `sqrt(ρ)·v³` > 4 for 3 s without the heat shield forward | `burnUp()` from `physStep` | lost — `BURNED UP` ([mission-design.md](mission-design.md), "Coming home") |
+| Lateral aerodynamic load over 0.5 g (6 g for the bare CSM) long enough to accumulate 0.6 of strain, or 3× the limit at once | `overstressed()` → `breakup()` from `physStep` | lost — `AERODYNAMIC BREAKUP` ([atmosphere.md](atmosphere.md)) |
 | Contact test | `surfaceAlt() ≤ 0` | the lowest attached point — the bell of the stage still bolted on, or the nose if inverted — against the terrain underneath (the drawn relief in the browser, the datum sphere headless). It used to be `S.pos` within `RHALF ≈ 52 m`, which is right for the full stack and left a lone CSM "landed" 61 m up |
 
 The Moon-encounter gate (`rM < SOI_M` → switch guidance to Moon-relative) must run **before**

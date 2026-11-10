@@ -12,8 +12,10 @@ node server.js 8078      # serves ES modules with no-store + SSE hot reload at /
 ```
 
 Open `http://localhost:8078/index.html`. `window.game` is the debug handle:
-`state() ignite stage jettisonLES setSas(on, retro) warp(n) camera(n) ff(seconds) setThrottle(v) nudge(ω)
-teleport(pos, vel, simTime) reset()`, plus `_cam`, `_pred`, `setCam(d)`. `state().aero` is
+`state() ignite stage jettisonLES setSas(on, retro) warp(n) camera(name) map(on) ff(seconds)
+setThrottle(v) nudge(ω) teleport(pos, vel, simTime) reset()`, plus `_cam`, `_pred`, `setCam(d)` and
+`setView(yaw, pitch, dist)` (snapped, for scripted poses). `camera(name)` takes `'orbit'` or
+`'chase'`; there is no `'system'` mode any more — the far view is `map(true)`. `state().aero` is
 `{ q, mach, aoa, load, margin }` — Pa, –, rad, lateral g, static margin in m.
 
 ## Verify with these, and only these
@@ -21,18 +23,25 @@ teleport(pos, vel, simTime) reset()`, plus `_cam`, `_pred`, `setCam(d)`. `state(
 ```sh
 npm i --no-save three@0.187.0             # tool only; the game has no dependencies
 node tools/mission-sim.mjs                 # solves the launch window then flies it: ~50 s
-node tools/mission-sim.mjs game --phase=4.9198031   # the shipped window: ~2 s
+node tools/mission-sim.mjs game --phase=4.9187044   # the shipped window: ~2 s
 python3 tools/mission-math.py              # must exit 0; recomputes the derived numbers in docs/
 node tools/shader-lint.mjs                 # must print ok; every ShaderMaterial must compile
+# these two drive a real browser: `npm i --no-save playwright`, and the dev server running
+node tools/clip-test.mjs 8078              # camera sweep at pad / flight / orbit / Moon; exits 1 on any clip
+node tools/shots.mjs <outdir> 8078         # eleven minutes of flight photographed; prints console errors AND warnings
 ```
 
-Shipped flight right now: `RESULT WON`, periselene 205 km, LOI 865 m/s at 218 km, touchdown
-**4.2 m/s** (`LAND_SAFE` is 32 m/s), 7.4 t spare, 16,245 m/s spent, 3.461 days. `retro` (the previous
-stack) is LOST at 1,264 m/s with a dry tank. The window is a cliff on one side: −1e-3 rad of phase
-(periselene 334 km) lands at 3.4 m/s with 7.2 t, −3e-3 rad (597 km) still lands at 2.6 m/s, but
-+0.75e-3 rad (110 km) and +1e-3 rad (79 km) are **LOST** at 81 and 72 m/s with the tank run down.
-Nominal ascent under SAS: max-Q 25.4 kPa at T+65 s, peak side load 0.024 g at T+85 s (limit 0.5 g),
-static margin +4.4 m on the pad. If you change physics, specs, constants or the launch
+`tools/gpu-time.mjs [port] [query]` is the frame-cost harness (timer queries round the rAF callback at
+a retina buffer: pad idle, liftoff, 15 km, 500 km orbit) — a measurement, not a pass/fail check.
+
+Shipped flight right now: `RESULT WON`, periselene 346 km, LOI 849 m/s at 358 km, touchdown
+**3.3 m/s** (`LAND_SAFE` is 32 m/s), 7.2 t spare, 16,274 m/s spent, 3.469 days. `retro` (the previous
+stack, at `--phase=1.4742618`) is LOST at 1,264 m/s with a dry tank. The window is solved for
+`AIM_PERI = 350` km, the middle of the band that lands: −3e-3 rad of phase (745 km) lands at 2.8 m/s
+with 6.6 t, +1.75e-3 rad (123 km) at 4.9 m/s with 7.6 t, and +2e-3 rad (91 km) is **LOST** at 71 m/s
+with the tank run down. Nominal ascent under SAS: max-Q 25.4 kPa at T+65 s, peak side load 0.024 g
+at T+85 s (limit 0.5 g, then strain), static margin +4.4 m on the pad. Command module alone from
+7.8 km/s at −1.5° and 122 km: 7.2 g, 59 kPa, splashdown 7.8 m/s (`SAFE_EARTH` is 12 m/s). If you change physics, specs, constants or the launch
 window, re-run and fix every number that moved **in the same commit** — `README.md` and
 `docs/reference/*.md` quote measured output, and a doc that no run backs is a bug.
 
@@ -71,20 +80,20 @@ zero; Ap/Pe mixed a Moon-centred position with inertial velocity and printed `ES
 most 600). Warp multiplies the **number** of substeps, never the step size, so the trajectory is
 identical at ×1 and ×1000. That makes 0.1 s the only step the game can produce, and the translunar
 encounter is sensitive enough to notice: stepping the coast at 1 s instead of 0.1 s moves the
-periselene by ~790 km (204 km becomes an impact 590 km under the surface, measured from the shipped
-coast-start state), nearly twice the width of the whole 140–600 km corridor. `tools/mission-sim.mjs` now
+periselene by ~820 km (346 km becomes an impact 475 km under the surface, measured from the shipped
+coast-start state), more than the whole band of periselenes anyone has landed from. `tools/mission-sim.mjs` now
 steps at `H` always and says so in its source; anything that certifies a mission must use the same
 step. Related: the mission is sensitive to ~130 km of periselene per 1e-3 rad of launch phase, and
-`MOON_PHASE0 = 4.9198031` is solved for the current `TURN` table **and the current forces** — change
+`MOON_PHASE0 = 4.9187044` is solved for the current `TURN` table **and the current forces** — change
 the pitch program, the step, the drag model or `gravityAt` and the window constant is wrong. The
-flight-model commit moved it by 0.036 rad (it was 4.9561012), more than 70 times the 0.5e-3 rad
-between the window and the last late flight that lands.
+flight-model commit moved it by 0.036 rad (4.9561012 → 4.9198031 for the same 200 km aim), twenty
+times the 1.75e-3 rad between today's window and the last late flight that lands.
 
 A corollary for anything that *predicts* the game: reproduce its discretisation. `simTime += dt`,
 gravity at the advanced time, `v += a·dt`, `p += v·dt`. `js/targeting.js` does exactly that: from the
-shipped coast-start state it and a real `physStep` coast both arrive at 204.43 km (run headless), and
-it is within ~1 km of the tool's whole-km periselene on all three certified flights. A converged
-velocity-Verlet integration of the same state says 299.9 km — 95 km from the ship's real trajectory,
+shipped coast-start state it and a real `physStep` coast both arrive at 345.66 km (run headless), and
+it is within ~1 km of the tool's whole-km periselene on six certified flights. A converged
+velocity-Verlet integration of the same state says 443.6 km — 98 km from the ship's real trajectory,
 which would make the readout lie.
 
 ## Rule: one aerodynamic evaluation feeds both the trajectory and the attitude
@@ -108,10 +117,19 @@ air. Corollaries, each read off the code or measured:
   measured SAS ascent, whose peak is 0.024 g, **and against what the vehicle can generate at all**.
   The stack limit was 1.2 g for one commit and almost nothing reached it: full pitch held with SAS
   off through max-Q peaked at 0.93 g and flew on, because broadside at 25 kPa this airframe makes
-  about 1 g and no more. At 0.5 g the same input from any time between T+40 s and T+90 s breaks up
-  5–8 s later (38–57° off the airflow); from T+100 s it peaks at 0.41 g and survives. A limit is
-  only a rule if a measured manoeuvre crosses it — change `CD_CROSS`, `GEOM` or the stage masses and
-  re-measure both ends.
+  about 1 g and no more. A limit is only a rule if a measured manoeuvre crosses it.
+- Failure is accumulated strain (`overstressed()`): `(load/limit − 1)` per second over the limit,
+  relaxing 0.5/s under it, gone at 0.6 or at once above 3× the limit. Measured, pitch held SAS-off
+  from T+60 s: released after 5 s it peaks 0.55 g with 9 % of the strain used; after 6 s, 0.68 g and
+  77 %; held, breakup at 6.9 s. Held from T+90 s it survives at 59 %; from T+100 s it never crosses
+  the limit. Change `CD_CROSS`, `GEOM`, the stage masses or the strain constants and re-measure
+  both tables in `docs/reference/atmosphere.md`.
+- The command module alone is a different vehicle in the same code path: `aeroShape()` gives a bare
+  capsule `CA = 1.1` and a 3 m² normal-force area at the apex so it is stable heat-shield-first;
+  heat is `sqrt(rho)·v³` against `HEAT_SHIELD = 4`; canopy drag is solved implicitly because an
+  explicit 0.1 s step overshoots under the mains. A capsule that starts apex-first rights itself in
+  time at 7.8 km/s and does **not** at 11 km/s, −6.5° (burned up 23 s after a 122 km interface) —
+  measured; do not write "the capsule always settles" anywhere.
 - The flat rate damping is a control system now (`rcsAssist`, key T, reset to on by `resetSim()`).
   A test that wants free rotation in vacuum must call `toggleRcsAssist()`; a test that assumes rates
   die on their own is testing the assist.
@@ -138,7 +156,8 @@ air. Corollaries, each read off the code or measured:
   inverted) over the terrain. Headless there is no terrain — `initPhysics` gets no `relief`, so the
   tool lands on the datum sphere, and its touchdown speed says nothing about a hillside. The descent
   guidance reads the same `P.surfaceAlt(true)`; when it read the altitude of `S.pos` instead it met
-  the ground believing it had 52 m left, and the shipped touchdown was 20.4 m/s where it is now 4.2.
+  the ground believing it had 52 m left, and the touchdown at that window was 20.4 m/s where the
+  fix made it 4.2.
 - The launch-phase solve only looks at the first periselene, so it is blind to anything that happens
   after it. A change to contact, descent guidance or `LAND_SAFE` does not move `MOON_PHASE0`, but it
   can move the corridor's edge onto the window: re-fly the neighbours (`--phase=` ±0.25e-3 … ±3e-3),
@@ -256,8 +275,10 @@ air. Corollaries, each read off the code or measured:
   before `parcelAudit()` proved the spray was there and only the camera was wrong. Shoot lunar
   surface blasts from ≥ 2.8 km, or from behind the spray at horizon distance.
 
-- **Camera collision is applied twice per frame** — to `desired` and again to the interpolated
-  `camPos`. A lerp between two points outside a sphere is a chord, and chords are inside, so before
+- **Camera collision is applied twice per frame, three rounds each** — to `desired` and again to the
+  interpolated `camPos`; the rounds are there because the planet's push-out is radial and one pass
+  lifted a camera squeezed between pad and stack out of the ground straight into the hull
+  (`tools/clip-test.mjs` found it 3 m inside the S-1), with a sideways escape if it is still inside. A lerp between two points outside a sphere is a chord, and chords are inside, so before
   this the camera cut 6 019 km through the Earth whenever `reset()`, `teleport()` or `ff()` moved the
   vehicle to the far side. Measured after the fix: the closest the camera gets to the centre during a
   full crossing is `RE + 0.02`, exactly the skin.
@@ -299,9 +320,17 @@ air. Corollaries, each read off the code or measured:
   module defaults, so each mission opened with the horizon rolling level; and "ease back behind the
   nose" ran on the pad, where the nose's heading is a fallback axis. Measured after: 0.000° of camera
   rotation across the first 4 s.
-- **"Home" for the chase camera is a function of altitude.** The pad shot on the ground, behind the
-  nose by 30 km, a slow arc between: easing straight to "behind the nose" after liftoff was a 130°
-  swing in two seconds (now ≤ 3.4°/s, measured over the first 10 s of flight).
+- **The camera has no "home" and nothing moves it but the user.** The altitude-keyed home and the
+  timed ease back to it are gone: they took the view out of the user's hand two seconds after every
+  drag. Orbit (the default) carries its heading along with the ship — parallel-transported, never
+  read from the nose or the velocity — so pitching the rocket pitches the rocket, not the world.
+  Chase sits behind the *flight path*, not the nose (those differ by 180° in a braking burn).
+  Double-click re-centres. `js/camera.js`'s header is the truth; do not reintroduce a timer.
+- **The map is the scene, not a drawing of it.** M switches to a map camera pivoting on Earth, the
+  Moon or the ship (F), with the pole of the Moon's orbit as up (north-up showed the transfer plane
+  edge-on); `js/mapview.js` adds only what is too small to see from 100 000 km, plus the whole
+  coast path and the Moon's position at closest approach. The 2-D canvas map and the `'system'` camera mode no longer exist, and the arrow
+  keys and − / = belong to the camera — W A S D Q E fly the ship.
 - **Damp the camera's offset, never its position.** A lerp of the absolute position toward a moving
   target trails it by speed × time-constant: in a 300 km orbit at ×1 with 0.12 km asked for, the camera
   sat 0.572 km back with the ship 32 % up the frame, and under warp it was simply left behind. The
@@ -421,11 +450,12 @@ await tab.evaluate(`(async () => {
   so an A/B that hides a mesh silently un-hides it a frame later. Isolate with
   `mesh.geometry.setDrawRange(0, 0)`, which no update touches, and reload between cases — module state
   like `receiveShadow` survives `reset()` and contaminates the next measurement.
-- **The chase camera looks along the vehicle, not at the ground.** Pointing the vehicle at the planet
-  centre gives a *limb* view where the surface is a few pixels of mip-blurred mean colour — that is how
-  a perfectly painted Earth looked "featureless from orbit" for a whole session. For a nadir view set
-  `S.q.setFromUnitVectors(Z, up)` so +Z is local up, and aim at a continent rather than trusting the
-  pose to be over land.
+- **Neither camera looks at the ground unless you turn it there.** A limb view shows the surface as
+  a few pixels of mip-blurred mean colour — that is how a perfectly painted Earth looked
+  "featureless from orbit" for a whole session. The old recipe (point the vehicle's +Z at local up)
+  only worked while the camera took its heading from the nose, which it no longer does; pose the
+  view with `g.setView(yaw, pitch, dist)` (snapped) instead — not yet verified to reach a true
+  nadir — and aim at a continent rather than trusting the ship to be over land.
 - Take the teleport velocity from the sim, not from `EARTH_SPIN × r`: capture `S.v` right after
   `g.reset()` and reuse it, otherwise the vehicle arrives with the wrong ground speed and the frame
   ends in `RE-ENTRY DISASTER` before you can screenshot.
@@ -445,13 +475,20 @@ await tab.evaluate(`(async () => {
 
 ## Structure
 
-One concern per file; no god files. Current sizes: `vehicle.js` 1374, `physics.js` 681, `world.js` 622, `navball.js` 498, `clouds.js` 443, `camera.js` 424, `earthpaint.js` 367, `hud.js` 318, `paintkit.js` 314, `surface.js` 288, `predictor.js` 276, `moonpaint.js` 276, `textures.js` 245, `saturn.js` 237, `terrain.js` 215, `ribbon.js` 213, `padsite.js` 203, `pad.js` 202, `main.js` 183, `surface-earth.js` 181, `toonmap.js` 142, `toon.js` 138, `constants.js` 125, `surface-moon.js` 120, `targeting.js` 111, `halfres.js` 103, `aero.js` 81, `chutes.js` 70, `mapview.js` 63, `haze.js` 62, `audio.js` 62, `palette.js` 35.
+One concern per file; no god files. Current sizes: `vehicle.js` 1374, `physics.js` 681, `world.js` 622, `navball.js` 498, `clouds.js` 443, `camera.js` 428, `earthpaint.js` 367, `hud.js` 318, `paintkit.js` 314, `surface.js` 288, `predictor.js` 276, `moonpaint.js` 276, `textures.js` 245, `saturn.js` 237, `terrain.js` 215, `ribbon.js` 213, `padsite.js` 203, `pad.js` 202, `main.js` 183, `surface-earth.js` 181, `toonmap.js` 142, `toon.js` 138, `constants.js` 125, `surface-moon.js` 120, `targeting.js` 111, `halfres.js` 103, `aero.js` 81, `chutes.js` 70, `mapview.js` 112, `haze.js` 62, `audio.js` 62, `palette.js` 35.
 `toonmap.js` is now only the registry of paint products; the painters are `earthpaint.js` and
 `moonpaint.js` on `paintkit.js`, the authored launch site is `padsite.js`, and the ground is drawn by
 `surface.js` + `surface-earth.js` + `surface-moon.js`.
 `vehicle.js` is now the exhaust and debris alone — the hardware it used
 to build is `saturn.js`, the launch complex left `world.js` for `pad.js`. It is still the largest
 behavioural module; if the particle field grows, split its renderer from its integrator.
+New since the flight model: `aero.js` (density, Mach drag rise, the one `aeroForce()` evaluation),
+`mapview.js` (ship marker, body names, lunar orbit, SOI ring, coast path and the Moon's arrival
+position for the map), `chutes.js` (the drawn
+drogues and mains; what is deployed is `physics.js`'s state). Tools: `mission-sim.mjs` (flies the
+mission headless), `mission-math.py` (derived numbers), `shader-lint.mjs`, `shots.mjs` (browser
+screenshots plus console errors and warnings), `clip-test.mjs` (camera never under terrain or inside
+the hull), `gpu-time.mjs` (GPU ms per frame by timer query).
 `physics.js` and `aero.js` stay display-free: `tools/mission-sim.mjs` imports them headless, and
 `saturn.js` with them for the stage records (so anything there that needs a canvas must tolerate having none).
 
