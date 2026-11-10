@@ -71,7 +71,10 @@ const SOI_BLEND_HI = SOI_M * 1.4, SOI_BLEND_LO = SOI_M * 0.8;
    Damping alone is not enough here, because the target outruns the damping whenever warp, staging or a
    reset moves it, and that step is exactly what lands a camera under the surface.
    PAD_SOLIDS: [radii xyz, centre xyz] */
-const PAD_SOLIDS = [[42, 30, 3.5, 0, 0, 0], [9, 9, 58, -21, 0, 46], [26, 20, 15, 52, 38, 6]];
+/* The tower's ellipsoid is 11 x 11 x 80: tall enough that it is still wider than the lattice's
+   6.4 u half-diagonal at ground level (at 9 x 9 x 58 it pinched to 5.5 u there and the camera could
+   sit inside the steel at 30 m). */
+const PAD_SOLIDS = [[42, 30, 3.5, 0, 0, 0], [11, 11, 80, -21, 0, 46], [26, 20, 15, 52, 38, 6]];
 const SHIP_R = 10 * PAD_SCALE;                               // stage radius; the length is the live span
 const SKIN = 0.02;                                           // km of standoff so nothing z-fights
 const ORIGIN = new THREE.Vector3();
