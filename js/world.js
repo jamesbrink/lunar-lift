@@ -576,6 +576,18 @@ const HORIZON = new THREE.Color(0xb2cfe2);
    background under it is black space. The exponential fog thins on the same clock and takes the
    dome's horizon tone, so near-field haze always matches the sky behind it. */
 const SKY_SCALE = 80;            // km — visual atmospheric depth for the sky/fog blend
+/* The map is a chart, not a view: weather off (the shell and the shade it casts on the ground), so
+   coastlines and the trajectory read cleanly from 100 000 km. */
+let shadeFull = null;
+export function setWeatherVisible(on) {
+  if (!cloudMesh || cloudMesh.visible === on) return;
+  cloudMesh.visible = on;
+  if (weather && weather.shadeStrength) {
+    if (shadeFull === null) shadeFull = weather.shadeStrength.value;
+    weather.shadeStrength.value = on ? shadeFull : 0;
+  }
+}
+
 export function updateSky(pos, camPos) {
   const alt = Math.max(0, pos.length() - RE);
   _skyMix = Math.exp(-alt / SKY_SCALE);

@@ -145,7 +145,9 @@ export function setMap(on) {
     mapOn = true;
     moonPos(getSimTime(), _moon);
     focus = S.pos.distanceTo(_moon) < SOI_M ? 1 : 0;
-    wantYaw = 0.6; wantPitch = 0.95; wantDist = mapFrame();
+    /* Open on the ship's side of the planet: its marker draws through the globe, and a map that
+       opens with the ship behind the Earth points at the wrong ocean. */
+    wantYaw = Math.atan2(S.pos.dot(MOON_U), S.pos.dot(MOON_V)) + 0.35; wantPitch = 0.8; wantDist = mapFrame();
   } else { mapOn = false; wantYaw = saved.yaw; wantPitch = saved.pitch; wantDist = saved.dist; }
   curYaw = wantYaw; curPitch = wantPitch; curDist = wantDist;
   placed = false;                             // a cut: the pivots can be 380 000 km apart
