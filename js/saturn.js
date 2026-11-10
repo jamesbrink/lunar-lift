@@ -29,6 +29,8 @@ import { toon, outline, flameMeshes, PALETTE, RAMP_HARD } from './toon.js';
       line through the middle of the vehicle. */
 
 export const rocketGroup = new THREE.Group(); rocketGroup.scale.setScalar(VS);
+export const capsuleGroup = new THREE.Group(); capsuleGroup.name = 'capsule';
+rocketGroup.add(capsuleGroup);
 export const stages = SPECS.map(s => ({ ...s, fuel: s.fuel, separated: false, meshes: new THREE.Group(), tailZ: 0, flames: [], glow: null }));
 
 const SEG = 40;                             // the hull's roundness; 24 showed its facets at the pad camera
@@ -38,6 +40,7 @@ const white = toon({ color: PALETTE.hull, gradientMap: RAMP_HARD });
    flight. */
 white.emissive = new THREE.Color(0x2c3036);
 const black = toon({ color: PALETTE.dark });
+const shield = toon({ color: 0x6b4a34 });        // ablator brown
 const silver = toon({ color: PALETTE.silver, gradientMap: RAMP_HARD });
 silver.emissive = new THREE.Color(0x22262b);
 const metal = toon({ color: PALETTE.engine, side: THREE.DoubleSide });
@@ -179,7 +182,10 @@ function decal(r, z0, z1, az, width, map) {
     q.position.set(Math.cos(a) * 1.44, Math.sin(a) * 1.44, 24.9); q.rotation.z = a; q.castShadow = true;
     g.add(q);
   }
-  g.add(cyl(0.36, 1.33, 2.3, 27.45, white, 32, true));        // command module +26.3 .. +28.6, base sunk in the SM top
+  /* The command module is its own group on the rocket, not part of this stage: when the CSM is
+     dropped (X on the last stage) it is what is left flying, and what the parachutes hang from. */
+  capsuleGroup.add(cyl(0.36, 1.33, 2.3, 27.45, white, 32, true));   // +26.3 .. +28.6, base sunk in the SM top
+  capsuleGroup.add(cyl(1.33, 1.05, 0.34, 26.2, shield, 32, true));  // heat shield, hidden inside the SM until then
   stages[2].tailZ = 6.8;
   stages[2].engines = [[0, 0]];
   stages[2].flame = { r: 0.86, len: 11, outer: 0x5fa8ff, core: 0xeef6ff, glow: 0x9cc8ff };

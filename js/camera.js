@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import * as WORLD from './world.js';
 import { RE, RM, MU_E, SOI_M, MOON_DIST, VS, PAD_SCALE, PAD_POS, PAD_UP, moonPos } from './constants.js';
-import { S, keys, fwd, getSimTime, activeStage, isBurning, getThrottle, airDensity, groundVel, navVel, orbitalElements } from './physics.js';
+import { S, keys, fwd, getSimTime, activeStage, isBurning, getThrottle, airDensity, groundVel, navVel, orbitalElements, getChute } from './physics.js';
 import { stages } from './saturn.js';
 
 /* distances are km; 1 m near plane so the 105 m rocket resolves, 3 M km far plane
@@ -336,10 +336,12 @@ export function updateCamera(dt) {
     desired.copy(_target).addScaledVector(_dir, curDist);
   } else {
     const i = activeStage();
-    const tail = i >= 0 ? stages[i].tailZ : NOSE_Z - 6;          // capsule alone: its own six units
-    const wantZ = 0.5 * (tail + NOSE_Z) * VS;
+    const tail = i >= 0 ? stages[i].tailZ : NOSE_Z - 2.7;        // capsule alone: heat shield to apex
+    /* Under parachutes the vehicle is the capsule AND what it hangs from: frame both. */
+    const ch = i < 0 ? getChute() : 0, top = ch === 2 ? NOSE_Z + 36 : ch === 1 ? NOSE_Z + 18 : NOSE_Z;
+    const wantZ = 0.5 * (tail + top) * VS;
     focusZ = focusZ === null || !placed ? wantZ : focusZ + (wantZ - focusZ) * (1 - Math.exp(-2.5 * dt));
-    spanHalf = 0.5 * (NOSE_Z - tail) * VS;
+    spanHalf = 0.5 * (top - tail) * VS;
     _target.copy(S.pos).addScaledVector(fwd(), focusZ);          // the thing the camera orbits
     bodyRadial(_up);
     /* First frame after a placement (boot, reset, setCam): start settled. The heading, the up vector

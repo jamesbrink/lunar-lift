@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { RE, RM, SOI_M, VS, CD_AREA, SPECS, moonPos } from './constants.js';
-import { S, getSimTime, getEngineOn, getThrottle, activeStage, totalMass, fwd, gravityAt, airDensity, surfaceAlt, tailStation } from './physics.js';
+import { S, getSimTime, getEngineOn, getThrottle, activeStage, totalMass, fwd, gravityAt, airDensity, surfaceAlt, tailStation, getChute } from './physics.js';
 import { stages } from './saturn.js';
 import { ribbon } from './ribbon.js';
 
@@ -197,7 +197,7 @@ export function predict() {
      4 min": true for a rock thrown at 40 m/s, a lie for a rocket about to stage and pitch. While
      an engine burns, the red end of the ribbon is the only honest element and it stays. */
   let msg = '';
-  if (path.impact && !burning && (impactT < 3000 || path.impact === 'moon')) {
+  if (path.impact && !burning && getChute() <= 0 && (impactT < 3000 || path.impact === 'moon')) {   // under a canopy the ground is the plan
     const body = moonPos(sim, _m);
     const overMoon = S.pos.distanceToSquared(body) < S.pos.lengthSq();
     _d.copy(S.pos); if (overMoon) _d.sub(body);
