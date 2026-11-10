@@ -169,7 +169,7 @@ function stepParcel(i, h) {
     let d = Math.sqrt(dx * dx + dy * dy + dz * dz);
     const g = MU_M / (d * d * d);
     vx -= dx * g * h; vy -= dy * g * h; vz -= dz * g * h;
-    px += vx * h; py += vy * h; pz += vz * h;
+    px += (vx - hvx) * h; py += (vy - hvy) * h; pz += (vz - hvz) * h;      // hv: see stepExhaust
     dx = px - moonP.x; dy = py - moonP.y; dz = pz - moonP.z;
     d = Math.sqrt(dx * dx + dy * dy + dz * dz);
     const gr = RM + reliefAt(dx, dy, dz, 1, i);
@@ -214,6 +214,16 @@ function stepParcel(i, h) {
            falls by ~4.5x and the sheet reads as ground-hugging dust again. */
         pR[i] = Math.min(7, pR[i] * 1.25 + 0.2);
         pLife[i] = Math.min(pLife[i], 1.9);
+        /* How much dust the jet cuts falls with the engine's height: the plume spreads in vacuum
+           and its pressure on the ground goes with the inverse square. Apollo's crews called dust
+           at 30-40 m; here a parcel that reaches the ground from above 45 m is kept with
+           probability (45/h)^1.5 — two thirds at 60 m, a third at 100, a tenth at 200 — and the
+           rest end where they land. Without it a burn at 3 km threw the same sheet as a hover. */
+        {
+          const sx = ship.pos.x - moonP.x, sy = ship.pos.y - moonP.y, sz = ship.pos.z - moonP.z;
+          const hM = ship.live ? (Math.sqrt(sx * sx + sy * sy + sz * sz) - gr) * 1000 : 0;
+          if (hM > 45 && Math.random() > Math.pow(45 / hM, 1.5)) pLife[i] = 0;
+        }
         ejectaEvents(px, py, pz, nx, ny, nz, _bx - moonV.x, _by - moonV.y, _bz - moonV.z);
         }
       }
@@ -268,7 +278,7 @@ function stepParcel(i, h) {
       const g = MU_E / (r2 * r);
       vx -= px * g * h; vy -= py * g * h; vz -= pz * g * h;
     }
-    px += vx * h; py += vy * h; pz += vz * h;
+    px += (vx - hvx) * h; py += (vy - hvy) * h; pz += (vz - hvz) * h;      // hv: see stepExhaust
 
     /* Ground: the sphere, plus the LC-39 dome where its footprint applies. The quadratic cap is
        one dot product and one multiply, and it fades to exactly RE at the footprint rim so there
@@ -420,7 +430,7 @@ function stepParcel(i, h) {
        steady-state number and is untouched. Deflected (pSmoke) parcels deliberately skip the
        boost: the pad sheet is tuned, and R_YOUNG below already fights the blast dome. */
     const early = pAge[i] < 0.45 ? 2.6 : 1;
-    pR[i] = Math.min(R_CAP, pR[i] + (pSmoke[i] ? (moon ? 5 : 10)
+    pR[i] = Math.min(R_CAP, pR[i] + (pSmoke[i] ? (moon ? 0 : 10)
                                              : (moon ? 0.4 : (px * px + py * py + pz * pz < ALT40_R2 ? 1.9 : 1.2)) * early) * h);
     /* review3/03: the blast read as one giant blurred tan dome because the deflectate inflated
        to the 16 m ceiling within its first half-second — dome first, definition never. A young
@@ -453,8 +463,8 @@ function stepParcel(i, h) {
       /* The staging flash stays SMALL: a light burst that billows is a smoke puff again. */
       grow = 0;
     } else if (pSmoke[i] === SM_SPRAY) {
-      /* Lunar dust has no air to roll in: a slow creep is the honest ceiling. */
-      grow = moon ? 1.8 : 6;
+      /* Lunar dust has no air to roll in: it does not grow at all. */
+      grow = moon ? 0 : 6;
     } else if (pSmoke[i]) {
       if (moon) grow = 5;
       else {
@@ -462,7 +472,7 @@ function stepParcel(i, h) {
         grow = 14 * THREE.MathUtils.clamp(rho / 0.25, 0.03, 1);
       }
     }
-    pR[i] = Math.min(R_CAP, pR[i] + grow * h);
+    if (grow > 0) pR[i] = Math.min(R_CAP, pR[i] + grow * h);     // the flash keeps the span it was drawn at
   }
   pLife[i] -= h; pAge[i] += h;
   return pLife[i] <= 0 ? 1 : 0;
@@ -473,9 +483,22 @@ function stepParcel(i, h) {
    reads as continuous flow. When the warp asks for more than MAX_SUB substeps the system accepts
    h ≈ 33 ms rather than fall behind the clock — at 1000× a 4 km/s parcel can tunnel the ~5 m hull
    radius in one step, the accepted trade; nothing explodes, because the drag update is implicit
-   and the colliders are positional. */
-export function stepExhaust(dt) {
+   and the colliders are positional.
+
+   `frame`: the mission is over. js/main.js stops the mission clock on an end card, so the planets
+   stand where they were — but smoke and sparks go on moving, and their velocities are inertial:
+   the air over the pad is doing 409 m/s, the Moon's ground 1 km/s. Integrated as they stood,
+   everything left alive at the end slid away over a frozen ground at the body's own speed
+   (measured after a crash by the pad: the wreck's sparks a median 741 m from it at the first look
+   and 1,567 m a second and a half later, against 47 m and 75 m now — the "yellow smear on the
+   horizon" of a splashdown was the same thing). So with the
+   clock stopped the caller hands over the velocity of the frame the picture is frozen in, and a
+   parcel's POSITION advances by its velocity relative to that; drag, gravity and the colliders
+   are unchanged. */
+let hvx = 0, hvy = 0, hvz = 0;
+export function stepExhaust(dt, frame = null) {
   if (!(dt > 0)) return;
+  if (frame) { hvx = frame.x; hvy = frame.y; hvz = frame.z; } else hvx = hvy = hvz = 0;
   const d = Math.min(1, dt);
   const steps = Math.max(1, Math.min(MAX_SUB, Math.ceil(d * 60)));
   const h = d / steps;

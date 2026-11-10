@@ -165,17 +165,25 @@ One concern per file. Line counts are `wc -l` at the commit that last touched th
   own group so it can fly on alone.
 - `js/chutes.js` (70 lines) — the command module's parachutes as drawn hardware: two drogues, then three
   orange-and-white mains, inflated by the state `js/physics.js` publishes.
-- `js/vehicle.js` (210 lines) — the conductor: the hardware's pose each frame, staging and the debris it
-  leaves (dropped stages stop at the ground), and the one call that turns a burning stage into fire
-  and smoke.
-- `js/flame.js` (214 lines) — the drawn flames: one shader-shaped mesh per stage with hard tone bands, nearly
-  opaque at sea level and a translucent veil in vacuum.
-- `js/exhaust-pool.js` (148 lines) — the fixed pool of gas parcels and the `spawnParticle` contract.
-- `js/exhaust-emit.js` (322 lines) — where parcels are born: nozzles, the smoke trail, ignition steam, lunar dust.
-- `js/exhaust-sim.js` (491 lines) — how they move: drag from the same `airDensity` the vehicle flies in, the
+- `js/vehicle.js` (319 lines) — the conductor: the hardware's pose each frame, staging and the debris it
+  leaves (dropped stages stop at the ground), the staging flash and the drawn explosion, and the one
+  call that turns a burning stage into fire and smoke.
+- `js/flame.js` (259 lines) — the drawn flames: one shader-shaped mesh per stage with hard tone bands —
+  a jet on every bell and, for a cluster, the one fire they merge into, which swells to several hull
+  diameters as the air thins. Opaque paint at sea level, flat veils in vacuum.
+- `js/exhaust-pool.js` (153 lines) — the fixed pool of gas parcels and the `spawnParticle` contract.
+- `js/exhaust-emit.js` (340 lines) — where parcels are born: nozzles, the smoke trail, ignition steam, lunar dust.
+- `js/exhaust-sim.js` (514 lines) — how they move: drag from the same `airDensity` the vehicle flies in, the
   flame trench, the hull.
-- `js/exhaust-draw.js` (308 lines) — how they are drawn: opaque three-tone puffs that write their own depth,
-  and a shadow-casting pass so the smoke column shades the ground.
+- `js/exhaust-draw.js` (503 lines) — how they are drawn: opaque three-tone puffs that write their own depth
+  and take the fire's colour on the side that faces it, flat grey lenses for lunar dust, hard-edged
+  shards for sparks and flashes, and a shadow-casting pass so the smoke column shades the ground.
+- `js/entry-fx.js` (197 lines) — atmospheric entry, drawn from the flight model's own heat proxy: a
+  bow-shock cap ahead of the leading face, a sheath of fire round the body and a trailing streak; it
+  turns crimson and sheds fragments when the vehicle is burning up.
+- `js/splash-fx.js` (142 lines) — the splash at a water landing: a crown of flat petals, droplets, two
+  rings running out and a collar of foam.
+- `js/dust-sheet.js` (136 lines) — the flat sheet of dust a lunar burn drives out along the ground.
 
 ### Worlds
 

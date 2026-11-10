@@ -61,6 +61,11 @@ export function resetPool() {
   nFree = NP; for (let i = 0; i < NP; i++) freeSlots[i] = i;
 }
 
+/* Remove every live generic parcel of one kind (see pSmoke above). */
+export function killKind(kind) {
+  for (let k = nAlive - 1; k >= 0; k--) { const i = alive[k]; if (pMode[i] === 2 && pSmoke[i] === kind) killSlot(k); }
+}
+
 /* Live frame of the vehicle, written each frame by js/vehicle.js. The integrator collides parcels with
    the hull, the lunar ejecta scales with the engine's height, and the draw call is anchored here. */
 export const ship = {
