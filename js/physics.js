@@ -73,6 +73,9 @@ export function warpCap() {
   if (state !== 'flying' && state !== 'pad') return 1;
   moonPos(simTime, _moon);
   const altE = S.pos.length() - RE, altM = S.pos.distanceTo(_moon) - RM;
+  /* Standing on the pad with the engines cold, time is free: warp through the day and the night
+     and launch when the Moon is where you want it. */
+  if (state === 'pad' && !engineOn) return 1000;
   if (altE < 70) return 4;                                   // in the air
   if (altM < 15) return 4; if (altM < 150) return 32;        // low over the Moon
   if (altE < 140) return 16;

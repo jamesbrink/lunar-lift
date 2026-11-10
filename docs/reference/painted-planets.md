@@ -180,8 +180,9 @@ integral any more.
 
 There is cloud wherever one scalar field exceeds one threshold:
 
-    F = WM·macro + WV·(variety − ½) + W1·oct1 + W2·oct2 + W3·(1 + TURRET·h)·oct3
+    F = M + WV·(variety − ½) + W1·oct1 + W2·oct2 + W3·(1 + TURRET·h)·oct3
     cloud where F > THR + RISE·h²        h = height in the cumulus layer, 0 at 4 km .. 1 at 7 km
+    M = mix( WM·macro, SYN_B + SYN_A·(synoptic − ½ + streets), orbit )
 
 So every cloud is a height field on a flat base: a steep wall at its foot, rounding over at the top,
 with the billows counting for more the higher up they are.
@@ -207,6 +208,77 @@ The tile is read in **Mercator**, not equirectangularly. Mercator is conformal, 
 as it is wide at every latitude and only shrinks toward the poles; read equirectangularly the cells
 kept their height while their width fell with cos(latitude), and everything north of 45° was drawn
 as north–south streaks. Every length the cell field deals in is therefore in equatorial km.
+
+### Two weathers: the pad's and the orbit's
+
+The red channel is right from the ground and wrong from space. 8 % of fair-weather cumulus wherever
+no system is reads, from the pad, as a sky with clouds in it; from 500 km it was an even sprinkle of
+similar white blobs over the whole planet — polka dots. No footprint trick fixes that, because at
+500 km a pixel is under a kilometre and the cells are fully resolved: the field *is* dots.
+
+So the field depends on how high the **eye** is. `orbit = smoothstep(50 km, 200 km, eye altitude)`
+(set in `setWeatherEye`, shared by the shell and the ground shade) mixes the macro term from the red
+channel to the **synoptic sheet**, the same texture's blue channel — same texel, no extra read.
+Below 50 km nothing in the shader differs from before. Between, the weather morphs:
+`tools/cloud-views.mjs --climb` photographs 40 … 300 km from one camera, and the fair-weather field
+thins while the front behind it fills in, with no frame where anything jumps.
+
+The synoptic value `s = blue − ½` moves the threshold by `SYN_A·s` about the cell sum's median
+(`SYN_A = 2·SYN_Z·σ`, `SYN_Z = 4.5`, σ = 0.110 measured from the tile; `SYN_B = THR − median`).
+Cover against `s`, from `cellField().cover`:
+
+| s | −0.5 | −0.3 | −0.2 | −0.1 | 0 | +0.1 | +0.2 | +0.3 |
+|---|---|---|---|---|---|---|---|---|
+| cover | 0.0 % | 0.2 % | 3.9 % | 19.7 % | 50 % | 81.0 % | 96.5 % | 99.8 % |
+
+So below −0.3 the sky is empty, above +0.2 it is solid, and the cells only show in between — on the
+edge of a system, or in a field drawn at −0.17 on purpose. By area, 41.7 % of the planet is at
+s ≤ −0.3 and 14.0 % at s ≥ +0.1. What is drawn into the sheet (`drawSystems`):
+
+- **its ground is the red channel's own argument**, so a system seen from the pad is still there from
+  orbit (red 1 ↔ s = +0.12; red 0 ↔ s = −0.30), dried a little more under the subtropical highs;
+- **extratropical cyclones**, seven per hemisphere at 41–60°, plus one placed by hand south of
+  Newfoundland so its cold front lies along 28° N across the water east of the Cape. Each is a
+  logarithmic spiral — a head wound round the low, a front that thins as it trails away equatorward
+  and west — with the dry slot cut in behind the front and the cold sector behind that. The plane
+  the comma is drawn in is bent by two octaves of noise: drawn with a compass, fourteen identical
+  hooks read as wallpaper;
+- **trade-cumulus fields** and **stratocumulus decks** between 7° and 36°. Their latitude gate is
+  added to the noise *before* the threshold; multiplied on afterwards, every field had the gate's
+  straight edge;
+- **four tropical cyclones**: a disc, two arms, an eye, a clear moat.
+
+Features are composed by max, the dry slot by subtraction before the band is laid over it.
+
+**Streets are not in the sheet.** At 20 km a texel, a diagonal stripe comes back from the bilinear
+filter as a string of beads one texel long: rows of identical dashes, and a regular grid of dots
+toward the limb. The sheet's alpha channel only says *where* the air is combed (the trade fields and
+the cold sectors, 20.0 % of the planet); the shader adds `STREET_AMP·sin(…)` there, 42 km crest to
+crest, 20° off the parallel and mirrored across the equator, its phase bent by the variety channel,
+and fades it out between footprints of 5 and 15 km.
+
+Four more things follow the same clock, each from a wrong picture:
+
+- **A slanted pixel is a strip, not a disc.** `t·pix` wide, `t·pix / cos(zenith)` long. The march
+  read the field at the strip's width, so toward the limb each row of pixels sampled ground 100 km
+  from the row above it in a field blurred to 6 km: rows of unrelated dashes — the "blocks" on the
+  horizon. From orbit the field is read at half the strip's length (`strip`, capped at 16×).
+- **The last sliver before the horizon is let go.** Where the ray meets the shell at under
+  cos 0.10 the whole 3 km layer is edge-on and under a half-resolution pixel tall; coverage fades to
+  nothing between 0.10 and 0.05 (the ground's own horizon is at 0.059).
+- **Coverage ramps on both sides of an outline.** A hit used to write 1 and only a miss ramped, so
+  the upsampled edge kept its half-resolution stairs. A hit `h` up the layer stands over a column
+  whose field is `RISE·h²` clear of the outline, and that is its ramp. Only for an eye above the
+  layer.
+- **Contrast is not held up.** `gain` goes to 1: the cover is the sheet's business, and scaling the
+  mip's residue of a 160 km tile back up drew a weave across every system at 4,000 km. For the same
+  reason the relief, once a pixel is wider than a billow, is read from the first octave (30–100 km
+  lobes) three pixels wide, and under a high sun the light is leaned east by a third so a top has a
+  shaded side at all.
+
+The ground shade follows: from orbit it darkens only where the field is clearly over the threshold.
+The half of its ramp below belonged to clouds too small for the half-resolution march to draw, and
+left dark specks on an empty sea.
 
 ### Detail follows the eye
 
@@ -270,9 +342,27 @@ sphere, so a second sphere at the cloud base carries the same march for those.
 Not yet measured on an idle machine. `tools/cloud-views.mjs` times the three passes that belong to
 the weather (`sky` the march, `ink` the composite, `ground` the planet with its cloud shade) with
 `EXT_disjoint_timer_query_webgl2` at a 2160 × 1250 drawing buffer, drawing each sixteen times
-inside one query because a single light frame reads anywhere from 0.7 to 2.5 ms on this GPU. The
-runs made while this was written shared the GPU with other work and disagreed with each other by
-more than the difference between old and new; no figure from them belongs here.
+inside one query because a single light frame reads anywhere from 0.7 to 2.5 ms on this GPU.
+
+The orbital weather was measured against the commit before it, two runs each, interleaved, on a GPU
+other work was sharing. `sky` (the march), ms, old / old / new / new:
+
+| station | old | old | new | new |
+|---|---|---|---|---|
+| pad-up | 0.906 | 1.109 | 0.958 | 0.952 |
+| ascent-15km | 0.955 | 1.156 | 1.152 | 0.988 |
+| high-60km | 1.068 | 0.972 | 1.199 | 1.194 |
+| low-150km | 0.763 | 0.861 | 0.694 | 0.595 |
+| orbit-500-nadir | 0.788 | 0.522 | 0.689 | 0.577 |
+| orbit-500-limb | 0.741 | 0.401 | 0.467 | 0.403 |
+| orbit-1500 | 0.756 | 0.734 | 0.611 | 0.797 |
+| far-4000 | 0.585 | 0.347 | 0.482 | 0.454 |
+
+The same code disagrees with itself by up to 0.34 ms between runs, which is more than any old/new
+difference in the table; what it supports is "not measurably dearer", and nothing finer. (The march
+has no new texture read: the synoptic sheet is two more channels of a texel already fetched, and
+empty sky skips the walk.) Generating the macro sheet went from 371 to about 700 ms in node on the
+same machine, once, at boot.
 
 Row 0 is south in every generated sheet: a `DataTexture` samples row 0 at `v = 0`, and
 `SphereGeometry`'s `v = 0` is the south pole.

@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { RE } from './constants.js';
-import { cellField, macroField, veilField, TILE, MACRO_W, MIX1, MIX2, MIX3, W1, W2, W3, WV } from './cloudfields.js';
+import { cellField, macroField, veilField, TILE, MACRO_W, MIX1, MIX2, MIX3, W1, W2, W3, WV, SYN_Z, STREET_KM, STREET_AMP, STREET_DEG } from './cloudfields.js';
 import { skyOnly, sky, RES_SCALE } from './halfres.js';
 
 /* Weather is ONE field on ONE mesh, and a cloud is a DRAWN SHAPE: an opaque surface with an edge,
@@ -26,7 +26,16 @@ import { skyOnly, sky, RES_SCALE } from './halfres.js';
    Detail follows the eye for free. Each read of the tile is taken at the mip matching the pixel's
    footprint at that distance, so an octave too fine to resolve averages to its mean and leaves
    the sum: from the pad F carries 1 km billows, from 500 km cells and fields, from 20 000 km only
-   the macro sheet's systems. The outline simplifies; it never dissolves and never pops. */
+   the macro sheet's systems. The outline simplifies; it never dissolves and never pops.
+
+   The field itself is not the same at every altitude, though. What is right from the pad — 8 % of
+   fair-weather cumulus wherever there is no system — is, from 500 km, an even sprinkle of dots over
+   the whole planet. So the uniform `orbit` (0 below 50 km of EYE altitude, 1 above 200) carries
+   the field from the macro sheet's red channel to its blue one, the synoptic sheet: fronts, commas,
+   streets, decks, and empty sky between them. Everything else that says `orbit` below is the
+   same idea — the drawing an orbital eye needs, switched in on that one clock, and worth exactly
+   nothing at the pad: the strip-shaped footprint toward the limb, the two-sided coverage ramp, the
+   relief of whole systems instead of billows. */
 
 const BAND_BASE = 4;                    // km: cloud base
 const BAND_TOP = 11;                    // km: cloud top
@@ -57,6 +66,9 @@ const RIM = 0.08;                       // field excess over which a base goes f
 const NEAR = 0.015;                     // a miss this close to the threshold gets one more look where it came closest
 const SHADE = 0.40;                     // how far a cloud's shadow darkens the ground: one flat tone
 const HAZE_KM = 220;                    // e-folding length of the air between eye and cloud
+/* The eye's altitude over which the weather goes from the pad's drawing to the orbital one (the
+   uniform `orbit`, 0 .. 1). Below ORBIT_LO nothing in this file behaves differently from before. */
+const ORBIT_LO = 50, ORBIT_HI = 200;
 
 /* Winds, m/s eastward relative to the ground. The octaves slide past each other, so shapes build
    and fade instead of merely translating; the billows ride with the cells they sit on, nearly. */
@@ -109,6 +121,11 @@ function defines() {
 #define THR ${f4(C.thr)}
 #define WM ${f4(C.wm)}
 #define WV ${f4(WV)}
+#define SYN_A ${f4(2 * SYN_Z * Math.hypot(W1 * C.sigma[0], W2 * C.sigma[1], W3 * C.sigma[2]))}
+#define SYN_B ${f4(C.thr - C.q50)}
+#define STREET_KM ${f4(STREET_KM)}
+#define STREET_AMP ${f4(STREET_AMP)}
+#define STREET_UV vec2( ${f4(Math.sin(STREET_DEG * Math.PI / 180) * KM_PER_U / STREET_KM)}, ${f4(-Math.cos(STREET_DEG * Math.PI / 180) * KM_PER_U / 2 / STREET_KM)} )
 #define FMAX ${f4(C.fmax)}
 #define RISE ${f4(RISE)}
 #define TURRET ${f4(TURRET)}
@@ -120,6 +137,7 @@ uniform vec2 drift1;
 uniform vec2 drift2;
 uniform vec2 drift3;
 uniform float macroRide;
+uniform float orbit;
 uniform vec3 sunWorld;
 `;
 }
@@ -182,6 +200,10 @@ Foot footOf( float fkm ) {
   F.keep = 1.0 / ( 1.0 + k * k / 64.0 );
   vec3 f = vec3( 1.0, F.fade );
   F.gain = min( SIG_ALL / sqrt( dot( SIG2, f * f / ( 1.0 + k * k * INV_K0SQ ) ) + 1e-8 ), 4.0 );
+  /* From orbit the cover is the synoptic sheet's business (macroAt), and cells too small to see are
+     allowed to go: an edge that was scalloped becomes the sheet's own contour. Holding their
+     contrast up here drew the mip's residue of a repeating tile as a weave across every system. */
+  F.gain = mix( F.gain, 1.0, orbit );
   return F;
 }
 
@@ -203,8 +225,18 @@ float cells3( vec2 uv, Foot F ) {
 }
 
 float macroAt( vec3 q, float fkm ) {
-  vec2 m = textureLod( cloudMacro, uvAt( q ) + vec2( macroRide, 0.0 ), lodOf( fkm, MACRO_KM ) ).rg;
-  return WM * m.r + WV * ( m.g - 0.5 );
+  vec2 uv = uvAt( q ) + vec2( macroRide, 0.0 );
+  vec4 m = textureLod( cloudMacro, uv, lodOf( fkm, MACRO_KM ) );
+  /* Red is the weather as the pad sees it: it moves the cover between 8 % and 72 %. Blue is the
+     weather as orbit sees it (js/cloudfields.js, the synoptic sheet): it moves the threshold
+     SYN_Z standard deviations either side of the cell sum's median, so its systems are solid, the
+     sky between them is empty, and the cells are the texture of an edge. Same texel, no extra read.
+     Alpha is where the air is combed into streets: crests ride the wind, a little off the
+     parallel and mirrored across the equator, meandering with the variety sheet. */
+  float syn = m.b - 0.5;
+  if ( orbit > 0.0 && m.a > 0.004 )
+    syn += STREET_AMP * m.a * sin( PI2 * ( STREET_UV.x * uv.x + STREET_UV.y * abs( uv.y - 0.5 ) ) + 14.0 * m.g ) * ( 1.0 - smoothstep( 0.12 * STREET_KM, 0.35 * STREET_KM, fkm ) );
+  return mix( WM * m.r, SYN_B + SYN_A * syn, orbit ) + WV * ( m.g - 0.5 );
 }
 
 /* Signed field: positive inside cloud. The threshold climbs with the SQUARE of the height, so a
@@ -306,7 +338,16 @@ void main() {
   float cov = 0.0, light = 1.0, haze = 0.0, veil = 0.0;
 
   if ( len > 0.0 ) {
-    float m0 = macroAt( o + tA * d, tA * pix ), m1 = macroAt( o + tB * d, tB * pix );
+    /* Seen from above at a slant, a pixel is not a disc of ground but a strip: t pix wide and
+       t pix / cos( zenith ) long. Everything below read the field at the strip's WIDTH, so toward the
+       limb each row of pixels sampled ground 100 km from the row above it in a field blurred to
+       6 km — rows of unrelated dashes, the blocks on the horizon. From orbit the field is read at
+       half the strip's length instead; a lobe the strip cannot hold fades into the sheet's contour. */
+    float sinz = length( cross( d, n ) );
+    float muz = sqrt( max( 1.0 - sinz * sinz, 1e-4 ) ), limb = smoothstep( 0.0, 0.3, orbit );
+    float strip = mix( 1.0, clamp( 0.5 / muz, 1.0, 16.0 ), limb );
+    float track = 0.7 * len * sinz;          // the sheet is read at three points of the ray: nothing finer than their spacing
+    float m0 = macroAt( o + tA * d, max( tA * pix * strip, track ) ), m1 = macroAt( o + tB * d, max( tB * pix * strip, track ) );
     /* the parameter is not called x: slow.x is in the body, and the preprocessor would rewrite it */
     #define SLOW(at) ( ( at ) < 0.5 ? mix( slow.x, slow.y, 2.0 * ( at ) ) : mix( slow.y, slow.z, 2.0 * ( at ) - 1.0 ) )
     {
@@ -318,20 +359,19 @@ void main() {
          pad, combs on every flank). Blurred to the stride, no lobe is narrower than it. An
          overhead ray stays in one column, takes three looks and keeps every billow; a grazing one
          crosses 200 km of band and draws its clouds in broad shapes, which is all its pixels hold. */
-      float sinz = length( cross( d, n ) );
       float ground = len * sinz / gCosLat;
       float tMid = tA + 0.5 * len;
       float steps = clamp( ceil( 2.0 * ground / max( tMid * cpix, STRIDE_MIN ) ) + 2.0, 3.0, float( MAX_STEPS ) );
       /* ONE footprint for the whole ray, taken at its middle: the far end of a ray from the pad is
          under twice as far as the near end, and a field that changed scale along the ray would
          have a different threshold at each step. */
-      Foot F = footOf( max( tMid * cpix, 2.0 * ground / steps ) );
+      Foot F = footOf( max( tMid * cpix * strip, 2.0 * ground / steps ) );
       /* The slow part of the field — the macro sheets and the first octave, whose smallest lobe
          is 30 km — is read at the two ends of the ray and at its middle and interpolated between,
          instead of at every step. And if the slow part is so low all along the ray that the
          other two octaves at their highest could not lift it over the threshold, there is no
          cloud on this ray and the walk is not taken at all: most of a fair-weather sky. */
-      float mM = macroAt( o + tMid * d, tMid * pix );
+      float mM = macroAt( o + tMid * d, max( tMid * pix * strip, track ) );
       vec3 slow = vec3( m0, mM, m1 ) + F.gain * vec3( cells1( cellAt( o + tA * d ), F ), cells1( cellAt( o + tMid * d ), F ), cells1( cellAt( o + tB * d ), F ) );
       float most = F.gain * ( W2 * mix( MEAN2, TOP2, F.fade.x ) + W3 * ( MEAN3 + ( 1.0 + 0.35 * TURRET ) * F.fade.y * ( TOP3 - MEAN3 ) ) - MEANSUM ) + MEANSUM - THR;
       float t = tA, lastT = tA, hitT = tA, hitD = 0.0, best = -1.0, bestT = tA, d0 = -1.0, d1 = -1.0;
@@ -380,8 +420,18 @@ void main() {
       /* Coverage is a ramp through 0.5 AT the silhouette. A base's outline has the field itself to
          ramp on. A flank does not — the walk only knows hit or miss — so a miss ramps on how
          near the ray came, scaled by how fast that nearness changes from one pixel to the next. */
-      if ( hit ) cov = first ? clamp( 0.5 + hitD / ( 4.0 * edge ), 0.5, 1.0 ) : 1.0;
+      /* A hit seen from ABOVE has a ramp of its own: the cloud is a height field whose threshold
+         climbs RISE h^2 from the base, so a ray that struck it h up the layer is over a column whose
+         field stands RISE h^2 clear of the outline. Without it coverage was 1 on one side of every
+         outline and a ramp on the other, and the upsampled edge kept the half-resolution stairs. */
+      float hh = clamp( ( length( o + t * d ) - BAND_IN ) / BAND_THICK, 0.0, 1.0 );
+      if ( hit ) cov = first ? clamp( 0.5 + hitD / ( 4.0 * edge ), 0.5, 1.0 )
+                     : ( dot( o, o ) > CU_R * CU_R ? clamp( 0.5 + RISE * hh * hh / ( 4.0 * edge ), 0.5, 1.0 ) : 1.0 );
       else cov = clamp( 0.5 + best / ( 2.0 * max( fwidth( best ), edge ) ), 0.0, 0.5 );
+      /* The last sliver before the horizon, seen from orbit: the whole 3 km layer is under a pixel
+         tall there, edge on, and whatever is drawn in it is a row of half-resolution dashes. It is
+         let go — the ray through the ground's own horizon meets the shell at cos 0.059. */
+      cov *= mix( 1.0, smoothstep( 0.05, 0.10, muz ), limb );
       if ( cov > 0.01 ) {
         vec3 p = o + t * d, up = normalize( p );
         float su = dot( up, sunWorld );
@@ -399,14 +449,26 @@ void main() {
              Tops are treated as if they were never cut flat at the layer's ceiling — a plateau
              with no relief is a white plate. */
           vec3 sh = sunWorld - su * up;
-          float fl = max( t * cpix, 1e-4 ), reach = max( 0.5, 4.0 * fl );
+          /* From orbit: under a high sun a height field has no shaded side at all and every system
+             was one white plate, so the light is leaned east by at least a third; and the relief is
+             read three pixels wide, which draws a top in patches of tone instead of in specks. */
+          sh += 0.35 * orbit * ( 1.0 - smoothstep( 0.15, 0.5, length( sh ) ) ) * gEast;
+          float fl = max( t * cpix * strip * ( 1.0 + 2.0 * orbit ), 1e-4 ), reach = max( 0.5, 4.0 * fl );
           Foot L = footOf( fl );
-          float tw = 1.0 + TURRET * clamp( ( length( p ) - BAND_IN ) / BAND_THICK, 0.0, 1.0 );
+          /* From orbit, once a pixel is wider than a billow, the relief worth drawing is the FIRST
+             octave's — the 30 to 100 km lobes of a system's top — and the billows' two reads are
+             spent on it instead. */
+          float wide = orbit * smoothstep( 4.5, 5.5, L.lod.z );
+          float tw = ( 1.0 + TURRET * clamp( ( length( p ) - BAND_IN ) / BAND_THICK, 0.0, 1.0 ) ) * ( 1.0 - wide );
           vec2 uv = cellAt( p ), uvS = cellAt( p + reach * gCosLat / max( length( sh ), 1e-3 ) * sh );
-          float dF = W2 * L.fade.x * dot( textureLod( cloudCells, uvS * REP2 + drift2, L.lod.y ) - textureLod( cloudCells, uv * REP2 + drift2, L.lod.y ), MIX2 )
-                   + tw * ( cells3( uvS, L ) - cells3( uv, L ) );
+          /* ...and the second octave, by then a mip's residue of a tile that repeats every 160 km,
+             counts for what is left of it instead of being scaled back up to full relief */
+          float w2 = mix( 1.0, min( 1.0, 3.0 * L.keep.y ), wide );
+          float dF = w2 * W2 * L.fade.x * dot( textureLod( cloudCells, uvS * REP2 + drift2, L.lod.y ) - textureLod( cloudCells, uv * REP2 + drift2, L.lod.y ), MIX2 );
+          if ( tw > 0.0 ) dF += tw * ( cells3( uvS, L ) - cells3( uv, L ) );
+          if ( wide > 0.0 ) dF += wide * ( cells1( uvS, L ) - cells1( uv, L ) );
           /* in units of the field's own rms slope at this footprint: the same drawing at every range */
-          float a = RELIEF * dF / reach / max( dot( GRAD_KM.yz, L.keep.yz * vec2( 1.0, tw ) ), 1e-5 );
+          float a = RELIEF * ( 1.0 - 0.4 * wide ) * dF / reach / max( dot( GRAD_KM, L.keep * vec3( wide, w2, tw ) ), 1e-5 );
           light = 0.5 + 0.5 * ( su - a * length( sh ) ) / sqrt( 1.0 + a * a );
         }
         float mu = abs( dot( up, d ) );
@@ -535,7 +597,9 @@ void cloudDarken() {
   float c1 = cells1( cellAt( p1 ), F );
   float D = max( fieldD( p1, F, c1, mac ), fieldD( p2, F, c1, mac ) );
   float w = 2.0 * F.gain * dot( GRAD_KM, F.keep ) * fkm;
-  gl_FragColor.rgb *= 1.0 - shadeStrength * smoothstep( -w, w, D ) * smoothstep( 0.02, 0.12, sd );
+  /* from orbit a shadow is drawn only where the march would draw its cloud: the half of the ramp
+     under the threshold belonged to clouds smaller than a pixel, and left specks on an empty sea */
+  gl_FragColor.rgb *= 1.0 - shadeStrength * smoothstep( mix( -w, 0.5 * w, orbit ), mix( w, 2.5 * w, orbit ), D ) * smoothstep( 0.02, 0.12, sd );
 }
 `;
 const SHADE_FRAG = defines() + /* glsl */`
@@ -556,6 +620,7 @@ export function makeWeather() {
     drift3: { value: new THREE.Vector2() },
     driftV: { value: new THREE.Vector2() },
     macroRide: { value: 0 },
+    orbit: { value: 0 },
     cloudLit: { value: CLOUD_LIT },
     cloudMid: { value: CLOUD_MID },
     cloudShade: { value: CLOUD_SHADE },
@@ -605,7 +670,7 @@ export function makeCloudShell(U) {
    bound at compile time, so no customProgramCacheKey is needed — see the magenta-probe note in
    AGENTS.md for what happens when they are not. */
 export function cloudShadeInject(sh, U) {
-  for (const key of ['cloudCells', 'cloudMacro', 'drift1', 'drift2', 'drift3', 'macroRide',
+  for (const key of ['cloudCells', 'cloudMacro', 'drift1', 'drift2', 'drift3', 'macroRide', 'orbit',
     'shadeStrength', 'sunWorld']) sh.uniforms[key] = U[key];
   sh.vertexShader = sh.vertexShader
     .replace('#include <common>', '#include <common>\nuniform mat3 fixRot;\nuniform vec3 eyeFixed;\nvarying vec3 vShadeW;')
@@ -642,4 +707,9 @@ export function updateWeather(mesh, simT, spin, sunWorld) {
 const Y_AXIS = new THREE.Vector3(0, 1, 0);
 let lastSpin = 0;
 /* Once per frame, with the eye the frame is drawn from (the same one js/origin.js uses). */
-export function setWeatherEye(U, eye) { U.eyeFixed.value.copy(eye).applyAxisAngle(Y_AXIS, -lastSpin); }
+export function setWeatherEye(U, eye) {
+  U.eyeFixed.value.copy(eye).applyAxisAngle(Y_AXIS, -lastSpin);
+  /* ...and how far up it is decides which weather is drawn. It is the eye's altitude, not the
+     ship's: every pixel of a frame, and the shade on the ground under it, reads the same field. */
+  U.orbit.value = THREE.MathUtils.smoothstep(eye.length() - RE, ORBIT_LO, ORBIT_HI);
+}

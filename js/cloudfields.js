@@ -8,7 +8,9 @@ import * as THREE from 'three';
        F = WM * macro + W1 * oct1 + W2 * oct2 + W3 * oct3          cloud where F > THR + RISE * h
 
    macro is a planet sheet (weather systems), oct1..3 are three looks at the same 512-texel tile at
-   800, 160 and 32 km per tile. Far away the fine octaves average to their means in the sampler's
+   1000, 160 and 32 km per tile. The planet sheet holds TWO weathers, one for an eye near the ground
+   and one for an eye in orbit (its red and blue channels; see the synoptic sheet below), and
+   js/clouds.js goes from one to the other as the eye climbs. Far away the fine octaves average to their means in the sampler's
    mips and drop out, so the outline simplifies but stays an outline — there is no distance at
    which the field has to be swapped for a fog. The octaves are built from DOMES (one minus the
    squared distance to the nearest feature point): the level set of a sum of domes is a union of
@@ -163,6 +165,7 @@ export function cellField() {
   _cells = {
     tex, mean, slope, sigma, k0, top,
     thr,                                    // cloud where the cell sum exceeds this, in fair weather
+    q50: q(0.5),                            // the cell sum's median: half the sky is over it
     wm: thr - q(1 - COVER_STORM),           // what a full macro value adds: coverage becomes COVER_STORM
     fmax: W1 * max[0] + W2 * max[1] + W3 * max[2],
     meanSum: W1 * mean[0] + W2 * mean[1] + W3 * mean[2],
@@ -185,10 +188,117 @@ export function cellField() {
 export const MACRO_W = 2048, MACRO_H = 1024;
 const CYCLONES = 26;
 
+/* ------------------------------------------------------------------------------------------------
+   The synoptic sheet (the macro texture's BLUE channel): the weather as it is drawn from orbit.
+
+   The red channel above moves the cover between 8 % and 72 %, which is right from the pad — there is
+   always a cumulus somewhere — and wrong from 500 km, where 8 % of fair-weather cloud everywhere is
+   an even sprinkle of dots over the whole planet. From orbit js/clouds.js reads this sheet instead:
+   s = value - 0.5 moves the threshold on the cell sum by 2 s SYN_Z of its standard deviations. So
+   s <= -0.3 is clear sky with nothing in it, s >= 0.3 is solid, and only the band between — the
+   EDGE of a system, and the fields drawn at s ~ -0.1 on purpose — is where the cells show, as the
+   texture of something larger.
+
+   What is drawn into it, over a lobed fbm that follows the zonal pattern:
+     - the ITCZ: a wavy line of clusters a few degrees north of the equator;
+     - extratropical cyclones, a wave train of them along each storm track: a comma — the head
+       wound round the low, the cold front trailing away equatorward and west as a band that
+       thins — with the dry slot cut in behind the front, and behind that the cold air's field of
+       open cells, combed into streets along the wind;
+     - a few tropical cyclones: a dense disc, two arms, an eye.
+   The streets themselves are NOT in the sheet. At 20 km a texel a diagonal stripe comes back from
+   the bilinear filter as a string of beads one texel long — rows of identical dashes, a grid of
+   dots at the limb. The sheet's ALPHA channel only says where the air is combed (the trade fields,
+   the cold sectors); js/clouds.js draws the comb itself, analytically, STREET_KM from crest to
+   crest, and lets it go where a pixel is too wide to hold it.
+   Features are composed by MAX (see agents.md): a product of overlapping systems goes to mud.
+   ------------------------------------------------------------------------------------------------ */
+export const SYN_Z = 4.5;
+export const STREET_KM = 42, STREET_AMP = 0.09, STREET_DEG = 20;     // spacing; depth, in the sheet's units; bearing off the parallel
+const LOWS = 7;                        // per hemisphere
+const DEG = Math.PI / 180;
+
+/* Visit every texel within `reach` degrees of ( lat0, lon0 ), in local degrees: ex east, ey POLEWARD
+   (so a southern system is the mirror image of a northern one, and winds the other way, unasked). */
+function stamp(W, H, lat0, lon0, reach, fn) {
+  const pole = lat0 < 0 ? -1 : 1, cosl = Math.cos(lat0 * DEG);
+  const y0 = Math.max(0, Math.floor((lat0 - reach + 90) / 180 * H)), y1 = Math.min(H - 1, Math.ceil((lat0 + reach + 90) / 180 * H));
+  const half = Math.min(W >> 1, Math.ceil(reach / Math.max(cosl, 0.2) / 360 * W)), xc = Math.round((lon0 / 360 + 0.5) * W);
+  for (let iy = y0; iy <= y1; iy++) {
+    const lat = ((iy + 0.5) / H - 0.5) * 180, c = Math.cos(0.5 * (lat + lat0) * DEG);
+    for (let dx = -half; dx < half; dx++) {
+      const i = iy * W + ((xc + dx) % W + W) % W;
+      fn(i, dx / W * 360 * c, (lat - lat0) * pole);
+    }
+  }
+}
+
+const wrapPi = (t) => t - 2 * Math.PI * Math.round(t / (2 * Math.PI));
+
+function drawSystems(syn, comb, W, H) {
+  const put = (i, f, peak) => { const v = -0.5 + (peak + 0.5) * f; if (v > syn[i]) syn[i] = v; };
+
+  /* Extratropical cyclones. A logarithmic spiral r = R0 exp( PITCH * phi ): leaving the low the band
+     starts on its west side, wraps over the pole side and down the east, and trails away
+     equatorward and west — phi is the angle swept, clockwise in these mirrored coordinates. */
+  const R0 = 0.15;
+  for (let c = -1; c < 2 * LOWS; c++) {
+    const south = c & 1, n = c >> 1;
+    let lat0 = (south ? -1 : 1) * (41 + 19 * hash(c, 1, 910));
+    let lon0 = -180 + 360 * ((n + 0.9 * hash(c, 2, 910)) / LOWS + (south ? 0.37 : 0.08));
+    let R = 6.5 + 7.5 * hash(c, 3, 910);                       // degrees: the head is ~0.8 R across, the front runs out to 2.4 R
+    let rot = (hash(c, 4, 910) - 0.5) * 1.6;                   // each low at its own stage of winding up
+    let pitch = 0.40 + 0.22 * hash(c, 6, 910);
+    let age = 0.7 + 0.3 * hash(c, 5, 910), reach = 1.5 + 0.9 * hash(c, 7, 910);
+    /* One low is placed by hand: south of Newfoundland, its cold front trailing along 28 N across
+       the water east of the Cape — the first weather a flight out of the pad passes over. */
+    if (c < 0) { lat0 = 45; lon0 = -57; R = 11; rot = -0.2; pitch = 0.5; age = 1; reach = 2.4; }
+    const cosa = pitch / Math.hypot(1, pitch);
+    stamp(W, H, lat0, lon0, (reach + 0.3) * R, (i, ex0, ey0) => {
+      /* nothing in the sky is drawn with a compass: the plane the comma is drawn in is itself bent */
+      if (ex0 * ex0 + ey0 * ey0 > (reach + 0.75) * (reach + 0.75) * R * R) return;      // the bend moves a point 0.33 R at most
+      const iu = (i % W) / W, iv = ((i / W) | 0) / H;
+      const ex = ex0 + R * (0.34 * (sphereNoise(iu, iv * 0.55, 24, 921 + c) - 0.5) + 0.12 * (sphereNoise(iu, iv * 0.55, 70, 931 + c) - 0.5));
+      const ey = ey0 + R * (0.34 * (sphereNoise(iu, iv * 0.55, 24, 951 + c) - 0.5) + 0.12 * (sphereNoise(iu, iv * 0.55, 70, 961 + c) - 0.5));
+      const x = ex / R, y = ey / R, r = Math.hypot(x, y);
+      if (r > reach + 0.3) return;
+      const rr = Math.max(r, 0.02);
+      /* angle from the band at this radius: negative is behind the front (toward the low) */
+      const th = wrapPi(Math.atan2(y, x) - (Math.PI + rot - Math.log(rr / R0) / pitch));
+      const d = rr * th * cosa;                                // distance from the band's centre line, in R
+      const fadeOut = 1 - smoothstep(reach - 0.6, reach, r), fadeIn = smoothstep(0.06, 0.2, r);
+      const w = (0.06 + 0.17 * Math.exp(-r / 0.9)) * (0.75 + 0.5 * sphereNoise(iu, iv * 0.55, 40, 981 + c));
+      /* the slot first: it cuts what the fbm put there, and the band is then laid over it */
+      const slot = Math.exp(-Math.pow((d + 2.4 * w + 0.05) / (1.5 * w + 0.05), 2)) * fadeIn * (1 - smoothstep(0.9, 1.9, r));
+      syn[i] -= 0.75 * slot;
+      /* behind the slot, the cold air: a field of open cells, in streets that follow the band */
+      const cold = smoothstep(-0.25, -0.55, d + 2.4 * w) * smoothstep(-1.35, -0.8, d) * smoothstep(0.55, 0.9, r) * fadeOut;
+      if (cold > 0.01) { put(i, cold, -0.10); if (cold > comb[i]) comb[i] = cold; }
+      put(i, Math.exp(-d * d / (w * w)) * fadeIn * fadeOut * (0.72 + 0.28 * smoothstep(0.3, 0.55, sphereNoise(iu, iv * 0.55, 56, 991 + c))), 0.5 * age);
+      const hx = x + 0.10 * Math.cos(rot), hy = y - 0.24;
+      put(i, Math.exp(-(hx * hx + hy * hy) / 0.11), 0.5 * age);
+    });
+  }
+
+  /* Tropical cyclones: small, round, unmistakable. */
+  const TC = [[17, -57, 4.2], [-15, 78, 3.8], [19, 138, 4.6], [-17, -118, 3.4]];
+  for (const [lat0, lon0, R] of TC) stamp(W, H, lat0, lon0, 1.5 * R, (i, ex, ey) => {
+    const r = Math.hypot(ex, ey) / R;
+    if (r > 1.5) return;
+    const th = Math.atan2(ey, ex) + Math.log(Math.max(r, 0.03)) / 0.35;
+    const arms = Math.pow(0.5 + 0.5 * Math.cos(2 * th), 3) * smoothstep(1.4, 0.75, r) * smoothstep(0.2, 0.45, r);
+    const disc = Math.exp(-r * r / 0.14);
+    const eye = smoothstep(0.035, 0.09, r);
+    syn[i] -= 0.5 * smoothstep(1.5, 0.9, r) * (1 - Math.max(arms, disc));     // the clear moat round it
+    put(i, Math.max(arms * 0.9, disc) * eye, 0.5);
+    if (r < 0.09) syn[i] = Math.min(syn[i], -0.5 + eye);
+  });
+}
+
 let _macro = null;
 export function macroField() {
   if (_macro) return _macro;
-  const W = MACRO_W, H = MACRO_H, x = new Float32Array(W * H), vary = new Float32Array(W * H);
+  const W = MACRO_W, H = MACRO_H, x = new Float32Array(W * H), vary = new Float32Array(W * H), syn = new Float32Array(W * H), comb = new Float32Array(W * H);
   for (let iy = 0; iy < H; iy++) {
     const lat = ((iy + 0.5) / H - 0.5) * 180, a = Math.abs(lat);
     const itcz = 1.95 * Math.exp(-Math.pow((a - 4) / 9, 2));
@@ -197,6 +307,8 @@ export function macroField() {
     const polar = 0.30 * Math.exp(-Math.pow((a - 78) / 12, 2));
     const belt = 0.34 + itcz + midlat + dry + polar;
     const driftGate = smoothstep(12, 20, a) - smoothstep(64, 82, a);
+    const dryer = 0.10 * Math.exp(-Math.pow((a - 25) / 10, 2));
+    const tradeGate = smoothstep(7, 12, a) * smoothstep(36, 27, a);
     for (let ix = 0; ix < W; ix++) {
       const u = ix / W, v = iy / H;
       const wu = (sphereNoise(u, v, 7, 99) - 0.5) * 0.09, wv = (sphereNoise(u, v, 11, 77) - 0.5) * 0.05;
@@ -207,8 +319,26 @@ export function macroField() {
       let vs = 0; amp = 0.5; tot = 0;
       for (let k = 0; k < 4; k++) { vs += amp * sphereNoise(u + wv, v * 0.5 + wu, 14 << k, 300 + k); tot += amp; amp *= 0.6; }
       vary[iy * W + ix] = vs / tot;
+      /* The synoptic sheet's ground is the SAME argument, so a system seen from the pad is still
+         there from orbit: where red reads 1 (72 % cover) this reads +0.12 (86 %), and where red
+         reads 0 — 8 % of fair-weather cumulus — this reads -0.30 (0.2 %). Then what the tropics
+         are made of besides the ITCZ: fields of trade cumulus combed into streets along the wind,
+         and decks of stratocumulus. */
+      const xs = x[iy * W + ix] - 0.30 * driftGate * cl * cl;
+      let sv = Math.min(0.36, -0.30 + (xs - 0.585) * 2.35) - dryer + 0.10 * (sphereNoise(u + wv, v * 0.55 + wu, 90, 530) - 0.5);
+      if (tradeGate > 0.01) {
+        /* the belt's edge is in the noise's argument, not multiplied on afterwards: a mask times a
+           gate has the gate's straight edge */
+        const su = u + 2 * wu, sw = (v + 2 * wv) * 0.55, gate = 0.3 * (tradeGate - 1);
+        const field = smoothstep(0.53, 0.62, 0.6 * sphereNoise(su, sw, 20, 541) + 0.4 * sphereNoise(su, sw, 53, 543) + gate);
+        const deck = smoothstep(0.66, 0.73, 0.6 * sphereNoise(su, sw, 15, 547) + 0.4 * sphereNoise(su, sw, 41, 549) + gate);
+        sv = Math.max(sv, -0.5 + 0.33 * field, -0.5 + 0.62 * deck);
+        comb[iy * W + ix] = field;
+      }
+      syn[iy * W + ix] = sv;
     }
   }
+  drawSystems(syn, comb, W, H);
   /* Cyclones, stamped into the same argument. Northern lows wind anticlockwise, southern clockwise. */
   for (let c = 0; c < CYCLONES; c++) {
     const south = c & 1, lat0 = (south ? -1 : 1) * (36 + 26 * hash(c, 1, 900)), lon0 = 360 * hash(c, 2, 900);
@@ -239,7 +369,8 @@ export function macroField() {
   for (let i = 0; i < W * H; i++) {
     data[i * 4] = Math.round(255 * smoothstep(0.585, 0.765, x[i]));
     data[i * 4 + 1] = Math.round(255 * (vary[i] - vlo) / (vhi - vlo));
-    data[i * 4 + 3] = 255;
+    data[i * 4 + 2] = Math.round(255 * Math.min(1, Math.max(0, 0.5 + syn[i])));
+    data[i * 4 + 3] = Math.round(255 * Math.min(1, comb[i]));
   }
   const tex = new THREE.DataTexture(data, W, H, THREE.RGBAFormat);
   tex.wrapS = THREE.RepeatWrapping; tex.wrapT = THREE.ClampToEdgeWrapping;

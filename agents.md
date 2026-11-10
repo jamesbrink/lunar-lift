@@ -243,6 +243,18 @@ air. Corollaries, each read off the code or measured:
   by some rays and jumped by their neighbours, and the cloud comes out as the slices the samples cut:
   a stack of plates from the pad, a comb on every flank. Jitter hid this in the old march and paid
   for it in stipple; the fix is to band-limit the read (explicit `textureLod`) to twice the stride.
+- **The weather is not the same field at every altitude, and the clock is the EYE's.** 8 % of
+  fair-weather cumulus everywhere is a sky from the pad and polka dots from 500 km, and no mip trick
+  fixes it — at 500 km the cells are resolved, the field *is* dots. `orbit` (0 below 50 km of eye
+  altitude, 1 above 200, set in `setWeatherEye`) mixes the macro term from the sheet's red channel
+  to its blue one, the synoptic sheet (`drawSystems` in `js/cloudfields.js`): commas with fronts,
+  trade fields, decks, tropical cyclones, and 42 % of the planet with nothing in it. Everything else
+  gated on `orbit` is worth exactly nothing at the pad and must stay that way. Three things learned
+  drawing it: a diagonal stripe in a 20 km texture is a string of beads (the streets are a `sin` in
+  the shader, the texture's alpha only says where); a slanted pixel is a strip `1 / cos(zenith)`
+  long and a field read at its width aliases into rows of dashes at the limb; a mask multiplied by
+  a latitude gate has the gate's straight edge (add the gate to the noise before the threshold).
+  `tools/cloud-views.mjs --climb` is the pop test, `--flicker` the idle-frame diff.
 - **A half-resolution pass can still have a full-resolution edge.** The weather target holds
   coverage as a ramp through 0.5 and light as a scalar, not a colour; the main pass thresholds them
   per screen pixel. Upsampling a colour blurs it, upsampling a ramp and cutting it does not.
@@ -564,7 +576,7 @@ await tab.evaluate(`(async () => {
 
 ## Structure
 
-One concern per file; no god files. Current sizes: `physics.js` 773, `world.js` 645, `clouds.js` 645, `navball.js` 499, `exhaust-sim.js` 491, `camera.js` 435, `earthpaint.js` 367, `hud.js` 344, `exhaust-emit.js` 322, `paintkit.js` 314, `exhaust-draw.js` 308, `surface.js` 288, `predictor.js` 276, `moonpaint.js` 276, `cloudfields.js` 274, `pad.js` 225, `saturn.js` 220, `terrain.js` 215, `flame.js` 214, `ribbon.js` 213, `vehicle.js` 210, `main.js` 210, `padsite.js` 203, `surface-earth.js` 181, `exhaust-pool.js` 148, `toonmap.js` 142, `constants.js` 134, `surface-moon.js` 120, `targeting.js` 119, `toon.js` 117, `mapview.js` 116, `halfres.js` 103, `textures.js` 97, `aero.js` 81, `colliders.js` 72, `chutes.js` 70, `haze.js` 64, `audio.js` 62, `palette.js` 35, `origin.js` 29.
+One concern per file; no god files. Current sizes: `physics.js` 773, `clouds.js` 715, `world.js` 645, `navball.js` 499, `exhaust-sim.js` 491, `camera.js` 437, `cloudfields.js` 405, `earthpaint.js` 367, `hud.js` 344, `exhaust-emit.js` 327, `paintkit.js` 314, `exhaust-draw.js` 308, `surface.js` 295, `predictor.js` 276, `moonpaint.js` 276, `saturn.js` 266, `terrain.js` 225, `pad.js` 225, `flame.js` 214, `ribbon.js` 213, `main.js` 211, `vehicle.js` 210, `padsite.js` 203, `surface-earth.js` 181, `exhaust-pool.js` 148, `toonmap.js` 142, `constants.js` 134, `surface-moon.js` 120, `targeting.js` 119, `toon.js` 117, `mapview.js` 116, `halfres.js` 103, `textures.js` 97, `aero.js` 81, `colliders.js` 72, `chutes.js` 70, `haze.js` 64, `audio.js` 62, `palette.js` 35, `origin.js` 29.
 `toonmap.js` is now only the registry of paint products; the painters are `earthpaint.js` and
 `moonpaint.js` on `paintkit.js`, the authored launch site is `padsite.js`, and the ground is drawn by
 `surface.js` + `surface-earth.js` + `surface-moon.js`.
