@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { PAD_SCALE } from './constants.js';
-import { toon, outline, PALETTE } from './toon.js';
+import { padware as toon, outline, PALETTE } from './toon.js';
 import { ARMS, ARM_FROM, ARM_SWING } from './colliders.js';
 
 /* Launch Complex 39 as the game draws it: the mobile launcher's deck over the flame opening, the
@@ -52,7 +52,15 @@ function batcher() {
         g.setAttribute('position', new THREE.Float32BufferAttribute(b.pos, 3));
         g.setAttribute('normal', new THREE.Float32BufferAttribute(b.nrm, 3));
         const m = new THREE.Mesh(g, b.mat);
-        m.castShadow = shadows; m.receiveShadow = shadows;
+        /* The red lattice casts but does not RECEIVE. Its members are 0.6-1.8 m across and a shadow
+           texel at the pad is 1.46 m, so what one strut dropped on another was never a shape; and
+           every pair of members that happen to stand one shadow bias apart along the light is a
+           compare decided by rounding noise — under a thresholded shadow each such texel drags a
+           stretch of hard edge with it (tools/flicker-test.mjs 'pad close': 62-103 unstable pixels
+           and 15-23 flips with the lattice receiving, 0-19 and under 10 without). The moving parts
+           at the vehicle's foot (hold-downs, mast arms) are the same case. The tower is shaded by
+           its ramp; the ground, the deck, the shaft and the stack take its shadow. */
+        m.castShadow = shadows; m.receiveShadow = shadows && b.mat.name !== 'red';
         if (b.edge) outline(m);
         group.add(m);
       }
@@ -60,12 +68,36 @@ function batcher() {
   };
 }
 
-const arms = [];
-/* 0 = across the stack, 1 = swung clear against the tower. Eased, so they start and stop gently. */
+const arms = [], holdDowns = [], mastArms = [];
+const ease = (s) => s * s * (3 - 2 * s);
+/* 0 = across the stack, 1 = swung clear against the tower. Eased, so they start and stop gently.
+   Everything that lets go of the vehicle runs on this one clock (js/physics.js's armSwing): the
+   hold-down arms are back in the first 40 % of it — they are what releases the stack — the tail
+   service masts fold up over the first 70 %, and the swing arms take all of it. */
 export function setArmSwing(s) {
-  const e = s * s * (3 - 2 * s);
+  const e = ease(s);
   for (const a of arms) a.rotation.z = a.userData.dir * ARM_SWING * e;
+  const h = ease(Math.min(1, s / 0.4)) * HOLD_TRAVEL;
+  for (const a of holdDowns) a.position.set(a.userData.cx * h, a.userData.cy * h, 0);
+  const m = ease(Math.min(1, s / 0.7)) * MAST_FOLD;
+  for (const a of mastArms) a.rotation.y = -m;
 }
+const HOLD_TRAVEL = 3.6;       // u the hold-down arms draw back along the deck
+const MAST_FOLD = 1.3;         // rad the tail service masts' umbilical arms fold up
+
+/* Night on the pad, 0..1: the lamp lenses come up, the lens glows and the beams appear. The hard-edged
+   light ON the hardware is js/toon.js's flood term; this is only the rig showing that it is lit. */
+const LENS_OFF = new THREE.Color(0x30363f), LENS_ON = new THREE.Color(0xfff3cf);
+let lensMat = null, beamMat = null, farMat = null, beams = null, beamsFar = null, glows = [];
+/* away: 0 while the stack stands in the beams, 1 once it has gone — then they run on into the sky. */
+export function setPadNight(n, away = 0) {
+  if (!lensMat) return;
+  lensMat.color.copy(LENS_OFF).lerp(LENS_ON, n);
+  beams.visible = n > 0.02; beamMat.opacity = BEAM_ALPHA * n;
+  beamsFar.visible = n * away > 0.02; farMat.opacity = BEAM_ALPHA * n * away;
+  for (const l of glows) { l.visible = n > 0.02; l.material.opacity = 0.6 * n; }
+}
+const BEAM_ALPHA = 0.12;
 
 export function buildPad(glowMap) {
   const g = new THREE.Group();
@@ -103,9 +135,25 @@ export function buildPad(glowMap) {
   box(22, 16.2, 2.6, deck, 21, 0, -0.3, true);
   box(22, 16.2, 2.6, deck, -21, 0, -0.3, true);
   box(20.6, 16.6, 1.6, dark, 0, 0, -0.18);                            // trench floor, top z 0.62
-  // four hold-down arms from the opening's edge to just under the skirt (z 1.4), between the fins
-  box(6.6, 1.8, 1.0, dark, 6.7, 0, 0.8, true); box(6.6, 1.8, 1.0, dark, -6.7, 0, 0.8, true);
-  box(1.8, 4.6, 1.0, dark, 0, 5.7, 0.8, true); box(1.8, 4.6, 1.0, dark, 0, -5.7, 0.8, true);
+  /* Four hold-down arms between the fins: a wedge from a tall heel on the deck down to a toe just
+     under the skirt (z 1.4). They MOVE — each is its own mesh and draws back along the deck when
+     the swing arms go (setArmSwing). Underside z 0.75: over the trench floor (0.62), inside the
+     deck slab (top 1.0) where it crosses one, so no face of it lies on another. */
+  holdDowns.length = 0;
+  {
+    const sh = new THREE.Shape();                       // x = radius from the axis, y = height
+    sh.moveTo(3.5, 0.75); sh.lineTo(3.5, 1.3); sh.lineTo(5.6, 1.3); sh.lineTo(8.6, 2.7); sh.lineTo(11.2, 2.7); sh.lineTo(11.2, 0.75); sh.closePath();
+    const geo = new THREE.ExtrudeGeometry(sh, { depth: 2.0, bevelEnabled: false }); geo.translate(0, 0, -1.0); geo.rotateX(Math.PI / 2);
+    const cap = boxGeo(1.5, 2.3, 0.5);
+    for (let i = 0; i < 4; i++) {
+      const a = i * Math.PI / 2, grp = new THREE.Group(), turn = new THREE.Group();
+      turn.rotation.z = a;
+      const m = new THREE.Mesh(geo, dark); m.castShadow = true; outline(m); turn.add(m);
+      const c = new THREE.Mesh(cap, red); c.position.set(9.9, 0, 2.9); c.castShadow = true; turn.add(c);   // the release housing on the heel
+      grp.add(turn); grp.userData.cx = Math.cos(a); grp.userData.cy = Math.sin(a);
+      g.add(grp); holdDowns.push(grp);
+    }
+  }
   // handrail round the deck: 1.1 m high, the first thing on the pad that is the size of a person
   for (const [w, d, x, y] of [[64, 0.12, 0, 22.9], [64, 0.12, 0, -22.9], [0.12, 45.8, 31.9, 0], [0.12, 45.8, -31.9, 0]]) {
     box(w, d, 0.12, steel, x, y, 1.8, false, 0, 0, 0, thin);
@@ -122,6 +170,13 @@ export function buildPad(glowMap) {
   box(3.6, 3.6, ZT - Z0 - 4, steel, TX, 0, (ZT + Z0 + 4) / 2, true);   // lift shaft
   for (let z = 12; z <= ZT; z += 8) {
     box(TW + 1.6, TW + 1.6, 0.5, red, TX, 0, z);
+    /* A parapet round every floor: a metre-high band of pale plate, 0.04 u off the slab's edge. It
+       is the railing a person would stand at, drawn thick enough to hold a pixel at the pad camera,
+       and eleven of them are what make the tower read as storeys rather than a lattice. */
+    for (const sy of [-1, 1]) {
+      box(TW + 2.08, 0.2, 1.35, steel, TX, sy * (TW / 2 + 0.94), z + 0.58);
+      box(0.2, TW + 1.5, 1.35, steel, TX + sy * (TW / 2 + 0.94), 0, z + 0.58);
+    }
     if (z < ZT) {
       const bl = Math.hypot(TW, 8), ba = Math.atan2(TW, 8), zc = z + 4, flip = ((z / 8) & 1) ? 1 : -1;
       box(0.45, 0.45, bl, red, TX, TW / 2, zc, false, 0, flip * ba, 0);
@@ -147,6 +202,9 @@ export function buildPad(glowMap) {
     };
     part(len, w, w, red, len / 2, 0, 0, true);
     part(len * 0.6, 0.3, 0.3, red, len * 0.3, 0, w * 1.6, false, -0.42);     // stay from the tower to mid-arm
+    part(len * 0.86, w + 0.12, 0.3, steel, len * 0.5, 0, w / 2 + 0.06, false);   // the walkway along its top
+    part(0.3, w * 0.8, w * 1.25, dark, len - 0.05, 0, -w * 0.08, false);         // umbilical carrier plate at the tip
+    part(len * 0.7, 0.34, 0.34, dark, len * 0.55, w / 2 + 0.2, -w * 0.2, false); // and the propellant line that feeds it
     if (z === 68.5) part(3.2, 3.0, 2.8, whiteMat, -4.6 - ARM_FROM, 0, 0, true);   // the white room, on the crew arm
     /* Alternate sides, so neighbouring arms do not fold into each other against the tower. */
     arm.userData.dir = arms.length % 2 ? 1 : -1;
@@ -160,8 +218,29 @@ export function buildPad(glowMap) {
   box(1.8, 34, 2.2, red, TX, 3, ZT + 4.6, true);
   box(3.2, 5, 3, dark, TX, -12, ZT + 4.2, true);                       // counterweight
   box(2.6, 3, 2.4, steel, TX + 2.2, 2.5, ZT + 2.4, true);              // operator's cab
-  // two tail service masts at the foot of the vehicle
-  for (const y of [-11, 11]) { box(2.2, 2.2, 7, steel, -11, y, 4.3, true); box(4.5, 0.7, 0.7, steel, -8.6, y * 0.82, 6.6, false, 0, 0, y > 0 ? -0.5 : 0.5); }
+  box(1.7, 2.6, 3.0, whiteMat, TX + 2.68, 0, 40, true);                // the lift car, on the shaft's face toward the stack
+  box(0.12, 1.8, 0.9, dark, TX + 3.56, 0, 40.5);                       // its window
+  box(0.5, 0.5, ZT - 14, dark, TX + 2.1, 1.75, (ZT + 10) / 2);         // guide rails either side of it
+  box(0.5, 0.5, ZT - 14, dark, TX + 2.1, -1.75, (ZT + 10) / 2);
+  /* Two tail service masts at the foot of the vehicle (the solids are js/colliders.js's). Each
+     carries an umbilical arm to the first stage's skirt, on the fin diagonal: it reaches r 3.9 at
+     z 7.4, over the fairing's tip, and FOLDS UP when the swing arms go — the fin tips (r 5.7) pass
+     that height two seconds after release, by which time the arm is vertical at r 14. */
+  mastArms.length = 0;
+  for (const y of [-11, 11]) {
+    box(2.2, 2.2, 7, steel, -11, y, 4.3, true);
+    box(2.5, 2.5, 1.1, dark, -11, y, 8.2, true);                       // the hood
+    const az = Math.atan2(-y, 11), turn = new THREE.Group(), fold = new THREE.Group();
+    turn.position.set(-11 + Math.cos(az) * 1.2, y + Math.sin(az) * 1.2, 7.3); turn.rotation.z = az;
+    const part = (gw, gd, gh, mat, x, zz, edge) => {
+      const m = new THREE.Mesh(boxGeo(gw, gd, gh), mat); m.position.set(x, 0, zz);
+      m.castShadow = true; if (edge) outline(m); fold.add(m);
+    };
+    part(10.0, 0.9, 0.9, steel, 5.0, 0, true);
+    part(0.35, 1.7, 1.7, dark, 10.1, 0, true);                         // the umbilical plate
+    part(6.0, 0.36, 0.36, dark, 6.4, -0.6, false);                     // lines slung under the arm
+    turn.add(fold); g.add(turn); mastArms.push(fold);
+  }
 
   /* ---- propellant farm: a LOX sphere and an LH2 sphere on ring skirts, three kerosene tanks ---- */
   box(40, 30, 2, concrete, 52, 38, 0.1, true);
@@ -180,19 +259,56 @@ export function buildPad(glowMap) {
   }
   for (let i = 0; i < 7; i++) box(0.36, 0.3, 1.25, whiteMat, -13 + i * 1.3 + (i % 2) * 0.3, -9.5 - (i % 3) * 0.7, 1.6, false, 0, 0, 0, thin);
 
-  /* ---- floodlight rig: mast, cross-truss, four housings; the lamps themselves are sprites ---- */
+  /* ---- floodlight rig: mast, cross-truss, four housings south of the stack, and two searchlight
+     carts out on the hardstand. Each fixture has a LENS (a plate 0.05 u proud of its housing, dark
+     glass by day) and at night a BEAM: a flat translucent cone to the part of the stack it is
+     aimed at — a shape with hard sides, not a glow. It is narrower at the stack than the hull it
+     lights and ends on the vehicle's axis, so its open end is inside the hull and no rim hangs in
+     the sky. Once the stack has gone a second mesh carries each beam on, fading along its length
+     to nothing (vertex colour under additive blending). Two meshes for all the beams. ---- */
   box(2.4, 2.4, 25, steel, 0, -34, 10.5);
   box(30, 2.0, 2.0, steel, 0, -34, 23, true);
-  const lamps = [];
+  lensMat = new THREE.MeshBasicMaterial({ color: LENS_OFF.clone(), fog: false });
+  beamMat = new THREE.MeshBasicMaterial({ color: 0xfff0c4, vertexColors: true, transparent: true, opacity: 0, blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide, fog: false });
+  farMat = beamMat.clone();
+  const lenses = batcher(), cones = [[], []], farCones = [[], []], cm = new THREE.Matrix4(), cv = new THREE.Vector3(), one = new THREE.Vector3(1, 1, 1);
+  lensMat.name = 'lens'; beamMat.name = 'beam';
+  glows = [];
+  const DOWN = new THREE.Vector3(0, -1, 0), aim = new THREE.Vector3(), qa = new THREE.Quaternion(), ea = new THREE.Euler();
+  /* a fixture's beam: apex at the lens, axis through (0, 0, tz) on the vehicle's axis, `at` u wide there */
+  const beam = (x, y, z, tz, at) => {
+    aim.set(-x, -y, tz - z); const reach = aim.length(); aim.normalize();
+    cm.compose(cv.set(x, y, z), qa.setFromUnitVectors(DOWN, aim), one);
+    /* [r0, r1] over [d0, d1] along the beam, brightness c0 at the near end and c1 at the far one */
+    const run = (out, d0, d1, c0, c1) => {
+      const geo = new THREE.CylinderGeometry(at * d0 / reach, at * d1 / reach, d1 - d0, 20, 1, true).toNonIndexed(), p = geo.attributes.position;
+      for (let i = 0; i < p.count; i++) {
+        const c = p.getY(i) > 0 ? c0 : c1;
+        cv.set(p.getX(i), p.getY(i) - (d0 + d1) / 2, p.getZ(i)).applyMatrix4(cm); out[0].push(cv.x, cv.y, cv.z); out[1].push(c, c, c);
+      }
+    };
+    run(cones, 0.01, reach, 1, 0.6);
+    run(farCones, reach, reach * 2.2, 0.6, 0);
+    const l = new THREE.Sprite(new THREE.SpriteMaterial({ map: glowMap, color: 0xfff2c9, transparent: true, opacity: 0, blending: THREE.AdditiveBlending, depthWrite: false }));
+    l.position.set(x, y, z); l.scale.setScalar(4.2); l.visible = false; g.add(l); glows.push(l);
+  };
   for (let i = 0; i < 4; i++) {
     const lx = -13.5 + i * 9;
     box(0.5, 0.5, 2.6, steel, lx, -34, 21.6);
     box(2.6, 1.4, 1.6, steel, lx, -34, 19.8, true);
-    /* The sprite is the LENS of a fixture, sitting proud of the housing face: alone it was a bokeh
-       disc hanging in the air. */
-    const l = new THREE.Sprite(new THREE.SpriteMaterial({ map: glowMap, color: 0xfff2c9, transparent: true, opacity: 0.5, blending: THREE.AdditiveBlending, depthWrite: false }));
-    l.position.set(lx, -33.4, 19.8); l.scale.setScalar(3.4); g.add(l);
-    lamps.push(l);
+    lenses.add(boxGeo(2.2, 0.1, 1.2), lensMat, false, lx, -33.3, 19.8);
+    beam(lx, -33.2, 19.8, [56, 22, 40, 66][i], [2.0, 3.1, 3.1, 1.15][i]);
+  }
+  /* Both carts stand south-west of the stack: the default pad camera looks in from the south-east,
+     and a searchlight parked under it was a black dome across the bottom of the opening frame. */
+  for (const [cx, cy, tz, at] of [[-46, -50, 52, 2.0], [-28, -62, 30, 3.1]]) {
+    box(3.4, 2.4, 1.3, steel, cx, cy, 1.05, true);                     // the cart, on the hardstand (top 0.45)
+    box(0.5, 2.0, 1.6, steel, cx, cy, 2.4);                            // the yoke
+    aim.set(-cx, -cy, tz - 3.4).normalize();
+    ea.setFromQuaternion(qa.setFromUnitVectors(DOWN, aim));
+    B.add(new THREE.CylinderGeometry(1.0, 1.25, 1.8, 16), whiteMat, true, cx, cy, 3.4, ea.x, ea.y, ea.z);     // the drum, looking up the beam
+    lenses.add(new THREE.CylinderGeometry(1.05, 1.05, 0.1, 16), lensMat, false, cx + aim.x * 0.9, cy + aim.y * 0.9, 3.4 + aim.z * 0.9, ea.x, ea.y, ea.z);
+    beam(cx + aim.x * 1.0, cy + aim.y * 1.0, 3.4 + aim.z * 1.0, tz, at);
   }
   /* Two lightning masts, tips clear of the vehicle. They and the handrail cast NO shadow: at the
      pad's 1.46 m per shadow texel a sub-metre caster is sub-texel, and PCF dithers its shadow into
@@ -221,5 +337,13 @@ export function buildPad(glowMap) {
   B.add(new THREE.CylinderGeometry(1.4, 1.4, 52, 10), steel, false, 120, -150, 26, Math.PI / 2);
   B.build(g, true);
   thin.build(g, false);
-  return { group: g, lamps };
+  lenses.build(g, false);
+  const beamMesh = ([pos, col], mat) => {
+    const cg = new THREE.BufferGeometry();
+    cg.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3)); cg.setAttribute('color', new THREE.Float32BufferAttribute(col, 3));
+    const m = new THREE.Mesh(cg, mat); m.visible = false; g.add(m); return m;
+  };
+  beams = beamMesh(cones, beamMat); beamsFar = beamMesh(farCones, farMat);
+  setArmSwing(0); setPadNight(0);
+  return { group: g };
 }

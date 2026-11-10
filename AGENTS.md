@@ -92,7 +92,7 @@ Shipped flight right now: `RESULT WON`, periselene 346 km, LOI 849 m/s at 358 km
 **3.3 m/s** (`LAND_SAFE` is 32 m/s), 7.2 t spare, 16,274 m/s spent, 3.469 days. `retro` (the previous
 stack, at `--phase=1.4742618`) is LOST at 1,264 m/s with a dry tank. The window is solved for
 `AIM_PERI = 350` km, the middle of the band that lands: −3e-3 rad of phase (745 km) lands at 2.8 m/s
-with 6.6 t, +1.75e-3 rad (123 km) at 4.9 m/s with 7.6 t, and +2e-3 rad (91 km) is **LOST** at 71 m/s
+with 6.6 t, +1.75e-3 rad (123 km) at 4.9 m/s with 7.6 t, and +2e-3 rad (91 km) is **LOST** at 80 m/s
 with the tank run down. Nominal ascent under SAS: max-Q 25.4 kPa at T+65 s, peak side load 0.024 g
 at T+85 s (limit 0.5 g, then strain), static margin +4.4 m on the pad; the same ascent after 0, 120,
 300 or 3,600 s of waiting on the pad. Command module alone from 122 km: 7.8 km/s lands from −1.5°
@@ -280,8 +280,9 @@ air. Corollaries, each read off the code or measured:
   altitude-bounded velocity envelope) was tuned by measurement. Simplify it and you get 41 m/s, 62
   m/s or 220 m/s impacts, all of which have been observed. Attitude must be commanded through the
   body-rate in the game's SAS convention; writing `S.q` directly gives `align −0.93` and a crater.
-- Contact is `surfaceAlt() <= 0`: the lowest attached point (the active stage's bell, or the nose if
-  inverted) over the terrain. Headless there is no terrain — `initPhysics` gets no `relief`, so the
+- Contact is `surfaceAlt() <= 0`: the lowest attached point (the active stage's bell — for the last
+  stage the soles of its landing gear, `GEAR_Z = 6.2` u in `js/stations.js`, 0.6 u under the bell's
+  exit at `TAIL_Z[2]` — or the nose if inverted) over the terrain. Headless there is no terrain — `initPhysics` gets no `relief`, so the
   tool lands on the datum sphere, and its touchdown speed says nothing about a hillside. The descent
   guidance reads the same `P.surfaceAlt(true)`; when it read the altitude of `S.pos` instead it met
   the ground believing it had 52 m left, and the touchdown at that window was 20.4 m/s where the
@@ -422,6 +423,17 @@ These five are carried as written — rule and history together — because `js/
   shell's night floor is 0.012 from inside the air and 0.14 from space, and the pad's floodlight
   sprites come on between +0.05 and −0.10. The sun's bearing is inertial and fixed (`SUN_DIR`): the
   planet turns under it, so waiting on the pad is how night comes.
+
+- Cel light is three's own chunks, patched once in `js/toon.js` (the patch throws if three's text
+  moves): a cast shadow is four fixed taps cut at one half and caps the ramp at `CEL_FLOOR`.
+- The vehicle and pad use `hardware()` / `padware()` materials; `js/world.js` fills their
+  `CEL_HARDWARE` uniforms each frame (sun above the limb at that place, floodlights). `HARD_GAIN = π`.
+- The sun LIGHT moves in `SUN_STEP` steps (27 s), held in the Earth's frame between them; the sky
+  and terminator use the true direction.
+- Receivers thinner than a shadow texel (the red lattice, small parts at the vehicle's foot) cast
+  but do not receive.
+- A mesh inside an invisible group is still `visible` to `tools/flicker-test.mjs`; pose hidden
+  things too.
 
 ### Exhaust
 
@@ -577,7 +589,8 @@ await tab.evaluate(`(async () => {
 
 **Vehicle and exhaust**
 - `js/saturn.js` — the Saturn V as drawn hardware and the stage records (imported headless: must tolerate having no canvas).
-- `js/chutes.js` — the drawn drogues and mains; what is deployed is `physics.js`'s state.
+- `js/chutes.js` — the drawn drogues and mains; what is deployed is `physics.js`'s state, the pendulum is the mission clock's, and the collapse after splashdown runs on real seconds, held while paused.
+- `js/gear.js` — when the lander's legs are down (`saturn.js` owns the legs and `setGear()`), and each foot's trim to its own ground.
 - `js/vehicle.js` — the conductor: pose, staging (`detachStage`, `resetStages`), debris, and `updateBurnVisuals`, which turns "this stage is burning" into calls on the five exhaust modules.
 - `js/entry-fx.js` — entry heating. `js/splash-fx.js` — the splash of a water landing. `js/dust-sheet.js` — the sheet of dust a lunar burn drives along the ground. All display-only, riding `updateParticles`.
 - `js/flame.js` — the drawn flames. `js/exhaust-pool.js` — the parcel pool and `spawnParticle`. `js/exhaust-emit.js` — where parcels are born. `js/exhaust-sim.js` — how they move (the largest; its lunar and Earth branches are the next split if it grows). `js/exhaust-draw.js` — how they are drawn, and their shadow caster.
@@ -757,6 +770,40 @@ await tab.evaluate(`(async () => {
 - **The sky needs a sun.** Before the day/night gate the ground went dark at midnight under a
   noon-blue sky, and the limb shell's night floor — 0.14, right from space — painted the whole sky
   slate grey from the pad through a horizon-long path and hid the stars.
+
+- **Cel light is three's own chunks, patched once in `js/toon.js`.** Every lit surface is a
+  `MeshToonMaterial`, so the rules live in `ShaderChunk` (the patch throws if three's text moves):
+  a cast shadow is four fixed bilinear taps CUT at one half (a crisp contour through the texel
+  staircase, one screen pixel of smoothstep), and it caps the ramp at `CEL_FLOOR` instead of
+  removing the sun — `min(ramp, shade)`, so it has the tone of the form shadow next to it and a
+  face already turned from the sun is not darkened twice. Before, shadows were five noise-rotated
+  PCF taps with only the blue fill left in them: soft navy smears.
+- **Hardware is lit by where it is.** `hardware()` / `padware()` materials (the vehicle, the pad)
+  carry `CEL_HARDWARE` uniforms that `js/world.js` fills each frame: whether the sun clears the
+  limb of the Earth and the Moon at that place (the sun light has no planet in its shadow box, so a
+  rocket on the night side used to stand day-bright), the fill and emissive floors that drop with
+  it, and the pad's floodlights — one hard-stepped direction plus a two-ring pool on upward faces,
+  no second light, nothing the planet's materials can see. `HARD_GAIN = π` is there because
+  three's Lambert divides by π and no longer multiplies it back: the hull was sRGB 160, a grey
+  rocket. The planets keep the exposure their shaders were tuned at.
+- **The sun light moves in steps (`SUN_STEP`, 27 s).** A hard shadow edge and a hard cel band both
+  follow the light, and the true sun creeps over the ground at 7.3e-5 rad/s: shadow-map texels on
+  a silhouette flip one at a time and each takes a stretch of thresholded edge with it. Measured
+  idle on the pad with the hard shadow term: 77-85 unstable pixels and 12-13 strong; with the
+  shadow map frozen 29 and 8; with the light held in the Earth's frame between steps 2-23 and 0-5
+  (the tree before this: 63-78 and 0-3). What is left is single MSAA samples on silhouettes — the
+  view matrix still changes in its last bits every frame — and they count as "strong" more often
+  now only because white hardware against black ink is a bigger step than grey was.
+- **A thresholded shadow needs receivers a texel can describe.** Wherever a receiver stands exactly
+  one shadow bias behind a caster the depth compare is decided by rounding noise; a soft filter
+  averaged that away, a cut edge follows it, and one flipped texel moves ~50 px of edge at close
+  range. The pad's red lattice (members thinner than the 1.46 m texel) and the small moving parts at
+  the vehicle's foot therefore cast but do not receive: 'pad close' went from 62-103 unstable
+  pixels to 0-19. The residual on any idle view is the camera: its orientation still turns ~4e-8
+  rad a frame on the pad (measured from `matrixWorld`), enough to flip single MSAA samples.
+- **A mesh inside an invisible group is still `visible`.** The stowed parachutes sat at the origin
+  of their hidden cluster, all three canopies in one place, and `tools/flicker-test.mjs` (which
+  reads `o.visible`, not the ancestors') reported 23 coplanar pairs. Pose hidden things too.
 
 ### Exhaust
 

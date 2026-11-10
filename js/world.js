@@ -3,14 +3,14 @@ import {
   RE, RM, MOON_RATE, EARTH_SPIN, PAD_UP, PAD_EAST, PAD_POS, SKY_DAY, SKY_NULL, moonPos
 } from './constants.js';
 import { startPlanetPaint, glowTex, flareTex } from './textures.js';
-import { toon, RAMP_EARTH, RAMP_MOON } from './toon.js';
+import { toon, RAMP_EARTH, RAMP_MOON, SHIP_LIGHT, PAD_LIGHT } from './toon.js';
 import { applyRelief, sampleGrid, reliefField, coastField, paintedCanvas } from './toonmap.js';
 import { fineRelief } from './padsite.js';
 import { surfaceInject, setSun } from './surface.js';
 import { makePatch, attachEarthPatch, updatePatch, makeMoonPatch, attachMoonPatch, updateMoonPatch, hidePatch } from './terrain.js';
 import { makeWeather, makeCloudShell, updateWeather, cloudShadeInject, setWeatherEye } from './clouds.js';
 import { makeHaze, hazeInject, updateHaze } from './haze.js';
-import { buildPad } from './pad.js';
+import { buildPad, setPadNight } from './pad.js';
 import { uOrigin, absolute } from './origin.js';
 
 /* distances are km, angles rad — everything here lives at real planetary scale */
@@ -20,7 +20,19 @@ const SUN_ANG = 0.009;             // rad: the real sun is 0.53° wide, so the f
 const STAR_R = 2000000;            // km — the starfield sits well outside the moon's orbit
 const SKY_R = 20000;               // km — the sky dome rides the camera; small vs the moon at 384 400
 const SHADOW_MAX = 48;             // km half-extent of the vehicle-tracking shadow box
-const SHADOW_MIN = 3;              // km — 4096² over ±3 km is 1.46 m/texel; at ±6 km the pad's shadows stepped in ~10 m blobs
+/* The sun LIGHT's direction is redrawn in steps: it is held fixed in the Earth's own frame while the
+   planet turns SUN_STEP rad (27 s of mission time), then moved. The true direction creeps over the
+   ground at 7.3e-5 rad/s, and everything with a hard edge crept with it: every shadow-map texel on
+   a silhouette flipped in its own time and took a stretch of thresholded shadow edge with it, and
+   every cel band boundary on a tank or a hull crossed pixel centres one at a time (measured idle
+   on the pad with the hard shadow term: 13 pixels of 1.3 M changing by more than 90, 5 of them
+   gone with the shadow map frozen, the rest on ramp boundaries). Held, the light, the shadow
+   camera and so the whole lit picture of anything bolted to the ground are the same numbers every
+   frame. The light is never more than SUN_STEP (0.11 deg) behind the sun; the sky, the flare and
+   the terminator use the true direction. */
+const SUN_STEP = 2e-3;
+const _sunLight = new THREE.Vector3();
+const SHADOW_MIN = 3;              // km — 4096² over ±3 km is 1.46 m/texel: the pad zoom the user screenshotted showed ~10 m blob steps at the old ±6 km
 const ATMO_SHELL = 1.01;          // atmosphere glow shell: RE * 1.01
 
 /* Sun bearing, fixed in inertial space: ~37° above the pad's horizon at MET 0, off to the east, so
@@ -39,10 +51,46 @@ let sun = null, sunTarget = null, flare = null, stars = null, sky = null;
 let spin = 0, simT = 0;
 export const getSpin = () => spin;
 const _sunF = new THREE.Vector3(), _camF = new THREE.Vector3(), Y_UP = new THREE.Vector3(0, 1, 0);
-/* The floodlight LENS sprites, kept for the night gate in updateSunShadow. They were ungated —
-   created in buildPad and never touched again — so four additive warm discs baked daytime haze
-   into the pad lenses at all hours. The lamps themselves (housing, truss) stay year-round. */
-const padLamps = [];
+/* ---- what reaches the hardware: js/toon.js's CEL_HARDWARE uniforms, filled every frame ----
+   The sun light has no planet in its shadow box (the box is ±3..48 km round the vehicle), so nothing
+   stopped it lighting a rocket standing on the night side: the stack was day-bright on a navy field.
+   The vehicle and the launch complex therefore carry their own "does the sun reach me", from
+   geometry — the sun's angle over the limb of each body, eased across a twilight — and at night
+   the complex's floodlights take over (a hard-stepped direction in the same shader, see toon.js).
+
+   HARD_GAIN is π: three's Lambert BRDF divides by π and its lights no longer multiply it back, so a
+   hull painted 0xf1f4f8 used to reach the screen at sRGB 160 — a grey rocket. Hardware is drawn at
+   the palette it was authored in; the planets keep the exposure their own shaders were tuned at. */
+const HARD_GAIN = Math.PI;
+const TWILIGHT_LO = -0.10, TWILIGHT_HI = 0.05;       // rad of sun over the limb: dark .. full
+const FLOOD_COL = new THREE.Color(1.0, 0.93, 0.78);
+/* Toward the rig, in the pad's frame (east, north, up): the truss stands south of the stack and its
+   lamps hang BELOW the vehicle's middle, so the lit side faces south and a little down. */
+const FLOOD_PAD = new THREE.Vector3(0.22, -0.95, -0.2).normalize();
+const ZERO = new THREE.Vector3();
+const _fd = new THREE.Vector3(), _pd = new THREE.Vector3(), _pv = new THREE.Vector3();
+/* Sun over the limb of a body of radius R centred at c, seen from p: 0 in its shadow, 1 in the light. */
+function sunOver(p, c, R) {
+  _fd.subVectors(p, c); const r = _fd.length();
+  const ang = Math.asin(THREE.MathUtils.clamp(_fd.dot(SUN_DIR) / r, -1, 1)) + Math.acos(Math.min(1, R / r));
+  return THREE.MathUtils.smoothstep(ang, TWILIGHT_LO, TWILIGHT_HI);
+}
+function setRig(rig, vis, flood, reach) {
+  rig.celSun.value.set(HARD_GAIN * vis, HARD_GAIN * THREE.MathUtils.lerp(0.5, 1, vis), THREE.MathUtils.lerp(0.3, 1, vis), reach);
+  rig.celFloodCol.value.copy(FLOOD_COL).multiplyScalar(HARD_GAIN * 0.8 * flood);
+}
+function updateHardwareLight(pos) {
+  /* the pad, in the game's inertial frame at the drawn instant */
+  _pd.copy(PAD_UP).applyAxisAngle(Y_UP, spin);
+  const visPad = sunOver(_pv.copy(_pd).multiplyScalar(RE), ZERO, RE - 1e-6), night = 1 - visPad;
+  setRig(PAD_LIGHT, visPad, night, 0.42);
+  PAD_LIGHT.celPool.value.set(0.105, 0.26, 0.5 * night);     // km: the bright ring, and the whole hardstand
+  /* the vehicle: either body can stand between it and the sun; the floods reach it only near the pad */
+  const d = _pv.distanceTo(pos);
+  setRig(SHIP_LIGHT, Math.min(sunOver(pos, ZERO, RE - 1e-6), sunOver(pos, moon.position, RM - 1e-6)),
+    night * (1 - THREE.MathUtils.smoothstep(d, 0.2, 1.4)), 1e9);
+  setPadNight(night, THREE.MathUtils.smoothstep(d, 0.08, 0.22));
+}
 
 /* Ground cloud shade is not a shadow-map caster: js/clouds.js injects a lookup of its own weather
    field along the sun ray into the globe and the near patch (cloudShadeInject), so the darkening
@@ -367,10 +415,20 @@ export function initWorld(target) {
      keeps the platform top at z = 4, the anchor physics expects, and the group scales by PAD_SCALE. ---- */
   const built = buildPad(glowMap);
   pad = built.group;
-  padLamps.push(...built.lamps);
+  /* The floods, in the axes the frame is drawn in. Those are the Earth's own (js/origin.js turns the
+     scene back by the spin), so a direction bolted to the pad is a constant. The pad's origin in
+     view space is only known once three has rebuilt the matrices for the frame: scene.onBeforeRender. */
+  for (const rig of [PAD_LIGHT, SHIP_LIGHT]) {
+    rig.celFloodDir.value.copy(PAD_EAST).multiplyScalar(FLOOD_PAD.x).addScaledVector(PAD_NORTH, FLOOD_PAD.y).addScaledVector(PAD_UP, FLOOD_PAD.z);
+    rig.celUp.value.copy(PAD_UP);
+  }
+  SHIP_LIGHT.celPad = PAD_LIGHT.celPad;
+  scene.onBeforeRender = (r, sc, cam) => {
+    _pv.setFromMatrixPosition(pad.matrixWorld).applyMatrix4(cam.matrixWorldInverse);
+    PAD_LIGHT.celPad.value.set(_pv.x, _pv.y, _pv.z, 1);
+  };
   pad.position.copy(PAD_UP).multiplyScalar(RE);
-  const north = new THREE.Vector3().crossVectors(PAD_UP, PAD_EAST).normalize();
-  pad.quaternion.setFromRotationMatrix(new THREE.Matrix4().makeBasis(PAD_EAST, north, PAD_UP));
+  pad.quaternion.setFromRotationMatrix(new THREE.Matrix4().makeBasis(PAD_EAST, PAD_NORTH, PAD_UP));
   earth.add(pad);
 
   scene.fog = new THREE.FogExp2(SKY_DAY.getHex(), 0.002);
@@ -433,7 +491,8 @@ export function updateSunShadow(pos) {
      camera's own axes (x = up × light, y = light × x): on the pad it does not move at all, and in
      flight it moves in steps the map cannot see. */
   const texel = 2 * shadowExtent / sun.shadow.mapSize.x;
-  _sf.copy(SUN_DIR).applyAxisAngle(Y_UP, -spin);                 // light, Earth-fixed
+  _sf.copy(SUN_DIR).applyAxisAngle(Y_UP, -Math.floor(spin / SUN_STEP) * SUN_STEP);   // light, Earth-fixed, held between steps
+  _sunLight.copy(_sf).applyAxisAngle(Y_UP, spin);                // and in the game's inertial frame at the drawn instant
   _sx.crossVectors(Y_UP, _sf).normalize(); _sy.crossVectors(_sf, _sx);
   _sp.copy(pos).applyAxisAngle(Y_UP, -spin);                     // the vehicle, Earth-fixed
   /* The centre is a point ON THE GROUND FRAME that stays where it is; the vehicle may wander 8
@@ -450,22 +509,11 @@ export function updateSunShadow(pos) {
   }
   snapC.addScaledVector(_sf, _sd.subVectors(_sp, snapC).dot(_sf));   // along the light it may follow freely: depth is not sampled
   _sp.copy(snapC).applyAxisAngle(Y_UP, spin);
-  sun.position.copy(_sp).addScaledVector(SUN_DIR, SUN_RANGE);
+  sun.position.copy(_sp).addScaledVector(_sunLight, SUN_RANGE);
   sun.target.position.copy(_sp);
   sun.target.updateMatrixWorld();
   flare.position.copy(pos).addScaledVector(SUN_DIR, SUN_DIST);   // flare stays on the sun's bearing
-  /* Pad lamps burn at night only. PAD_UP is body-local; its world direction is rotY(current spin)
-     of it — the exact inverse of spinLocal — and dotting that with the inertial SUN_DIR is the
-     sine of the sun's elevation over the pad. The lamps light across twilight (el +0.05 → −0.10)
-     and hold through the night side; daytime additive lens sprites over the ground were the warm
-     haze the review frames caught. */
-  if (padLamps.length && earth) {
-    const a = earth.rotation.y, cb = Math.cos(a), sb = Math.sin(a);
-    const el = PAD_UP.y * SUN_DIR.y + (cb * PAD_UP.x + sb * PAD_UP.z) * SUN_DIR.x
-             + (-sb * PAD_UP.x + cb * PAD_UP.z) * SUN_DIR.z;
-    const on = THREE.MathUtils.clamp((0.05 - el) / 0.15, 0, 1);
-    for (const l of padLamps) { l.visible = on > 0.02; l.material.opacity = 0.5 * on; }
-  }
+  updateHardwareLight(pos);
   updateReliefPatches(pos);
 }
 

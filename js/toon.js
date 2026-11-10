@@ -58,14 +58,123 @@ export function ramp(stops) {
 export const PALETTE = {
   hull: 0xf1f4f8, dark: 0x232932, accent: 0xe0532c, engine: 0x767d87,
   silver: 0xcdd5de,
-  padConcrete: 0x9aa1ab, padSteel: 0xc3cbd4, blast: 0x2b2f36, lutRed: 0xc2452f, padDeck: 0x7f8894,
-  hardstand: 0xb4b9bf, gravel: 0xbfae8c, asphalt: 0x4a4f57,
+  /* The pad's greys are authored for hardware drawn at its palette (HARD_GAIN in js/world.js): the
+     hardstand is mid-grey so the white stack and the white tanks are the brightest things on it. */
+  padConcrete: 0x858b93, padSteel: 0xb3bbc5, blast: 0x2b2f36, lutRed: 0xc2452f, padDeck: 0x6c747f,
+  hardstand: 0x8d9094, gravel: 0xa8976f, asphalt: 0x4a4f57,
 };
 
 export function toon(opts = {}) {
   const m = new THREE.MeshToonMaterial({ color: 0xffffff, gradientMap: RAMP_HARD, ...opts });
   return m;
 }
+
+/* ---- cel light: three's own lighting chunks, patched once, before any material compiles ----
+
+   Every lit surface in the game is a MeshToonMaterial, so the cel rules live in the chunks they all
+   include rather than in a dozen onBeforeCompile hooks (js/surface.js, js/clouds.js and js/haze.js
+   splice the ground materials already, and three keys its program cache on that function's text).
+
+   1. A cast shadow is a SHAPE: two tones and an edge. Three's PCF is five taps on a disc turned by
+      per-pixel noise — a soft smear, against hardware drawn in ink. Here the map is read four times
+      on a fixed half-texel square (hardware-bilinear compares, so a 3x3 tent) and the result is CUT
+      at one half, with a screen-pixel of smoothstep for antialiasing. The contour of a bilinear
+      field is a smooth line through the texel staircase.
+   2. A cast shadow has the tone of the shaded side of the thing it falls on. It used to remove the
+      sun entirely and leave the blue fill alone — navy blots, three times darker than the form
+      shadow next to them. Now it caps the ramp at CEL_FLOOR, the ramp's own shadow band: min(ramp,
+      shade), so a surface already turned from the sun is not darkened twice.
+   3. Hardware (CEL_HARDWARE: the vehicle, the pad — see hardware() below) knows whether the sun
+      reaches it. The sun light has no planet in its shadow box, so at midnight the stack stood
+      day-bright on a navy field. celSun.x scales the sun, .y the fill, .z the emissive floor.
+   4. ...and has a floodlight rig: one more hard-stepped direction (no shadow map, no second light
+      for the planet to pick up), and a flat two-ring pool on upward faces round the pad. */
+export const CEL_FLOOR = 0.32;
+{
+  const C = THREE.ShaderChunk;
+  const patch = (name, from, to) => {
+    const had = typeof from === 'string' ? C[name].includes(from) : from.test(C[name]);
+    if (!had) throw new Error('js/toon.js: three\'s ' + name + ' chunk no longer holds the text the cel patch replaces');
+    C[name] = C[name].replace(from, to);
+  };
+  patch('shadowmap_pars_fragment', /if \( frustumTest \) \{\s*(?:\/\/[^\n]*\s*)*vec2 texelSize[\s\S]*?\) \* 0\.2;\s*\}/, /* glsl */`
+			float celLit = 1.0;
+			if ( frustumTest ) {
+				vec2 celT = vec2( 0.5 ) / shadowMapSize;
+				celLit = (
+					texture( shadowMap, vec3( shadowCoord.xy + vec2( -celT.x, -celT.y ), shadowCoord.z ) ) +
+					texture( shadowMap, vec3( shadowCoord.xy + vec2( celT.x, -celT.y ), shadowCoord.z ) ) +
+					texture( shadowMap, vec3( shadowCoord.xy + vec2( -celT.x, celT.y ), shadowCoord.z ) ) +
+					texture( shadowMap, vec3( shadowCoord.xy + vec2( celT.x, celT.y ), shadowCoord.z ) )
+				) * 0.25;
+			}
+			float celW = clamp( fwidth( celLit ), 0.02, 0.5 );
+			shadow = smoothstep( 0.5 - celW, 0.5 + celW, celLit );`);
+  patch('lights_pars_begin', 'uniform bool receiveShadow;', /* glsl */`uniform bool receiveShadow;
+float celShade = 1.0;
+#ifdef CEL_HARDWARE
+	uniform vec4 celSun;        // sun reaching the hardware, fill scale, emissive scale, flood reach km
+	uniform vec3 celFloodDir;   // toward the rig, world axes
+	uniform vec3 celFloodCol;
+	uniform vec4 celPad;        // the pad's origin in view space; w: 1 when the pool is drawn
+	uniform vec3 celUp;         // the pad's up, world axes
+	uniform vec3 celPool;       // inner radius, outer radius (km), strength
+#endif`);
+  patch('lights_fragment_begin', 'getDirectionalLightInfo( directionalLight, directLight );', /* glsl */`getDirectionalLightInfo( directionalLight, directLight );
+		celShade = 1.0;
+		#if defined( CEL_HARDWARE ) && ( UNROLLED_LOOP_INDEX == 0 )
+		directLight.color *= celSun.x;
+		#endif`);
+  patch('lights_fragment_begin', /directLight\.color \*= (\( directLight\.visible && receiveShadow \) \? getShadow\( directionalShadowMap[^;]*: 1\.0);/, /* glsl */`
+		#ifdef TOON
+		celShade = mix( ${CEL_FLOOR.toFixed(2)}, 1.0, $1 );
+		#else
+		directLight.color *= $1;
+		#endif`);
+  patch('lights_fragment_begin', '#if ( NUM_RECT_AREA_LIGHTS > 0 ) && defined( RE_Direct_RectArea )', /* glsl */`#ifdef CEL_HARDWARE
+	totalEmissiveRadiance *= celSun.z;
+	if ( celFloodCol.r + celPool.z > 0.0 ) {
+		float celD = length( geometryPosition - celPad.xyz );
+		float celNL = dot( geometryNormal, normalize( ( viewMatrix * vec4( celFloodDir, 0.0 ) ).xyz ) );
+		float celNU = dot( geometryNormal, normalize( ( viewMatrix * vec4( celUp, 0.0 ) ).xyz ) );
+		float celA = max( fwidth( celNL ), 0.004 );
+		float celSide = smoothstep( 0.12 - celA, 0.12 + celA, celNL ) * step( celD, celSun.w );
+		float celGround = step( 0.7, celNU ) * celPad.w * ( 0.5 * step( celD, celPool.x ) + 0.5 * step( celD, celPool.y ) ) * celPool.z;
+		reflectedLight.directDiffuse += celFloodCol * max( celSide, celGround ) * BRDF_Lambert( material.diffuseColor );
+	}
+#endif
+
+#if ( NUM_RECT_AREA_LIGHTS > 0 ) && defined( RE_Direct_RectArea )`);
+  patch('lights_fragment_begin', 'vec3 irradiance = getAmbientLightIrradiance( ambientLightColor );', /* glsl */`vec3 irradiance = getAmbientLightIrradiance( ambientLightColor );
+	#ifdef CEL_HARDWARE
+	irradiance *= celSun.y;
+	#endif`);
+  patch('lights_toon_pars_fragment', 'getGradientIrradiance( geometryNormal, directLight.direction ) * directLight.color',
+    'min( getGradientIrradiance( geometryNormal, directLight.direction ), vec3( celShade ) ) * directLight.color');
+}
+
+/* One set of light uniforms per place the hardware can be: the vehicle (and what falls off it) and
+   the launch complex. js/world.js fills them every frame. */
+function lightRig() {
+  return {
+    celSun: { value: new THREE.Vector4(1, 1, 1, 1e9) },
+    celFloodDir: { value: new THREE.Vector3(0, 1, 0) },
+    celFloodCol: { value: new THREE.Color(0, 0, 0) },
+    celPad: { value: new THREE.Vector4(0, 0, 0, 0) },
+    celUp: { value: new THREE.Vector3(0, 1, 0) },
+    celPool: { value: new THREE.Vector3(0, 0, 0) },
+  };
+}
+export const SHIP_LIGHT = lightRig(), PAD_LIGHT = lightRig();
+
+/* A toon material for built hardware: the same cel ramp, plus the night and floodlight terms. */
+export function hardware(opts = {}, rig = SHIP_LIGHT) {
+  const m = toon(opts);
+  m.defines = { ...(m.defines || {}), CEL_HARDWARE: 1 };
+  m.onBeforeCompile = (sh) => { Object.assign(sh.uniforms, rig); };
+  return m;
+}
+export const padware = (opts) => hardware(opts, PAD_LIGHT);
 
 const OUT_VERT = /* glsl */`
   uniform float w;

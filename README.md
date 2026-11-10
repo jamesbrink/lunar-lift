@@ -130,8 +130,9 @@ One concern per file.
   attitude dynamics, SAS, attitude hold, the RCS stability assist, side-load strain and breakup, the
   command module's heat-shield rule, parachutes and crew g limit, collision with the launch complex
   (`js/colliders.js`), and `impact()`. Contact is the
-  lowest attached point (`surfaceAlt()`: the engine bell of whatever stage is still bolted on, or
-  the nose if it is upside down) meeting the terrain, and a slow touchdown more than 60° from
+  lowest attached point (`surfaceAlt()`: the engine bell of whatever stage is still bolted on — for
+  the last stage, the footpads of its landing gear, 0.84 m under the bell — or the nose if it is
+  upside down) meeting the terrain, and a slow touchdown more than 60° from
   vertical is `TIPPED OVER`, a loss. A flight with no propellant left and no way down ends too:
   `STRANDED IN ORBIT` for a closed orbit that stays clear of the air or of the lunar ground,
   `LOST IN SPACE` for an escape past the Moon. Its frame rule matters: `navVel()` is
@@ -354,7 +355,7 @@ than trying to hover, and an earlier, slightly smaller stack reached the Moon an
 surface at 1 264 m/s with a dry tank. The launch window is solved for a 350 km periselene, the middle
 of the band the tool's autopilot lands from: every flight from 3e-3 rad of launch phase early
 (745 km) to 1.75e-3 rad late (123 km, eleven minutes of lunar motion) lands at under 5 m/s, and
-2e-3 rad late (91 km) runs the tank down and hits at 71 m/s. Margin on paper is not margin; the
+2e-3 rad late (91 km) runs the tank down and hits at 80 m/s. Margin on paper is not margin; the
 descent has to be flown.
 
 ## How a flight is graded

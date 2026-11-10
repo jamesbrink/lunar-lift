@@ -13,6 +13,7 @@ export const U_M = 1.4;                       // metres per build unit
 
 /* ---- along the axis ---- */
 export const TAIL_Z = [-42, -11.8, 6.8];      // engine exit plane of S-1, S-2 and the CSM: the lowest point of each
+export const GEAR_Z = 6.2;                    // soles of the last stage's footpads: its contact plane, 0.6 u under the bell's exit
 export const CM_TAIL_Z = 26.0;                // the command module's heat-shield face: the tail once the CSM is dropped
 export const NOSE_Z = 28.7;                   // top of the docking tunnel rim: the nose for contact, the pad collider and the camera
 export const CM_APEX_Z = 28.6;                // top of the command module's cone (drawn +26.3 .. +28.6): where the parachute risers attach

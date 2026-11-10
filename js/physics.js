@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { airDensity, airVel, aeroForce, aeroState, ATMO_TOP, CN_BODY, machDrag, soundSpeed } from './aero.js';
 import { padHit, ARM_TIME } from './colliders.js';
-import { U_M, TAIL_Z, CM_TAIL_Z, NOSE_Z, R_STACK, R_CSM_AERO, R_CM_BASE, GEOM, FIN_AREA, FIN_Z } from './stations.js';
+import { U_M, TAIL_Z, GEAR_Z, CM_TAIL_Z, NOSE_Z, R_STACK, R_CSM_AERO, R_CM_BASE, GEOM, FIN_AREA, FIN_Z } from './stations.js';
 import { G0, RE, MU_E, RM, MU_M, SOI_M, PAD_UP, PAD_POS, PAD_ANGULAR, VS, CD_AREA, WARPS, WARP_ONE, LAND_SAFE, SAFE_EARTH, SPECS, CAPSULE_MASS, EARTH_SPIN, SPIN_AXIS, PAD_EAST, MOON_DIST, TURN, moonPos, moonVel } from './constants.js';
 
 /* ---------------- injected dependencies (see initPhysics) ----------------
@@ -162,9 +162,12 @@ export function bodyUp(out = new THREE.Vector3()) {
    the ground" cannot be a test on S.pos: it used to be `r <= R + 37 u`, which lands a full stack
    on its engine bells and leaves a lone CSM — whose tail is 6.8 u ABOVE S.pos — hanging 61 m over
    the Moon at the moment it is judged to have touched down. Contact is the lowest attached point
-   meeting the terrain underneath. Stations are js/stations.js's, in build units. */
+   meeting the terrain underneath. Stations are js/stations.js's, in build units. The last stage
+   stands on its landing gear: the footpads' soles (GEAR_Z) are 0.6 u (0.84 m) under the bell's
+   exit, and that plane is this stage's contact. */
+const CONTACT_Z = [TAIL_Z[0], TAIL_Z[1], GEAR_Z];
 const _cu = new THREE.Vector3(), _air = new THREE.Vector3();
-export function tailStation() { const i = activeStage(); return i >= 0 ? TAIL_Z[i] : CM_TAIL_Z; }
+export function tailStation() { const i = activeStage(); return i >= 0 ? CONTACT_Z[i] : CM_TAIL_Z; }
 /* km from the lowest attached point down to the surface of the Moon (onMoon) or the Earth. */
 export function surfaceAlt(onMoon = overMoon()) {
   if (onMoon) { moonPos(simTime, _moon); _cu.subVectors(S.pos, _moon); } else _cu.copy(S.pos);
