@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import * as C from './constants.js';
-import { S, getState, getSimTime, getEngineOn, getThrottle, gravityAt, orbitalElements } from './physics.js';
+import { S, getState, getSimTime, getEngineOn, getThrottle, gravityAt, orbitalElements, coastDrag } from './physics.js';
+const AIR_R2 = (C.RE + 420) ** 2;
 
 /* Will the trajectory you are on meet the Moon, and how hard?
 
@@ -92,6 +93,9 @@ export function updateAim() {
   for (; steps < stop; steps++) {
     const t = tCur + DT;
     gravityAt(p, a, t);                     // the advanced time, exactly as physStep does it
+    /* and the air, while there is any: a coast that starts at a 150 km perigee loses enough to
+       drag to move the lunar pass by 227 km (measured against a physStep coast). */
+    if (p.lengthSq() < AIR_R2) coastDrag(a, p, u);
     u.addScaledVector(a, DT);
     p.addScaledVector(u, DT);
     C.moonPos(t, moon);

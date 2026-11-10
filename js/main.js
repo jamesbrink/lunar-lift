@@ -121,7 +121,7 @@ function frame() {
     // ceil + max(1, …): a frame shorter than DTPHYS (any display above 100 Hz) used to
     // round to 0 substeps, so at ×1 physics never ran while the visuals kept spinning.
     const steps = Math.max(1, Math.min(600, Math.ceil(simDt / DTPHYS)));
-    const h = simDt / steps;
+    const h = Math.min(DTPHYS, simDt / steps);   // never past DTPHYS: a slow frame at x1000 runs behind the warp, not at a coarser step
     for (let s = 0; s < steps; s++) physStep(h);
     if (getState() === 'flying') addDistFlown(S.pos.distanceTo(prevPos));
     prevPos.copy(S.pos);

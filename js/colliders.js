@@ -55,7 +55,8 @@ export function padHit(pos, axis, t, tailZ, noseZ, armsIn) {
   if (Math.abs(lx) > 260 || Math.abs(ly) > 260 || lz > 220 || lz < -60) return null;      // nowhere near
   _a.copy(axis).applyAxisAngle(Y, -EARTH_SPIN * t);
   const ax = _a.dot(PAD_EAST), ay = _a.dot(NORTH), az = _a.dot(PAD_UP);
-  for (let z = tailZ; z <= noseZ + 1e-6; z += 2.4) {
+  const step = Math.min(2.4, Math.max(0.6, (noseZ - tailZ) / 4));       // a bare capsule is 2.7 u long: sample it finely
+  for (let z = tailZ; z <= noseZ + 1e-6; z += step) {
     const x = lx + ax * z, y = ly + ay * z, h = lz + az * z, r = hullRadius(z);
     const hit = scan(FIXED, x, y, h, r) || (armsIn ? scan(ARM_BOXES, x, y, h, r) : null);
     if (hit) return hit;

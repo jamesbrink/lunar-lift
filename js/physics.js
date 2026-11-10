@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { airDensity, aeroForce, aeroState, ATMO_TOP, CN_BODY } from './aero.js';
+import { airDensity, aeroForce, aeroState, ATMO_TOP, CN_BODY, machDrag, soundSpeed } from './aero.js';
 import { padHit, ARM_TIME } from './colliders.js';
 import { RE, MU_E, RM, MU_M, SOI_M, PAD_UP, PAD_POS, PAD_ANGULAR, VS, CD_AREA, WARPS, LAND_SAFE, SAFE_EARTH, SPECS, CAPSULE_MASS, EARTH_SPIN, SPIN_AXIS, PAD_EAST, MOON_DIST, TURN, moonPos, moonVel } from './constants.js';
 
@@ -143,7 +143,8 @@ export function surfaceAlt(onMoon = overMoon()) {
   if (onMoon) { moonPos(simTime, _moon); _cu.subVectors(S.pos, _moon); } else _cu.copy(S.pos);
   const r = _cu.length(); _cu.multiplyScalar(1 / r);
   const c = _fw.copy(UP_REF).applyQuaternion(S.q).dot(_cu);          // cos of the tilt from vertical
-  const low = Math.min(tailStation() * c, NOSE_Z * c) * VS;          // lowest end, km above S.pos (negative = below)
+  const i = activeStage(), rad = i < 0 ? 1.33 : i === 2 ? 2.2 : 3.57;
+  const low = (Math.min(tailStation() * c, NOSE_Z * c) - rad * Math.sqrt(Math.max(0, 1 - c * c))) * VS;   // lowest point of a tilted cylinder, km above S.pos
   const sphere = r - (onMoon ? RM : RE) + low;
   if (!relief || sphere > 30) return sphere;                         // no relief lookup while it cannot matter
   return sphere - (onMoon ? relief.moon(_cu) : relief.earth(_cu));
@@ -236,6 +237,10 @@ export const getG = () => gLoad;
 /* Swing arms: 0 across the stack, 1 swung clear. They start to move at ignition and take
    ARM_TIME; until they are most of the way round they are solid (js/colliders.js). */
 let armSwing = 0;
+/* Mission time at which the hold-down let go. The pitch program runs on time SINCE then: waiting
+   on the pad is how the launch window is moved, and a program on the mission clock tipped a
+   late launch into the swing arms half a second after ignition. */
+let tRelease = null;
 export const getArmSwing = () => armSwing;
 let chute = 0, chuteOpen = 0, heat = 0, cooking = 0;       // chute: 0 stowed, 1 drogue, 2 mains, -1 torn
 export const getChute = () => chute;
@@ -273,7 +278,7 @@ export function toggleIgnite() {
   if (i === 0 && engineOn) { hooks.addLog('SOLID BOOSTER BURNS AT FULL THROTTLE TO DEPLETION', 'warn'); return; }
   engineOn = !engineOn;
   if (engineOn) { targetThrottle = 1; throttle = Math.max(throttle, i === 0 ? 1 : 0.6); audio.engine(true); }
-  else hooks.addLog('ENGINE FLAMEOUT');
+  else { targetThrottle = 0; throttle = 0; hooks.addLog('ENGINE SHUT DOWN'); }   // or the throttle setting relights it next step
 }
 
 /* Launch escape tower. SP-4029's Apollo 11 timeline puts the jettison at GET 000:03:17.9, high above
@@ -306,8 +311,8 @@ export function separateStage() {
   const i = activeStage();
   if (i < 0) return;
   const st = stages[i];
-  if (st.fuel > 1) hooks.addLog(`STAGE ${i + 1} SEPARATED WITH ${Math.round(st.fuel / SPECS[i].fuel * 100)}% PROPELLANT LEFT`, 'warn');
-  else hooks.addLog(`STAGE ${i + 1} SEPARATED — ${SPECS[Math.min(i + 1, 2)].name} IS NOW FLYING`, 'good');
+  if (st.fuel > 1 && i < 2) hooks.addLog(`STAGE ${i + 1} SEPARATED WITH ${Math.round(st.fuel / SPECS[i].fuel * 100)}% PROPELLANT LEFT`, 'warn');
+  else hooks.addLog(i === 2 ? 'CSM DROPPED — THE COMMAND MODULE FLIES ALONE' : `STAGE ${i + 1} SEPARATED — ${SPECS[i + 1].name} IS NOW FLYING`, 'good');
   st.separated = true; st.fuel = 0;
   const mesh = st.meshes;
   vehicleOps.detachStage(mesh, S.pos, S.q);
@@ -354,6 +359,16 @@ export function gravityAt(p, out, t = simTime) {
 const _g = new THREE.Vector3(), _d = new THREE.Vector3(), _moon = new THREE.Vector3(), _md = new THREE.Vector3(), _sv = new THREE.Vector3(), _up = new THREE.Vector3();
 const _spinQ = new THREE.Quaternion(), _fw = new THREE.Vector3(), _tq = new THREE.Vector3(), _qi = new THREE.Quaternion();
 const _aero = new THREE.Vector3();
+/* Nose-on drag of the hardware now attached, as an acceleration added to `out` — for anything that
+   predicts a coast (js/targeting.js) and must not disturb the live aero readout. */
+export function coastDrag(out, p, v, mass = totalMass()) {
+  const alt = p.length() - RE;
+  if (alt >= ATMO_TOP) return out;
+  const vx = v.x - EARTH_SPIN * p.z, vy = v.y, vz = v.z + EARTH_SPIN * p.x, sp = Math.hypot(vx, vy, vz);
+  const sh = aeroShape(), k = -0.5 * airDensity(alt) * sh.aRef * sh.ca * machDrag(sp / soundSpeed(alt)) * sp / mass;
+  out.x += vx * k; out.y += vy * k; out.z += vz * k;
+  return out;
+}
 /* `axis` is the unit nose vector of the thing being accelerated; without one (debris) the air
    sees a tumbling lump and only drags it. */
 export function accelAt(p, v, mass, thrustAcc, t = simTime, axis = null) {
@@ -372,6 +387,7 @@ export function accelAt(p, v, mass, thrustAcc, t = simTime, axis = null) {
 export function physStep(dt) {
   if (keys['shift']) targetThrottle = Math.min(1, targetThrottle + 0.6 * dt);
   if (keys['control']) targetThrottle = Math.max(0, targetThrottle - 0.6 * dt);
+  if (engineOn && stages && !stages[0].separated && (state === 'pad' || state === 'flying')) targetThrottle = 1;   // a solid has no throttle
   const dThr = targetThrottle - throttle;
   throttle += THREE.MathUtils.clamp(dThr, -0.25 * dt, 0.25 * dt);
 
@@ -399,6 +415,7 @@ export function physStep(dt) {
       return;
     }
   }
+  if (tRelease === null) tRelease = simTime - dt;
   if (burning) {
     const sp = SPECS[i];
     stages[i].fuel = Math.max(0, stages[i].fuel - sp.thrust * throttle / (sp.isp * 9.81) * dt);   // t/s
@@ -464,9 +481,10 @@ export function physStep(dt) {
     const vs = surfaceVel(_nv);
     if (vs.lengthSq() > 1e-10) servo(_sq.setFromUnitVectors(UP_Z, vs.normalize().negate()), Math.min(ratio, 20), dt);
   }
+  const hung = chute > 0 && aeroState.q > 5;                       // under a canopy the canopy steers, not SAS
   if (holdOn && manual) holdQ.copy(S.q);
-  if (holdOn && !manual) servo(holdQ, ratio, dt);
-  if (sasOn && !manual) {                                          // SAS: rate servo toward the reference
+  if (holdOn && !manual && !hung) servo(holdQ, ratio, dt);
+  if (sasOn && !manual && !hung) {                                          // SAS: rate servo toward the reference
     sasHoldTime = Math.min(6, sasHoldTime + dt);
     /* Below a few km the ground-relative velocity is a few m/s and is dominated by the
        attitude error itself, so chasing "prograde" is a self-reinforcing loop: the nose
@@ -477,17 +495,20 @@ export function physStep(dt) {
        out of the launch plane as the vehicle climbs out of the rotating atmosphere. */
     let dir;
     if (sasRetro) {
-      dir = navVel(_nv);
-      if (dir.lengthSq() < 2.5e-5) dir = bodyUp(_rad);      // terminal descent: no velocity vector worth fighting, hold the local vertical
+      /* In the air the velocity that matters is over the ground (inertial is 409 m/s of planet
+         spin under a parachute); under 10 m/s there is no vector worth fighting — and nothing
+         the servo below will act on — so hold the local vertical. */
+      dir = !overMoon() && S.pos.length() - RE < 120 ? surfaceVel(_nv) : navVel(_nv);
+      if (dir.lengthSq() < 1e-4) dir = bodyUp(_rad);
       else dir.negate();
     }
-    else if (simTime < TURN.t0) dir = _up.copy(S.pos);            // hold the local vertical
-    else if (simTime < TURN.t0 + TURN.ramp) {                     // programmed gravity turn
+    else if (simTime - tRelease < TURN.t0) dir = _up.copy(S.pos);            // hold the local vertical
+    else if (simTime - tRelease < TURN.t0 + TURN.ramp) {                     // programmed gravity turn
       /* The nose is swept from vertical toward the launch-plane east direction, but never
          faster than the remaining radial acceleration allows: pitching over before the
          horizontal speed is near orbital just spends fuel holding the vehicle up, and the
          trajectory falls back. thMax is where the radial acceleration goes to zero. */
-      const thProg = TURN.max * Math.min(1, (simTime - TURN.t0) / TURN.ramp);
+      const thProg = TURN.max * Math.min(1, (simTime - tRelease - TURN.t0) / TURN.ramp);
       _up.copy(S.pos).normalize();
       const r = S.pos.length();
       const vRad = S.v.dot(_up);
@@ -545,7 +566,7 @@ export function physStep(dt) {
      before 'flying' is declared, is exactly where the tower is. A launch vehicle does not bounce:
      contact with steel is the end of the flight. */
   if (S.pos.length() - RE < 1) {
-    const hit = padHit(S.pos, _fw.copy(UP_REF).applyQuaternion(S.q), simTime, tailStation(), NOSE_Z, armSwing < 0.85);
+    const hit = padHit(S.pos, _fw.copy(UP_REF).applyQuaternion(S.q), simTime, tailStation(), NOSE_Z, armSwing < 0.6);
     if (hit) return collide(hit);
   }
 
@@ -706,7 +727,7 @@ function checkMissionEvents() {
   } else if (!loiLogged) {
     loiLogged = true; hooks.addLog('LUNAR SPHERE OF INFLUENCE — PREPARE RETROGRADE BRAKING (V, then P, then ignite)', 'good');
   }
-  if (!loggedMaxQ && maxQ > 30000) { loggedMaxQ = true; hooks.addLog('MAX-Q — EASE THE THROTTLE IF YOU LIKE THE PAINT'); }
+  if (!loggedMaxQ && maxQ > 30000 && activeStage() === 0) { loggedMaxQ = true; hooks.addLog('MAX-Q — EASE THE THROTTLE IF YOU LIKE THE PAINT'); }
   if (!turnHintLogged && r - RE > 120) {
     turnHintLogged = true;
     hooks.addLog('NOW PITCH TOWARD THE MOON (MAP) — OR PRESS P FOR PROGRADE SAS', 'good');
@@ -723,8 +744,8 @@ export function resetSim() {
   engineOn = false; throttle = targetThrottle = 0;
   sasOn = false; sasRetro = false; simTime = 0; warpIdx = 0; maxQ = 0;
   tliLogged = loiLogged = loggedMaxQ = turnHintLogged = false; distFlown = 0; trail = [];
-  flightStarted = false; state = 'pad'; omega.set(0, 0, 0); I0 = null; holdOn = false; armSwing = 0; gLoad = 0; gOver = 0; chute = 0; chuteOpen = 0; heat = 0; cooking = 0; rcsAssist = true; aeroLoad = 0; strain = 0;
+  flightStarted = false; state = 'pad'; omega.set(0, 0, 0); I0 = null; holdOn = false; armSwing = 0; tRelease = null; aeroState.q = aeroState.mach = aeroState.aoa = aeroState.nBody = aeroState.nFin = 0; gLoad = 0; gOver = 0; chute = 0; chuteOpen = 0; heat = 0; cooking = 0; rcsAssist = true; aeroLoad = 0; strain = 0;
 }
 
 /* teleport() starts the flight directly, bypassing the liftoff guard */
-export function markTeleported() { flightStarted = true; state = 'flying'; }
+export function markTeleported() { flightStarted = true; state = 'flying'; tRelease = -1e9; armSwing = 1; }   // a teleported flight is long past its pitch program
