@@ -4,6 +4,7 @@ import { RE, RM, MU_E, MU_M, EARTH_SPIN, PAD_SCALE, PAD_UP, VS, moonPos, moonVel
    airDensity is literally the function accelAt drags the vehicle with, so the smoke cannot disagree
    with the flight computer about where the air runs out. */
 import { airDensity, getSimTime } from './physics.js';
+import { ATMO_TOP } from './aero.js';
 import * as WORLD from './world.js';
 import { pPos, pVel, pR, pLife, pAge, pInv, pHeat, pMode, pSmoke, pMoon, pTh, pColB, alive, nAlive, killSlot, ship, moonP, moonV,
   plumeDebug, SM_SEAM, SM_SPRAY, SM_FLASH, SM_TRAIL, SM_STEAM } from './exhaust-pool.js';
@@ -219,7 +220,7 @@ function stepParcel(i, h) {
     const alt = r - RE;
     const buoy = pMode[i] === 2 && (pSmoke[i] === SM_TRAIL || pSmoke[i] === SM_STEAM);
     let floats = false;
-    if (alt < 420) {
+    if (alt < ATMO_TOP) {
       const rho = airDensity(alt);
       if (rho > 0) {
         const ax = -EARTH_SPIN * pz, az = EARTH_SPIN * px;          // the atmosphere rides the spin
@@ -388,7 +389,7 @@ function stepParcel(i, h) {
        birth — the pad reads clear long before the 8 s the review asked for. */
     if (!moon) {
       const altE = Math.sqrt(px * px + py * py + pz * pz) - RE;
-      const rhoN = altE < 420 ? airDensity(altE) / RHO_SEA : 0;
+      const rhoN = altE < ATMO_TOP ? airDensity(altE) / RHO_SEA : 0;
       pHeat[i] -= h * (rhoN * (5.5 + 3 * Math.max(0, pAge[i] - 0.12)) + 4 * Math.max(0, pAge[i] - 0.15));
       if (pAge[i] > 0.45 && pHeat[i] > 0.22) pHeat[i] = 0.22;
       if (pAge[i] > 0.85) pLife[i] -= h * (pAge[i] - 0.85) * 2;

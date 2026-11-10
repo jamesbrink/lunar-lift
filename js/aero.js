@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { ATMO_H, RHO0, CD_AREA } from './constants.js';
+import { ATMO_H, RHO0, CD_AREA, EARTH_SPIN } from './constants.js';
 
 /* Atmospheric flight model. Display-free: tools/mission-sim.mjs flies through it headless.
 
@@ -25,6 +25,10 @@ import { ATMO_H, RHO0, CD_AREA } from './constants.js';
    drag rise, and the coefficients are textbook orders of magnitude, not wind-tunnel data. */
 export const ATMO_TOP = 420;                                   // km — density is exactly 0 above
 export function airDensity(alt) { return alt > ATMO_TOP ? 0 : RHO0 * Math.exp(-Math.max(0, alt) / ATMO_H); }
+
+/* The air's own velocity at p, km/s, into `out`: the atmosphere rides the planet's spin, ω × r with
+   ω = EARTH_SPIN about +Y. Velocity through the air is v − airVel(p). */
+export function airVel(p, out) { return out.set(EARTH_SPIN * p.z, 0, -EARTH_SPIN * p.x); }
 
 /* Speed of sound, km/s: 340 m/s at sea level falling linearly to 295 m/s at the tropopause, held
    above it (the standard atmosphere's stratosphere is isothermal to ~20 km and within 12 % of

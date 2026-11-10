@@ -2,6 +2,8 @@ import * as THREE from 'three';
 import { VS, RE, RM, moonPos } from './constants.js';
 import { rocketGroup, stages, lesGroup, bellMetal } from './saturn.js';
 import { airDensity, getSimTime } from './physics.js';
+import { ATMO_TOP } from './aero.js';
+import { TAIL_Z, R_SM_DRAWN } from './stations.js';
 import * as WORLD from './world.js';
 import { nAlive, resetPool, spawnParticle, ship, plumeDebug, SM_SMOKE, SM_SEAM, SM_FLASH } from './exhaust-pool.js';
 import { BELL_SETS, emitExhaust, emitIdle, resetEmit } from './exhaust-emit.js';
@@ -105,7 +107,7 @@ export function updateDebris(simDt, accelAt) {
          at the edge of space, where the honest event is the flash (physics.js) and tumbling
          metal, not a ribbon — the ribbon appears on the way down. */
       const alt = d.mesh.position.length() - RE;
-      const rho = alt < 420 ? airDensity(alt) : 0;
+      const rho = alt < ATMO_TOP ? airDensity(alt) : 0;
       if (rho > 0.004) {
         d.smokeAcc = (d.smokeAcc || 0) + simDt;
         const period = Math.max(0.033, 11 / Math.max(1, fall * 1000));   // ≥11 m apart, ≤30/s
@@ -188,7 +190,7 @@ export function updateBurnVisuals({ pos, quat, vel, throttle, activeIdx, burn, o
     ship.hullR = bellSet.hullR * VS;
   } else {
     if (activeIdx >= 0) plumeDebug.causeBell++;   // an index nobody built: counted, not a crash
-    ship.tailZ = 6.8; ship.hullR = 1.39 * VS;     // the SM/CM stub after everything else flew
+    ship.tailZ = TAIL_Z[2]; ship.hullR = R_SM_DRAWN * VS;     // the SM/CM stub after everything else flew
   }
   const t = getSimTime();
   const on = !!(burn && bellSet);

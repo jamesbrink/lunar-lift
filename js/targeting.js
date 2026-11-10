@@ -1,7 +1,8 @@
 import * as THREE from 'three';
 import * as C from './constants.js';
 import { S, getState, getSimTime, getEngineOn, getThrottle, gravityAt, orbitalElements, coastDrag } from './physics.js';
-const AIR_R2 = (C.RE + 420) ** 2;
+import { ATMO_TOP } from './aero.js';
+const AIR_R2 = (C.RE + ATMO_TOP) ** 2;
 
 /* Will the trajectory you are on meet the Moon, and how hard?
 

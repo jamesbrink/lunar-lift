@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { RE, VS, PAD_UP, PAD_EAST, EARTH_SPIN } from './constants.js';
+import { TAIL_Z, SIVB_TOP_Z, R_STACK, R_SIVB, R_SM } from './stations.js';
 
 /* What the vehicle can run into at the launch complex. Display-free (the headless mission harness
    flies through it), and the ONE table of these shapes: js/pad.js draws the swing arms from ARMS
@@ -40,7 +41,7 @@ const ARM_BOXES = ARMS.map(([z, hullR, w]) => {
 ARM_BOXES.push(['THE WHITE ROOM', -4.6, 0, 68.5, 1.6, 1.5, 1.4]);
 
 /* Hull radius at a station along the vehicle axis (build units), for whatever is still attached. */
-function hullRadius(z) { return z < 6.8 ? 3.57 : z < 22 ? 2.36 : 1.4; }
+function hullRadius(z) { return z < TAIL_Z[2] ? R_STACK : z < SIVB_TOP_Z ? R_SIVB : R_SM; }
 
 const NORTH = new THREE.Vector3().crossVectors(PAD_UP, PAD_EAST).normalize();
 const Y = new THREE.Vector3(0, 1, 0);
