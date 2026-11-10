@@ -3,7 +3,7 @@ import { RE, RM, WARPS, DTPHYS, PAD_POS, SPECS, moonPos } from './constants.js';
 import { initWorld, spinBodies, syncTime, updateSky, updateSunShadow, setWeatherVisible, getSpin, groundHeight, fineGroundHeight, moonGroundHeight } from './world.js';
 import { stages, lesGroup } from './saturn.js';
 import { initVehicle, spawnParticle, addDebris, detachStage, setVisible, updateParticles, updateDebris, updateBurnVisuals, clearDebris, resetStages, plumeLive } from './vehicle.js';
-import { S, keys, initPhysics, getState, getSimTime, setSimTime, getEngineOn, getThrottle, getWarpIndex, setWarpIndex, setTargetThrottle, getSasOn, setSas, cycleWarp, toggleSas, toggleSasRetro, activeStage, fwd, isBurning, accelAt, physStep, toggleIgnite, separateStage, separateLES, addDistFlown, pushTrail, resetSim, markTeleported, airDensity, groundVel, omega, getControlAuthority, toggleRcsAssist, toggleHold, deployChute, getArmSwing, guardWarp, aeroState, getAeroLoad, stability } from './physics.js';
+import { S, keys, initPhysics, getState, getSimTime, setSimTime, getEngineOn, getThrottle, getWarpIndex, setWarpIndex, setTargetThrottle, getTargetThrottle, getSasOn, setSas, cycleWarp, toggleSas, toggleSasRetro, activeStage, fwd, isBurning, accelAt, physStep, toggleIgnite, separateStage, separateLES, addDistFlown, pushTrail, resetSim, markTeleported, airDensity, groundVel, omega, getControlAuthority, toggleRcsAssist, toggleHold, deployChute, getArmSwing, guardWarp, aeroState, getAeroLoad, stability } from './physics.js';
 import { camera, initCamera, cycleCamera, updateCamera, resetCameraView, setCamMode, setCamDist, setCamView, resizeCamera, setMap, isMap, cycleMapFocus } from './camera.js';
 import { initMapView, updateMapView } from './mapview.js';
 import { updateChutes } from './chutes.js';
@@ -46,7 +46,7 @@ scene.fog = new THREE.FogExp2(0x04060b, 0);
 function resetMission() {
   clearDebris();
   resetStages();
-  resetSim();
+  resetSim(); retrue();
   syncTime(getSimTime());   // resetSim zeroes the mission clock; the bodies have to move back too
   resetCameraView();
   hideOverlay();
@@ -126,6 +126,22 @@ function dropStage() {
 /* ---------------- main loop ---------------- */
 let last = performance.now(), prevPos = PAD_POS.clone();
 let predTick = 0, trailTick = 0;
+/* Between frames S holds the DRAWN state — the last two physics steps blended — and the mission
+   clock reads the drawn instant, so everything that renders (camera, vehicle, HUD, Moon, weather)
+   agrees with everything else. T is the true state; toTrue() puts it back before physics runs
+   again. Anything that replaces the state from outside a frame (reset, teleport, ff) calls
+   retrue() so its new state is not overwritten by a stale T. */
+const T = { pos: new THREE.Vector3(), v: new THREE.Vector3(), q: new THREE.Quaternion(), t: 0 };
+const P0 = { pos: new THREE.Vector3(), v: new THREE.Vector3(), q: new THREE.Quaternion() };
+let bank = 0, shown = false, prevValid = false, lastDraw = 0;
+function show(alpha) {
+  T.pos.copy(S.pos); T.v.copy(S.v); T.q.copy(S.q); T.t = getSimTime();
+  S.pos.lerpVectors(P0.pos, T.pos, alpha); S.v.lerpVectors(P0.v, T.v, alpha); S.q.slerpQuaternions(P0.q, T.q, alpha);
+  setSimTime(T.t - (1 - alpha) * DTPHYS);
+  shown = true;
+}
+function toTrue() { if (shown) { S.pos.copy(T.pos); S.v.copy(T.v); S.q.copy(T.q); setSimTime(T.t); shown = false; } }
+function retrue() { shown = false; prevValid = false; bank = 0; lastDraw = getSimTime(); }
 const _gv = new THREE.Vector3();
 
 function frame() {
@@ -138,23 +154,34 @@ function frame() {
      but the camera, the map and the HUD stay live, so a pause is for looking around. */
   guardWarp();
   const paused = WARPS[getWarpIndex()] === 0;
+  if (!paused) toTrue();
   if (!paused && (getState() === 'pad' || getState() === 'flying')) {
     const simDt = dtReal * WARPS[getWarpIndex()];
-    // ceil + max(1, …): a frame shorter than DTPHYS (any display above 100 Hz) used to
-    // round to 0 substeps, so at ×1 physics never ran while the visuals kept spinning.
-    /* On the pad with the engines cold a step is an exact rotation with the planet, whatever its
-       size, so the whole frame is one step and x10000 costs nothing. In flight the step is never
-       more than DTPHYS and there are at most 600 a frame; if that is not enough to keep up (a slow
-       frame at x1000) the clock runs behind the warp rather than the planet running ahead of the
-       ship — everything below is driven by the time actually stepped. */
-    const idle = getState() === 'pad' && !getEngineOn();
-    const steps = idle ? 1 : Math.max(1, Math.min(600, Math.ceil(simDt / DTPHYS)));
-    const h = idle ? simDt : Math.min(DTPHYS, simDt / steps);
-    for (let s = 0; s < steps; s++) physStep(h);
-    const stepped = h * steps;
+    /* THE STEP IS ALWAYS DTPHYS. Frame time is banked and spent in whole 0.1 s steps, so the
+       trajectory is the same on a 60 Hz and a 144 Hz display, at x1 and at x1000, and it is the
+       trajectory tools/mission-sim.mjs certifies. (It used to step at the frame time below x6 —
+       1/60 s at x1 — and an independent review flew the certified window that way with the tool's
+       own autopilot: Moon impact at 2,559 m/s instead of a 346 km pass.) What is DRAWN is the
+       state blended between the last two steps (see show()), or a 10 Hz physics would stutter.
+       At most 600 steps a frame; a frame too slow for the warp falls behind it.
+       One exception: standing on the pad with the engines cold and the throttle shut, a step is
+       an exact rotation with the planet at any size, so the frame is one step and x10000 is free. */
+    const idle = getState() === 'pad' && !getEngineOn() && !keys['shift'] && getTargetThrottle() < 0.05;
+    if (idle) { physStep(simDt); bank = 0; prevValid = false; }
+    else {
+      bank = Math.min(bank + simDt, 600 * DTPHYS);
+      while (bank >= DTPHYS && (getState() === 'pad' || getState() === 'flying')) {
+        P0.pos.copy(S.pos); P0.v.copy(S.v); P0.q.copy(S.q); prevValid = true;
+        physStep(DTPHYS); bank -= DTPHYS;
+      }
+    }
     if (getState() === 'flying') addDistFlown(S.pos.distanceTo(prevPos));
     prevPos.copy(S.pos);
-    spinBodies(stepped);
+    if (!idle && prevValid && (getState() === 'pad' || getState() === 'flying')) show(bank / DTPHYS);
+    /* One clock: the planets, the weather and the terrain lookups stand where the DRAWN instant
+       puts them (world.js used to keep its own, advanced separately). */
+    const tDraw = getSimTime(), stepped = Math.max(0, Math.min(tDraw - lastDraw, simDt + DTPHYS)); lastDraw = tDraw;
+    syncTime(tDraw);
 
     if (getState() === 'flying') { trailTick += dtReal; if (trailTick > 0.5) { trailTick = 0; pushTrail(S.pos); } }
 
@@ -170,6 +197,7 @@ function frame() {
     predTick += dtReal; if (predTick > .2) { predTick = 0; if (getState() === 'flying') predict(); }
     updateAim();   // predicted lunar aim; spends a fixed step budget per frame and self-throttles
   }
+  else if (!paused) { syncTime(getSimTime()); }
   if (!paused) updateParticles(Math.min(1, dtReal * WARPS[getWarpIndex()]));
   updateCamera(dtReal, paused);
   if (paused) updateAudio({ burning: false, throttle: 0, rho: 0, q: 0 });   // and the engine is silent
@@ -208,11 +236,11 @@ window.game = {
     omega: [omega.x, omega.y, omega.z], authority: getControlAuthority().py,
     aero: { q: aeroState.q, mach: aeroState.mach, aoa: aeroState.aoa, load: getAeroLoad(), margin: stability() } }),
   ignite: toggleIgnite, stage: separateStage, jettisonLES: separateLES, setSas,
-  warp: m => { setWarpIndex(WARPS.indexOf(m)); }, camera: n => { setCamMode(n); }, map: on => { document.body.classList.toggle('map', on); setMap(on); },
-  ff(sec) { let left = sec; while (left > 1e-9) { const h = Math.min(DTPHYS, left); physStep(h); left -= h; } syncTime(getSimTime()); },
+  warp: m => { const k = WARPS.indexOf(m); if (k >= 0) setWarpIndex(k); }, camera: n => { setCamMode(n); }, map: on => { document.body.classList.toggle('map', on); setMap(on); },
+  ff(sec) { toTrue(); let left = sec; while (left > 1e-9) { const h = Math.min(DTPHYS, left); physStep(h); left -= h; } retrue(); syncTime(getSimTime()); },
   setThrottle(v) { setTargetThrottle(v); },
   nudge(ax, ay, az) { omega.set(ax, ay, az); },
-  teleport(pos, vel, t) { markTeleported(); resetAim(); S.pos.set(...pos); S.v.set(...vel); if (t !== undefined) setSimTime(t); syncTime(getSimTime()); prevPos.copy(S.pos); omega.set(0, 0, 0); },
+  teleport(pos, vel, t) { toTrue(); markTeleported(); resetAim(); S.pos.set(...pos); S.v.set(...vel); if (t !== undefined) setSimTime(t); syncTime(getSimTime()); prevPos.copy(S.pos); omega.set(0, 0, 0); retrue(); },
   reset: resetMission,
   _cam: camera, _pred: predLine, setCam: d => { setCamDist(d); }, setView: setCamView,
 };
