@@ -2,12 +2,11 @@ import * as THREE from 'three';
 import {
   RE, RM, MOON_RATE, EARTH_SPIN, PAD_UP, PAD_EAST, PAD_SCALE, PAD_POS, SKY_DAY, SKY_NULL, moonPos
 } from './constants.js';
-import { moonTex, earthTex, glowTex, flareTex } from './textures.js';
+import { startPlanetPaint, glowTex, flareTex } from './textures.js';
 import { toon, RAMP_EARTH, RAMP_MOON } from './toon.js';
-import {
-  applyRelief, sampleGrid, reliefField, coastField, shoreDistance, fineEarth,
-  padWeight, paintedCanvas,
-} from './toonmap.js';
+import { applyRelief, sampleGrid, reliefField, coastField, paintedCanvas } from './toonmap.js';
+import { fineRelief } from './padsite.js';
+import { surfaceInject, setSun } from './surface.js';
 import { makePatch, attachEarthPatch, updatePatch, makeMoonPatch, attachMoonPatch, updateMoonPatch, hidePatch } from './terrain.js';
 import { makeWeather, makeCloudShell, updateWeather, cloudShadeInject } from './clouds.js';
 import { makeHaze, hazeInject, updateHaze } from './haze.js';
@@ -89,7 +88,8 @@ export function initWorld(target) {
   sunTarget.updateMatrixWorld();
   scene.add(sun, sunTarget, new THREE.AmbientLight(0x39496b, 1.0));
 
-  const earthMap = earthTex(), moonMap = moonTex(), glowMap = glowTex();
+  startPlanetPaint();
+  const glowMap = glowTex();
   const flareMap = flareTex();
 
   /* ---- earth: the painted map under a three-band ramp. 384×192 segments (74 305 vertices) and
@@ -102,48 +102,18 @@ export function initWorld(target) {
      small navy emissive is a floor for the night side and the grazing limb, where the shadow
      band alone left the sea black. ---- */
   earth = new THREE.Mesh(new THREE.SphereGeometry(RE, 384, 192),
-    toon({
-      map: earthMap,
-      gradientMap: RAMP_EARTH, emissive: 0x07182c,
-    }));
+    toon({ gradientMap: RAMP_EARTH, emissive: 0x07182c }));
   earth.geometry.setAttribute('aUv', earth.geometry.attributes.uv);   // shared, not copied
+  earth.geometry.setAttribute('sfUv', earth.geometry.attributes.uv);  // the ground shader's name for it
   earth.receiveShadow = true;
-  /* ---- crisp coastline ink ----
-     Round 5: the shelf/ocean/deep banding this shader used to draw is gone — it moved into the
-     canvas paint in js/toonmap.js, because at the oblique review slants (cpx ≈ 40-150 km per
-     pixel) every derivative-faded band switches itself off and the MAP texture is all the eye
-     gets; and the canvas's dilate-mask boundaries staircased at 20 km there. What remains here
-     is the one job only a shader can do: an ink stroke ±16 km around the smoothed SDF zero
-     line, AA'd by its own derivative width, fading out below one-pixel width so the system view
-     sees the plain map and nothing shimmers. A single-wrap sphere sampling a smooth field is
-     exactly the case AGENTS.md's mip-wedge rule EXEMPTS — that rule needs uv repeats.
-     R16F because the field must bilinear-filter: R8 would quantise km at ~8 per code and draw
-     the 16 km stroke as a 16 km staircase; WebGL2 filters half-float natively. Night side
-     unaffected: this recolours diffuse before the toon lighting. */
-  const coastU = { value: null };
+  /* The surface is DRAWN, per fragment, by js/surface.js — biomes, relief bands, the inked coast —
+     from data fields the paint job fills in place. ONE injection per material: three keys its
+     program cache on onBeforeCompile.toString(), so the weather shade, the haze and the ground
+     are composed in the same function, and every uniform is bound here at compile time. */
   earth.material.onBeforeCompile = (sh) => {
-    /* ONE injection per material: three keys its program cache on onBeforeCompile.toString(), so
-       the weather shade and the coastline ink have to be composed in the same function. Both
-       uniforms are bound here, at compile time — no deferred assignment, so no customProgramCacheKey
-       is needed for the shade (see the magenta-probe note in AGENTS.md). */
     cloudShadeInject(sh, weather);
     hazeInject(sh, hazeU);      // the globe carries the SAME aerial perspective as the patch
-    if (!coastU.value) return;
-    sh.uniforms.coastMap = coastU;
-    sh.uniforms.coastInk = { value: new THREE.Color(0x0e2842) };     // C.coast  [14,40,66]
-    sh.fragmentShader = 'uniform sampler2D coastMap; uniform vec3 coastInk;\n' +
-      sh.fragmentShader.replace('#include <map_fragment>',
-        '#include <map_fragment>\n' +
-        '  float csd = texture2D( coastMap, vMapUv ).r;\n' +              // km from coast, <0 land
-        '  float cpx = max(fwidth( csd ), 0.5);\n' +                      // km per pixel at this fragment
-        // Round 5: the shelf/ocean/deep bands moved into the canvas paint (smooth-SDF iso-lines),
-        // because at review slants (cpx 40-150 km) every shader band fades itself out to avoid
-        // aliasing and the MAP texture is all the eye gets. Only the ink stroke remains here: it
-        // stays crisp where the canvas can only be 20 km coarse, and it fades below
-        // one-pixel width like before.
-        '  float vInk = 1.0 - smoothstep( 14.0, 34.0, cpx );\n' +
-        '  float ink = 1.0 - smoothstep( 16.0 - cpx, 16.0 + cpx, abs( csd ) );\n' +
-        '  diffuseColor.rgb = mix( diffuseColor.rgb, coastInk, ink * vInk );');
+    surfaceInject(sh, 'earth', 'globe');
   };
   /* Planet-scale bodies are exempt from the fog: FogExp2 is measured from the camera, so at
      0.002/km a system-view camera 20 000 km out would erase the planet entirely. The haze the
@@ -153,42 +123,7 @@ export function initWorld(target) {
   scene.add(earth);
   applyRelief(earth.geometry, 'earth');
   reliefField('earth').then((f) => { earthField = f; });
-  coastField().then((c) => {
-    shore = c;
-    if (!c || !earth) return;
-    /* Encode the signed coast distance (km, Float32, 2048×1024 — the map's own grid) as half
-       floats for the coastline band above. f16 by hand: Float32/Uint32 union, exponent rebias
-       127→15, mantissa 23→10; flush denormals to zero (|sd| < 6e-5 km is on the line anyway)
-       and clamp to f16 max (the field's extremes are ~±10 000 km, well inside 65 504). */
-    const n = c.w * c.h;
-    const px = new Uint16Array(n);
-    const f32 = new Float32Array(1), u32 = new Uint32Array(f32.buffer);
-    for (let i = 0; i < n; i++) {
-      f32[0] = c.km[i];
-      const x = u32[0], sign = (x >>> 16) & 0x8000;
-      let e = ((x >>> 23) & 0xff) - 127 + 15;
-      if (e <= 0) { px[i] = sign; continue; }
-      if (e >= 31) { px[i] = sign | 0x7c00; continue; }
-      px[i] = sign | (e << 10) | ((x & 0x7fffff) >>> 13);
-    }
-    const tex = new THREE.DataTexture(px, c.w, c.h, THREE.RedFormat, THREE.HalfFloatType);
-    tex.wrapS = THREE.RepeatWrapping;
-    tex.wrapT = THREE.ClampToEdgeWrapping;
-    tex.magFilter = THREE.LinearFilter;    // the band samples the field with derivatives, so it
-    tex.minFilter = THREE.LinearFilter;    // must be filterable; no mips — R16F filters natively
-    tex.generateMipmaps = false;
-    tex.needsUpdate = true;
-    coastU.value = tex;
-    earth.material.needsUpdate = true;     // recompile with the injection live
-    /* needsUpdate ALONE never re-injects: three's program cache key includes
-       onBeforeCompile.toString(), which the late uniform assignment does not change — the boot
-       frame compiled and cached the NO-BAND program (coastU.value was still null, the fn early-
-       returns), and every needsUpdate since re-fetched that same cached program. Magenta-probe
-       proof: with the flat-sea uniform forced to 0xff00ff, not one magenta pixel rendered at
-       160 km over the 100 km-wide Adriatic. The cache key must lie about the difference, so it
-       declares which injection is live. */
-    earth.material.customProgramCacheKey = () => (coastU.value ? 'coast-on' : 'coast-off');
-  });
+  coastField().then((c) => { shore = c; });
   /* The near level: ONE mesh, 161×161 vertices, dense (≈70 m) under the vehicle and stretched to a
      220 km rim — the horizon from altitude h is √(2·RE·h), and the rim stays beyond it until the
      patch's remaining difference from the globe mesh is sub-pixel. It rides the spin as a child of
@@ -202,6 +137,7 @@ export function initWorld(target) {
   earthPatch.mesh.material.onBeforeCompile = (sh) => {
     cloudShadeInject(sh, weather);
     hazeInject(sh, hazeU);
+    surfaceInject(sh, 'earth', 'patch');
   };
 
   /* ---- the weather shell: 4 km to 11 km, one mesh, the whole planet.
@@ -346,10 +282,9 @@ export function initWorld(target) {
      physics touches down on the exact RM sphere. No normal map (cartoon-art-direction): the
      terrain must survive as shape against the sky, not as surface shading. */
   moon = new THREE.Mesh(new THREE.SphereGeometry(RM, 512, 256),
-    toon({
-      map: moonMap,
-      gradientMap: RAMP_MOON,
-    }));
+    toon({ gradientMap: RAMP_MOON }));
+  moon.geometry.setAttribute('sfUv', moon.geometry.attributes.uv);
+  moon.material.onBeforeCompile = (sh) => surfaceInject(sh, 'moon', 'globe');
   moon.material.fog = false;      // ground haze must not eat the moon or the stars
   moon.position.copy(_moon);
   /* Round 6: the Moon no longer CASTS shadow. With castShadow on, the relief-displaced sphere and
@@ -509,6 +444,9 @@ export function updateSunShadow(pos) {
    (undo the spin — patches are children of the meshes, the vehicle position is inertial), and each
    hides itself above its own 30 km gate, so exactly one is ever drawn. */
 function updateReliefPatches(pos) {
+  /* the sun in each body's own frame, for the drawn relief bands and crater crescents */
+  _ld.copy(SUN_DIR); spinLocal(earth, _ld); setSun('earth', _ld.x, _ld.y, _ld.z);
+  _ld.copy(SUN_DIR); spinLocal(moon, _ld); setSun('moon', _ld.x, _ld.y, _ld.z);
   _ld.copy(pos).normalize();
   spinLocal(earth, _ld);
   updatePatch(earthPatch, _ld.x, _ld.y, _ld.z, pos.length() - RE);
@@ -568,15 +506,12 @@ export function moonGroundHeight(dir) {
 
 export function fineGroundHeight(dir) {
   if (!uvAlong(earth, dir)) return 0;
-  const u = _uvw.u, v = _uvw.v;
-  const rel = earthField ? sampleGrid(earthField, u, v) : 0;   // pad flattening is already baked in
-  const f = shore ? 1 - smooth01((0.06 + shoreDistance(shore, u, v)) / 0.12) : (rel > 0 ? 1 : 0);
-  return rel + fineEarth(u, v) * f * padWeight(u, v);
+  if (!earthField || !shore) return 0;
+  // the same two terms js/terrain.js writes into the near patch's vertices under the vehicle
+  return sampleGrid(earthField, _uvw.u, _uvw.v) + fineRelief(shore, _uvw.u, _uvw.v);
 }
-
-const smooth01 = (t) => { const x = THREE.MathUtils.clamp(1 - t, 0, 1); return x * x * (3 - 2 * x); };
-// f = 1 − smoothstep(−e, +e, sd): rewritten as smooth01 above so no extra temp is needed.
-// The Moon has no fine getter: it has no near level, so moonGroundHeight IS its terrain.
+// The Moon has no fine getter: its near patch is the relief grid itself, so moonGroundHeight IS
+// the drawn ground.
 
 /* The painted canvases, for the orbital map screen (js/hud.js): the same authored pixels the
    planets wear, so the map can blit real coastline instead of a flat blue disc, and never kicks

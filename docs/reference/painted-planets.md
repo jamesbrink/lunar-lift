@@ -1,5 +1,88 @@
 # Painted planets — how the surfaces are made
 
+## The surface is drawn per fragment (current)
+
+Everything below this section describes how the *data* is derived from the shipped sheets, and that
+is still how it works. What changed is the last step. The painted canvases are no longer the
+planets' textures: they are only what the orbital map and the navball blit. The ground itself is
+drawn in the fragment shader (`js/surface.js`, `js/surface-earth.js`, `js/surface-moon.js`) from
+smooth data fields, because a canvas has one resolution — 20 km per texel on the Earth, and from the
+pad, from 15 km and from 110 km of lunar orbit that one resolution was the picture.
+
+**The idea.** A flat tone with a sharp edge is a threshold on a smooth field. Bilinear sampling of a
+smooth field gives a smooth contour at any zoom, and adding band-limited noise to the threshold
+makes the contour a fractal line. So each body carries a few fields and the shader thresholds them:
+
+| body | texture | channels |
+| --- | --- | --- |
+| Earth | `sfField` 2048×1024 RGBA8, mipmapped | aridity, tree cover, cold, ruggedness |
+| Earth | `sfCoast` 2048×1024 R16F | signed km to the coast (the same field as before) |
+| Earth | `sfPadSdf` 512² R16F over ±72 km | the authored launch-site shore, 0.28 km per texel |
+| Moon | `sfField` 1024×512 RGBA8, mipmapped | albedo, the 340 km-smoothed albedo the mare cut is taken on, relief-crater tone |
+
+The Earth's three biome axes are the voted labels turned back into memberships (each label votes a
+value per axis; land-weighted box mean, r 2), so the table in "Biomes" below still decides what
+grows where. Ruggedness is new data: the tilt of `earth_normal_2048.jpg`, read as numbers. Measured
+5×5 mean tilt in 8-bit units — Himalaya 72.6, Alps 71.1, Andes 36.7, Rockies 30.9, Tibet 29.6;
+Sahara 7.0, Amazon 4.1, Florida 2.0, open ocean 2.0. It also replaces the seeded ridges in the
+Earth's relief grid, so the far mesh's mountains stand where the drawn ones are.
+
+**The noise** is a uint hash on integer lattice cells, eight octaves four apart: 512 km … 31 m on
+the Earth, 256 km … 16 m on the Moon. An octave fades out as its cell drops under roughly 30 pixels
+and is not evaluated under 9, so there is no speckle at any range. Two variants: `sfN` (gradient +
+value, used where a slope is shaded) and `sfNv` (value only, a third of the cost, used where only a
+contour is drawn).
+
+**What is drawn.** Earth: biome borders with groves and clearings at every scale; farmland plots (a
+cubic lattice cut by the ground is a patchwork of polygons); rivers as the 0.5 contour of a slow
+field, at their own width or 1.4 px; rock and snow where ruggedness and ridges say so, and two flat
+shading bands from the slope of a ridged height toward the sun; five sea bands, surf, pack ice; a
+beach and dune band and a 1.6 px ink line on every shore. Moon: mare / plain / highland / bright
+with a collar stroke inside each mare border; the 560 relief craters from the field; and a crater
+population per octave (one candidate per lattice cell, radius 0.07–0.30 of the cell, so 5 m to
+19 km) each drawn as two offset discs — a shadow crescent inside the sunward rim and a lit one on
+the far wall, the offset growing as the sun drops — plus a rim ring that survives noon.
+
+**One function, two meshes.** The globe and the near patch run the same shader on the same
+body-fixed point. Where the patch is up, the globe's fragments within 205 km of its centre are
+discarded at the top of the shader: with a logarithmic depth buffer there is no early-z, and the
+discard is also why the patch needs no display lift under the vehicle (see below).
+
+**Precision.** A float32 body-fixed position has a 0.5 m grid at the Earth's radius. The patch's
+vertices are differenced against an anchor in the vertex stage, and each lattice is addressed as
+(local offset + fraction of a cell) plus (integer cell of the anchor), both computed in doubles in
+`anchorPatch`. On the patch the coarse octaves are evaluated per vertex and interpolated; relief
+slope there is differenced per vertex too, because a screen derivative of an interpolated value is
+constant per triangle (seen as sawtooth shading over the Alps from 12 km).
+
+**The patch is shape only, and it is the contact surface.** `js/terrain.js` writes position, normal
+and uv; no colour. Under the vehicle the Earth patch is `reliefGrid + fineRelief` and the lunar
+patch is the relief grid — the same numbers `fineGroundHeight` and `moonGroundHeight` return.
+Measured at the 625 vertices nearest the vehicle: 0.27 m worst disagreement at the pad, 0.07 m at
+two lunar sites (float32 vertex rounding). The lunar patch used to carry a 300 m display lift plus
+analytic rim relief, so a camera or a ship placed on `moonGroundHeight` sat underneath the drawn
+ground and saw stars; both are gone. Non-finite floats in position / normal / uv: 0 at the pad and
+at both lunar sites. Worst normal tilt off vertical: 1.17° at the pad.
+
+**A bug this found.** `boxSignal`'s latitude window added each entering row twice: a constant field
+of 1 came back as 11 at r 1 and 5.0 at r 3. Every smoothed signal — the biome classifier's three,
+the Moon's mare field — had been running on it. Fixed; max error against a brute-force sum is float
+rounding at r 1, 2, 3 and 9. The biome shares and named-place checks quoted under "Biomes" were
+taken with the broken filter and have NOT been re-measured; Florida, for one, now votes forest
+rather than grass, and the launch site's grass and scrub are authored in the shader instead.
+
+**Cost.** Boot, navigation to first painted frame, same machine and harness (headless Chromium,
+Apple M4 Max): 5.6 s before, 2.1 s after — the Moon is painted at its native 1024×512 instead of
+4096×2048, the blurred ground copy is gone, and the coast transform runs once instead of twice.
+GPU time (`EXT_disjoint_timer_query_webgl2`, 2160×1250, weather hidden so only the ground is
+timed) was measured while other jobs shared the GPU and is noisy: medians of 1.0–1.5 ms before
+against 1.5–3.5 ms after at the pad and over the Cape, 0.8 against ~2.2 from 400 km, 0.3–0.6
+against 0.9–2.6 at the Moon. It needs re-measuring on a quiet machine before anyone quotes it.
+
+**Stale below.** "Cost" (the 540 ms / 27 ms paint times), "The near level" (vertex colour, the
+blurred `canvasDataSoft` copy, the 8 m lift), the Moon's 4096 canvas and its analytic near-level
+craters, and the relief caps' description of seeded Earth ridges describe the previous renderer.
+
 The bodies are drawn, not photographed. The blue-marble and lunar sheets in `assets/` are satellite
 data at 2–20 km per pixel: stretched over a sphere and viewed from orbit it is a soft, mud-coloured
 smear, and a cel ramp only quantises the smear into bands of mud. Repainting the photo's own pixels

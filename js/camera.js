@@ -283,7 +283,7 @@ function insideShip(pos) {
 }
 function groundOut(pos) {
   _dir.copy(pos).normalize();
-  keepOut(pos, ORIGIN, RE + SKIN + groundLift(WORLD.groundHeight, _dir));
+  keepOut(pos, ORIGIN, RE + SKIN + groundLift(WORLD.fineGroundHeight || WORLD.groundHeight, _dir));
   moonPos(getSimTime(), _moon);
   _diff.subVectors(pos, _moon);
   if (_diff.lengthSq() > 1e-9) _dir.copy(_diff).multiplyScalar(1 / _diff.length());

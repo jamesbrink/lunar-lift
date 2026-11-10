@@ -37,7 +37,7 @@ const sweep = name => page.evaluate(async name => {
           game.setView(yaw, pitch, dist);
           updateCamera(1 / 60); updateCamera(1 / 60);
           const c = camera.position; n++;
-          const hE = c.length() - C.RE - W.groundHeight(d.copy(c).normalize());
+          const hE = c.length() - C.RE - W.fineGroundHeight(d.copy(c).normalize());
           C.moonPos(P.getSimTime(), moon);
           rel.subVectors(c, moon);
           const hM = rel.length() - C.RM - W.moonGroundHeight(d.copy(rel).normalize());

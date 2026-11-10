@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { RE, RM, WARPS, DTPHYS, PAD_POS, moonPos } from './constants.js';
-import { initWorld, spinBodies, syncTime, updateSky, updateSunShadow, groundHeight, moonGroundHeight } from './world.js';
+import { initWorld, spinBodies, syncTime, updateSky, updateSunShadow, groundHeight, fineGroundHeight, moonGroundHeight } from './world.js';
 import { stages, lesGroup } from './saturn.js';
 import { initVehicle, spawnParticle, addDebris, detachStage, setVisible, updateParticles, updateDebris, updateBurnVisuals, clearDebris, resetStages, plumeLive } from './vehicle.js';
 import { S, keys, initPhysics, getState, getSimTime, setSimTime, getEngineOn, getThrottle, getWarpIndex, setWarpIndex, setTargetThrottle, getSasOn, setSas, cycleWarp, toggleSas, toggleSasRetro, activeStage, fwd, isBurning, accelAt, physStep, toggleIgnite, separateStage, separateLES, addDistFlown, pushTrail, resetSim, markTeleported, airDensity, groundVel, omega, getControlAuthority, toggleRcsAssist, toggleHold, deployChute, aeroState, getAeroLoad, stability } from './physics.js';
@@ -66,7 +66,7 @@ initPhysics({
   scene,
   stages,
   hooks: { addLog, showEndOverlay: endOverlay },
-  relief: { earth: groundHeight, moon: moonGroundHeight },
+  relief: { earth: fineGroundHeight, moon: moonGroundHeight },   // the functions the drawn patches are built from
   audio: { engine: audioEngine, thud: audioThud, explosion: audioExplosion, win: audioWin },
   vehicleOps: { spawnParticle, addDebris, detachStage, setVisible, les: lesGroup },
 });
