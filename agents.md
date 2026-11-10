@@ -40,8 +40,10 @@ stack, at `--phase=1.4742618`) is LOST at 1,264 m/s with a dry tank. The window 
 `AIM_PERI = 350` km, the middle of the band that lands: −3e-3 rad of phase (745 km) lands at 2.8 m/s
 with 6.6 t, +1.75e-3 rad (123 km) at 4.9 m/s with 7.6 t, and +2e-3 rad (91 km) is **LOST** at 71 m/s
 with the tank run down. Nominal ascent under SAS: max-Q 25.4 kPa at T+65 s, peak side load 0.024 g
-at T+85 s (limit 0.5 g, then strain), static margin +4.4 m on the pad. Command module alone from
-7.8 km/s at −1.5° and 122 km: 7.2 g, 59 kPa, splashdown 7.8 m/s (`SAFE_EARTH` is 12 m/s). If you change physics, specs, constants or the launch
+at T+85 s (limit 0.5 g, then strain), static margin +4.4 m on the pad; the same ascent after 0, 120,
+300 or 3,600 s of waiting on the pad. Command module alone from 122 km: 7.8 km/s lands from −1.5°
+(7.2 g, splashdown 7.8 m/s, `SAFE_EARTH` is 12) to −6° (14.7 g) and is `ENTRY TOO STEEP` at −7°;
+11 km/s skips out at −5°, lands at −5.5° to −6.5° (5.6 to 14.4 g) and is too steep at −7°. If you change physics, specs, constants or the launch
 window, re-run and fix every number that moved **in the same commit** — `README.md` and
 `docs/reference/*.md` quote measured output, and a doc that no run backs is a bug.
 
@@ -130,6 +132,26 @@ air. Corollaries, each read off the code or measured:
   explicit 0.1 s step overshoots under the mains. A capsule that starts apex-first rights itself in
   time at 7.8 km/s and does **not** at 11 km/s, −6.5° (burned up 23 s after a 122 km interface) —
   measured; do not write "the capsule always settles" anywhere.
+- Entry has a floor and a ceiling now. `G_LIMIT = 16` g for `G_TIME = 2` s is `ENTRY TOO STEEP`
+  (only with the engine off, below 150 km); a canopy is lost on deploy above its tear pressure, its
+  Mach limit (1.5 drogues, 0.5 mains) or with the heat proxy over 0.5. Under an open canopy SAS and
+  hold are ignored, and retrograde SAS below 120 km steers by `surfaceVel`, not `navVel` — inertial
+  velocity under a parachute is 409 m/s of planet spin. A scripted entry must deploy by altitude or
+  Mach, not by q alone: q is 0.08 kPa at 110 km and Mach 25.
+- The pad is solid and the clock that matters off it is `tRelease`. `padHit()` (`js/colliders.js`)
+  is tested from hold-down release, while `state` is still `'pad'`; swing arms are solid while
+  `armSwing < 0.6` (0.9 s). The pitch program runs on `simTime − tRelease`. `markTeleported()` sets
+  `tRelease = −1e9` and `armSwing = 1`, so a teleported vehicle is past both. A headless test that
+  steers at ignition with SAS off will hit a swing arm at 0.8 s (yaw) or the ground at 14 s
+  (pitch) — measured — so switch SAS on first unless the collision is what you are testing.
+- `WARPS[0]` is 0 (paused) and `WARPS[1]` is 0.25. Start from `WARP_ONE`, set by value
+  (`g.warp(1)`), and never treat index 0 as ×1. `guardWarp()` caps warp by place every frame and
+  drops it to ×1 at the Moon's SOI, so a browser test that sets ×1000 in the air does not get it;
+  `ff(seconds)` is not capped.
+- **Known limit, not fixed:** in the browser the terrain height under the vehicle is read through
+  the planet mesh's drawn rotation, which moves once per rendered frame. At high warp the substeps
+  inside a frame see the ground where it was drawn — up to a frame of spin stale. Found in review,
+  not measured. Headless there is no terrain and no lag.
 - The flat rate damping is a control system now (`rcsAssist`, key T, reset to on by `resetSim()`).
   A test that wants free rotation in vacuum must call `toggleRcsAssist()`; a test that assumes rates
   die on their own is testing the assist.
@@ -350,10 +372,28 @@ air. Corollaries, each read off the code or measured:
   read from the nose or the velocity — so pitching the rocket pitches the rocket, not the world.
   Chase sits behind the *flight path*, not the nose (those differ by 180° in a braking burn).
   Double-click re-centres. `js/camera.js`'s header is the truth; do not reintroduce a timer.
+- **The scene is drawn from the eye: floating origin (`js/origin.js`).** Coordinates are km from the
+  Earth's centre and the GPU has 32-bit floats: at 6,371 km a float steps 0.49 m, and the pad moves
+  409 m/s through the frame, so every world-space quantity a shader computed landed on a different
+  half-metre each frame. Measured idle on the pad: 9,561 pixels changing frame to frame, 0 when
+  paused. Each frame `setOrigin(scene, camera.position)` sets `scene.position = −camera`; positions
+  stay absolute doubles in JavaScript and every uploaded matrix is eye-relative. What follows:
+  - The camera is a child of the scene. **Never call `camera.lookAt`** — on a parented camera it
+    builds the wrong matrix; the look-at is built by hand in `js/camera.js`.
+  - A `matrixWorld` read in JavaScript is eye-relative. Read the pad's only through
+    `padMatrix()` in `js/world.js` (or put the planet back with `absolute()` from `origin.js`).
+  - A new shader that needs a planet-centred position must add the `uOrigin` uniform back, or do
+    its work in an Earth-fixed frame. `modelMatrix × position` alone is eye-relative now. The
+    answer with `uOrigin` is as coarse as it ever was, so use it only for things kilometres across.
+- **Smoke casts shadows through its own caster.** The puffs live on the effects layer and cast
+  nothing; `js/exhaust-draw.js` keeps a layer-0 `Points` with a `customDepthMaterial` that draws
+  each puff as a disc into the sun's map (three 0.187 reads the shadow map's depth attachment).
 - **The map is the scene, not a drawing of it.** M switches to a map camera pivoting on Earth, the
   Moon or the ship (F), with the pole of the Moon's orbit as up (north-up showed the transfer plane
-  edge-on); `js/mapview.js` adds only what is too small to see from 100 000 km, plus the whole
-  coast path and the Moon's position at closest approach. The 2-D canvas map and the `'system'` camera mode no longer exist, and the arrow
+  edge-on); `js/mapview.js` adds only what is too small to see from 100 000 km, plus the engine-off
+  coast path and the Moon's position at closest approach. The map hides the weather, takes its sky
+  from where the *eye* is (space) rather than where the ship is, and opens on the ship's side of the
+  planet. The 2-D canvas map and the `'system'` camera mode no longer exist, and the arrow
   keys and − / = belong to the camera — W A S D Q E fly the ship.
 - **Damp the camera's offset, never its position.** A lerp of the absolute position toward a moving
   target trails it by speed × time-constant: in a 300 km orbit at ×1 with 0.12 km asked for, the camera
@@ -517,7 +557,7 @@ await tab.evaluate(`(async () => {
 
 ## Structure
 
-One concern per file; no god files. Current sizes: `physics.js` 730, `world.js` 622, `clouds.js` 619, `navball.js` 498, `exhaust-sim.js` 491, `camera.js` 428, `earthpaint.js` 367, `hud.js` 318, `paintkit.js` 314, `exhaust-emit.js` 312, `surface.js` 288, `predictor.js` 276, `moonpaint.js` 276, `cloudfields.js` 274, `exhaust-draw.js` 254, `pad.js` 225, `saturn.js` 220, `terrain.js` 215, `flame.js` 214, `ribbon.js` 213, `vehicle.js` 210, `padsite.js` 203, `main.js` 185, `surface-earth.js` 181, `exhaust-pool.js` 148, `toonmap.js` 142, `constants.js` 126, `surface-moon.js` 120, `toon.js` 117, `targeting.js` 113, `mapview.js` 112, `halfres.js` 103, `textures.js` 97, `aero.js` 81, `colliders.js` 71, `chutes.js` 70, `haze.js` 62, `audio.js` 62, `palette.js` 35.
+One concern per file; no god files. Current sizes: `physics.js` 773, `world.js` 645, `clouds.js` 645, `navball.js` 499, `exhaust-sim.js` 491, `camera.js` 435, `earthpaint.js` 367, `hud.js` 344, `exhaust-emit.js` 322, `paintkit.js` 314, `exhaust-draw.js` 308, `surface.js` 288, `predictor.js` 276, `moonpaint.js` 276, `cloudfields.js` 274, `pad.js` 225, `saturn.js` 220, `terrain.js` 215, `flame.js` 214, `ribbon.js` 213, `vehicle.js` 210, `main.js` 210, `padsite.js` 203, `surface-earth.js` 181, `exhaust-pool.js` 148, `toonmap.js` 142, `constants.js` 134, `surface-moon.js` 120, `targeting.js` 119, `toon.js` 117, `mapview.js` 116, `halfres.js` 103, `textures.js` 97, `aero.js` 81, `colliders.js` 72, `chutes.js` 70, `haze.js` 64, `audio.js` 62, `palette.js` 35, `origin.js` 29.
 `toonmap.js` is now only the registry of paint products; the painters are `earthpaint.js` and
 `moonpaint.js` on `paintkit.js`, the authored launch site is `padsite.js`, and the ground is drawn by
 `surface.js` + `surface-earth.js` + `surface-moon.js`.
@@ -527,14 +567,17 @@ turns "this stage is burning" into calls on the five exhaust modules — `flame.
 `exhaust-pool.js` (the parcel pool and `spawnParticle`), `exhaust-emit.js` (where parcels are born),
 `exhaust-sim.js` (how they move) and `exhaust-draw.js` (how they are drawn). The integrator is still
 the largest of them; its lunar and Earth branches are the next split if it grows.
-New since the flight model: `aero.js` (density, Mach drag rise, the one `aeroForce()` evaluation),
+New since the flight model: `colliders.js` (the one table of pad solids and swing arms — what
+`pad.js` draws and what `physics.js` hits; display-free), `origin.js` (the floating origin and
+`uOrigin`), `aero.js` (density, Mach drag rise, the one `aeroForce()` evaluation),
 `mapview.js` (ship marker, body names, lunar orbit, SOI ring, coast path and the Moon's arrival
 position for the map), `chutes.js` (the drawn
 drogues and mains; what is deployed is `physics.js`'s state). Tools: `mission-sim.mjs` (flies the
 mission headless), `mission-math.py` (derived numbers), `shader-lint.mjs`, `shots.mjs` (browser
 screenshots plus console errors and warnings), `clip-test.mjs` (camera never under terrain or inside
-the hull), `gpu-time.mjs` (GPU ms per frame by timer query).
-`physics.js` and `aero.js` stay display-free: `tools/mission-sim.mjs` imports them headless, and
+the hull), `gpu-time.mjs` (GPU ms per frame by timer query), `cloud-views.mjs` (weather screenshots
+and GPU time).
+`physics.js`, `aero.js` and `colliders.js` stay display-free: `tools/mission-sim.mjs` imports them headless, and
 `saturn.js` with them for the stage records (so anything there that needs a canvas must tolerate having none).
 
 `js/constants.js` holds every physical constant and the vehicle `SPECS`, each with the measurement

@@ -55,7 +55,9 @@ S.pos.addScaledVector(S.v, dt);      // position uses the NEW velocity
 ```
 
 `js/main.js` drives it: `simDt = dtReal · WARP`, split into
-`max(1, min(600, ceil(simDt / 0.1)))` substeps, so **h ≤ 0.1 s always** and warp multiplies
+`max(1, min(600, ceil(simDt / 0.1)))` substeps of `min(0.1, simDt / steps)`, so **h ≤ 0.1 s
+always** — a frame slow enough to want more than 600 substeps runs behind the warp instead of
+stepping coarser — and warp multiplies
 the number of physical steps rather than the size of one. Warp is therefore not a time
 dilation — the mission clock is real seconds at every warp setting, and ×1000 costs 167
 integration steps per frame instead of lying about the physics.
@@ -156,7 +158,8 @@ t·cos θ = g − v²/r     →     θ_max = acos( clamp( (g − v²/r) / t, 0, 
 ```
 
 `js/constants.js` exposes the steering program as `TURN = { t0: 55, ramp: 190, max: 1.15 }`:
-hold vertical for 55 s, then sweep the nose toward `PAD_EAST` over 190 s by up to 1.15 rad,
+hold vertical for 55 s **from hold-down release** (not from mission time zero: a launch after a
+wait on the pad flies the same program), then sweep the nose toward `PAD_EAST` over 190 s by up to 1.15 rad,
 with the clamp above deciding how much of that the vehicle can actually hold. At the pad,
 `g − v²/r = 9.82` and `t = 46 000/3 433 = 13.40 m/s²` → `θ_max = acos(0.733) = 43°` — the
 program asks for less, which is right early on; later, when `v²/r` approaches `g`, the clamp
@@ -208,9 +211,11 @@ the same stations.
 | Moon contact, faster | same | lost |
 | Earth contact, command module alone, speed ≤ 12 m/s | `impact(false)` with `speed ≤ SAFE_EARTH` and no stage attached | **success** — `SPLASHDOWN`, or `AROUND THE MOON AND HOME` after a pass through the lunar SOI |
 | Earth contact, faster, or with a stage attached | same | lost — `HARD LANDING` (`RE-ENTRY DISASTER` above 1,000 m/s) |
+| More than 16 g felt for 2 s, engine off, below 150 km | `crushed()` from `physStep` | lost — `ENTRY TOO STEEP` |
+| Contact with the launch complex | `padHit()` in `js/colliders.js`, checked within 1 km of the datum | lost — `COLLISION WITH …` |
 | Heat proxy `sqrt(ρ)·v³` > 4 for 3 s without the heat shield forward | `burnUp()` from `physStep` | lost — `BURNED UP` ([mission-design.md](mission-design.md), "Coming home") |
 | Lateral aerodynamic load over 0.5 g (6 g for the bare CSM) long enough to accumulate 0.6 of strain, or 3× the limit at once | `overstressed()` → `breakup()` from `physStep` | lost — `AERODYNAMIC BREAKUP` ([atmosphere.md](atmosphere.md)) |
-| Contact test | `surfaceAlt() ≤ 0` | the lowest attached point — the bell of the stage still bolted on, or the nose if inverted — against the terrain underneath (the drawn relief in the browser, the datum sphere headless). It used to be `S.pos` within `RHALF ≈ 52 m`, which is right for the full stack and left a lone CSM "landed" 61 m up |
+| Contact test | `surfaceAlt() ≤ 0` | the lowest attached point — the bell of the stage still bolted on, or the nose if inverted, lowered by the hull radius times the sine of the tilt, so a leaning cylinder touches with its rim — against the terrain underneath (the drawn relief in the browser, the datum sphere headless). It used to be `S.pos` within `RHALF ≈ 52 m`, which is right for the full stack and left a lone CSM "landed" 61 m up |
 
 The Moon-encounter gate (`rM < SOI_M` → switch guidance to Moon-relative) must run **before**
 `checkImpact`, otherwise a fast arrival at the surface is reported as impact instead of a

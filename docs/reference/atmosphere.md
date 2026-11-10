@@ -288,7 +288,8 @@ cosmetic; weather is not simulated.
 | sea-level pressure | 101 325 Pa | USSA-1976 (fact sheet: 1014 mb) |
 | `C_d·A`, nose-on, subsonic | 28 m² (game) = 0.357 × 78.5 m² | game value; no Apollo figure fetched |
 | side-load limit | 0.5 g stack, 6 g bare CSM; failure at 0.6 of accumulated strain or 3× the limit | gameplay choice; nominal ascent peaks at 0.024 g |
+| crew limit | 16 g for 2 s | gameplay choice; survivable entries measured up to 14.7 g |
 | heat limit | `sqrt(ρ)·v³` > 4 for 3 s without a heat shield forward | gameplay choice; 8.9 at a 7.8 km/s entry, 33.7 at 11 km/s (measured) |
-| parachutes | drogues 30 m², tear 20 kPa; mains 2,300 m², tear 4 kPa | gameplay choice; 7.8 m/s under mains (measured) |
+| parachutes | drogues 30 m², tear 20 kPa or Mach 1.5; mains 2,300 m², tear 4 kPa or Mach 0.5; either lost in entry heat | gameplay choice; 7.8 m/s under mains (measured) |
 | Kármán line | 100 km | convention only; no physical discontinuity |
 | max-q | 35.2 kPa (Apollo 11), 25.4 kPa (game, measured) | SP-4029; SAS ascent |

@@ -29,35 +29,49 @@ Read from the `keydown` handler in `js/main.js` and the hold-key reads in `js/ph
 
 | Key | Action |
 | --- | --- |
-| SPACE | Ignite / flameout. S-1 is a solid: once lit it runs at 100 % to burnout. On S-2/CSM, raising the throttle relights the engine (KSP-style) |
+| SPACE | Ignite / shut down. S-1 is a solid: once lit it runs at 100 % to burnout and neither SPACE nor CTRL touches it. On S-2/CSM, SPACE cuts the engine and zeroes the throttle; raising the throttle relights it (KSP-style) |
 | SHIFT (hold) | Throttle up |
 | CTRL (hold) | Throttle down |
 | W / S | Pitch |
 | A / D | Yaw |
 | Q / E | Roll |
-| X | Separate the stage. Pressed on the CSM it leaves the command module flying alone |
+| X | Separate the stage. A stage still holding more than 5 % of its propellant wants X twice within two seconds. Pressed on the CSM it leaves the command module flying alone |
 | P | SAS autopilot on / off (holds the pitch program off the pad, then the velocity vector) |
 | V | Flip SAS between prograde and retrograde |
 | H | Attitude hold on / off: stops every rotation and keeps the nose where it is; steering by hand moves the held attitude with you. Switching SAS on cancels it, and it switches SAS off |
 | T | RCS stability assist on / off (on by default; off, nothing damps a rotation in vacuum) |
 | G | Parachutes, command module only: first press drogues, second press mains |
-| ] / [ | Time warp up / down the ladder |
+| ] / [ | Time warp up / down the ladder — which now runs down through slow motion to a pause |
+| ESC | Pause / resume (or close the help card if it is open). The camera, the map and the HUD stay live while paused |
+| ? | Help card |
 | C | Camera mode: orbit (the default) ↔ chase |
 | M | Map: the same 3-D scene from far off, with the ship, both bodies, the Moon's orbit and sphere of influence, the coast path and the Moon's position at closest approach marked |
 | F | Map focus: Earth → Moon → ship |
 | ↑ ↓ ← → | Turn the camera (they no longer steer the ship) |
 | − / = | Zoom out / in |
-| R | Reset the mission (ENTER or SPACE on the end overlay) |
+| R | Reset the mission (R, ENTER or SPACE on the end overlay) |
 | Mouse drag | Turn the camera |
 | Double-click | Re-centre the view behind the ship |
 | Mouse wheel | Zoom |
 
-Warp ladder (`WARPS` in `js/constants.js`): ×1, 2, 4, 8, 16, 32, 64, 128, 256, 512, 1000. The
-convention that makes coasting honest: **warp multiplies the number of substeps, never the step
+Warp ladder (`WARPS` in `js/constants.js`): paused, ×0.25, ×1, 2, 4, 8, 16, 32, 64, 128, 256, 512,
+1000. The convention that makes coasting honest: **warp multiplies the number of substeps, never the step
 size.** `js/main.js` takes `simDt = frame time × warp` and splits it into substeps capped at
 `DTPHYS = 0.1 s` (at least 1 per frame, up to 600), so the integrator sees the same 0.1 s steps at
 ×1000 that it sees at ×1 — the trajectory is identical at every warp factor, ×1000 only buys wall
-clock.
+clock. A substep is never longer than `DTPHYS`: a slow frame at ×1000 falls behind the warp rather
+than take a coarser step. Below ×1 the substep is shorter. Warp is also capped by place — ×4 in
+the air (below 70 km) or within 15 km of the Moon, ×16 below 140 km, ×32 within 150 km of the Moon —
+and drops to ×1 on crossing the Moon's sphere of influence.
+
+The launch complex is solid. The swing arms start to retract at ignition and take 1.5 s; for the
+first 0.9 s they are still across the stack, and touching them, the tower, the crane, a mast or a
+tank ends the flight (`COLLISION`). Measured headless: SAS from ignition clears everything (the
+stack is 1.6 m up when the arms stop being solid); yaw held from ignition with SAS off hits a swing
+arm 0.8 s later; a stack pitched over at ignition falls back and hits the ground at 142 m/s — it
+used to tunnel into the Earth. The SAS pitch program is timed from the moment the hold-down lets
+go, so waiting on the pad for the launch window does not change the ascent: waits of 0, 120, 300
+and 3,600 s all reach the same S-2 burnout state (6.416 km/s, apogee 584 km, max-Q 25.4 kPa).
 
 Flight controls are inertial: the keys apply torque against the vehicle's live moment of inertia, so
 the fueled stack turns slowly and the HUD's `authority` readout climbs as propellant burns off, and
@@ -95,11 +109,16 @@ Repo-wide convention (see `docs/reference/README.md`): **km, s, tonnes, kN**.
 
 ## Architecture
 
-- `js/physics.js` (681 lines) — the integrator and the reference-frame helpers. Inverse-square
+One concern per file. Line counts are `wc -l` at the commit that last touched this list.
+
+### Flight
+
+- `js/physics.js` (773 lines) — the integrator and the reference-frame helpers. Inverse-square
   gravity from Earth and Moon plus the indirect term an Earth-centred frame owes (the Earth falls
   toward the Moon too), the aerodynamic force and its torque from `js/aero.js`, mass burn, staging,
   attitude dynamics, SAS, attitude hold, the RCS stability assist, side-load strain and breakup, the
-  command module's heat-shield rule and parachutes, and `impact()`. Contact is the
+  command module's heat-shield rule, parachutes and crew g limit, collision with the launch complex
+  (`js/colliders.js`), and `impact()`. Contact is the
   lowest attached point (`surfaceAlt()`: the engine bell of whatever stage is still bolted on, or
   the nose if it is upside down) meeting the terrain, and a slow touchdown more than 60° from
   vertical is `TIPPED OVER`, a loss. It also holds
@@ -115,62 +134,84 @@ Repo-wide convention (see `docs/reference/README.md`): **km, s, tonnes, kN**.
   sound, the transonic drag rise, and `aeroForce()` — axial drag plus the angle-of-attack normal
   force. One evaluation per step feeds both the trajectory and the torque. What it models and what
   it deliberately does not: `docs/reference/atmosphere.md`.
-- `js/world.js` (687 lines) — Earth, Moon, sky gradient, starfield, the sun whose
-  shadow camera follows the vehicle, and the launch pad welded to the rotating planet. Mounts the
-  weather shell from `js/clouds.js` and composes the ground materials' injections (cloud shade, haze,
-  coastline ink) — one `onBeforeCompile` per material. Exposes the terrain queries
-  `groundHeight`, `moonGroundHeight` and `fineGroundHeight` (km above the reference sphere), plus
-  `planetCanvas` and `bodySpin` for the navball's globe.
-- `js/terrain.js` (549 lines) — the near level: one 161 × 161 mesh warped radially, ~25 m spacing
-  under the vehicle stretching to a ±220 km rim, hidden above 30 km and re-centred in place after
-  ground travel, so the ground the vehicle touches is always the authored ground.
-- `js/toonmap.js` (1778 lines) — where the planets are *painted*, once at boot, from data rather than
-  from imagery: the specular sheet is read as a land mask and the diffuse sheet as a biome signal, and
-  the result is a flat cartoon surface map — ocean, shelf, a hard coastline stroke, grass, forest,
-  desert, tundra, boreal, ice — plus the relief fields, the authored Merritt Island shore lines and the
-  cloud sheets. No photographic pixel reaches the screen. Look and its limits:
-  `docs/reference/painted-planets.md` and `docs/reference/cartoon-art-direction.md`.
-- `js/toon.js` (117 lines) — the cel shading itself: `toon()` materials on a quantising ramp
-  (`RAMP_EARTH` is four texels with the top two equal, so its steps sit at N·L = −0.5, 0, +0.5 — out by
-  the terminator; three samples the ramp at `dotNL · 0.5 + 0.5`, see `agents.md`), `PALETTE`, and
-  `outline()` for the single dark edge on hardware.
-- `js/saturn.js` (214 lines) — the Saturn V as drawn hardware: three stage groups in the real paint
-  scheme, engine fairings and fins, contoured bells, the launch escape system, and the command
-  module as its own group so it can fly on alone.
-- `js/vehicle.js` (210 lines) — what the hardware does: the pose each frame, staging and debris, and
-  the call that turns a burning stage into fire and smoke.
-- `js/flame.js` (214 lines) — the drawn flames: one shader-shaped mesh per stage with hard tone bands,
-  shock diamonds in thick air, a wide translucent bell in thin air, an engine-by-engine start-up.
-- `js/exhaust-pool.js`, `exhaust-emit.js`, `exhaust-sim.js`, `exhaust-draw.js` (148, 312, 491, 254 lines) —
-  the particle field: the pool, where parcels are born (nozzles, smoke trail, ignition steam, lunar
-  dust), how they move (drag, the trench, the hull), and how they are drawn (opaque shaded puffs).
-- `js/chutes.js` (70 lines) — the command module's parachutes as drawn hardware: two drogues, then
-  three orange-and-white mains, inflated by the state `js/physics.js` publishes.
-- `js/vehicle.js` (1374 lines) — what the hardware does: the pose each frame, the flames' size and
-- `js/pad.js` (202 lines) — Launch Complex 39: mobile launcher with a real flame opening, the red
-  umbilical tower with swing arms and crane, propellant farm, floodlights, and the site it stands on —
-  hardstand, flame trench, crawlerway, perimeter road, water tower. Static geometry is merged
-  into nine meshes.
-- `js/halfres.js` (103 lines) — the half-resolution pass the weather and the exhaust are drawn in, with
-  the exhaust behind its own depth prepass, the weather cut by the hardware at full resolution.
+- `js/colliders.js` (72 lines) — what the vehicle can run into at the launch complex: the one table of pad
+  solids (tower, crane, service masts, lightning masts, tank farm, water tower) and the swing arms,
+  which `js/pad.js` also draws from, so what is drawn and what is solid cannot drift apart.
+  Display-free; the headless tool flies through it.
+- `js/constants.js` (134 lines) — every physical constant: `RE`/`MU_E`, `RM`/`MU_M`/`SOI_M`,
+  `MOON_DIST`, Earth spin, LC-39 position, the exponential-atmosphere parameters, `SPECS` (stage
+  dry/fuel/thrust/Isp), `LAND_SAFE` (0.032 km/s), `SAFE_EARTH` (0.012 km/s), `WARPS`, `DTPHYS`, the
+  SAS pitch program `TURN`, `TLI_LEAD` (how far the Moon leads the ship when the certified flight
+  lights its injection burn — 2.7742 rad, the cue the `NEXT` line counts down to),
+  and `MOON_PHASE0` — the solved launch window (the Moon's angle along its orbit at MET 0 for which
+  a TLI at the first perigee after insertion arrives at the Moon).
+- `js/targeting.js` (119 lines) — the predicted lunar aim: propagates the live state forward through
+  `gravityAt` at the game's own 0.1 s step and publishes the closest lunar approach, incrementally
+  (a fixed step budget per frame) and only re-seeding after thrust, past the predicted encounter, or
+  when the result goes stale. Run headless from the recorded coast-start state it reproduces the
+  certified flights' periselene to about 1 km (476.5 / 345.7 / 217.0 km against the tool's
+  477 / 346 / 218), which means it predicts what this game will do rather than the converged two-body
+  answer.
 - `js/predictor.js` (276 lines) — where the vehicle is going. Integrates the path five times a second,
   draws it every frame from the ship's current position: it starts a short gap ahead of the ship, fades
   in, dims with time ahead, and stops after one lap of a closed orbit. Places the `Ap`/`Pe` markers
   on the path and raises the impact warning.
-- `js/ribbon.js` (213 lines) — a polyline as a screen-space ribbon (a 2 px feathered core under a 9 px
-  additive halo, per-point colour and opacity) rather than a thin `Line`, so it stays legible against
-  both the planet and black space.
-- `js/hud.js` (318 lines) — telemetry, stage fuel pips, throttle gauge, logs, the `NEXT` line (what
-  to do now and the key that does it, derived from the live state — including the braking deadline
-  on the way down to the Moon and the parachute calls on the way home), the end overlay and the
-  landing debrief with its stars and score.
-- `js/mapview.js` (112 lines) — what the map adds to the scene: a marker for the ship, a name on each
-  body, the Moon's orbit and its sphere of influence, the whole coast path, and where the Moon will
-  be at closest approach. The map itself
-  is the real scene seen from the map camera; the old 2-D canvas map is gone.
-- `js/navball.js` (498 lines) — the KSP-style attitude ball: an orthographic view of the sky from
-  the nose, prograde/retrograde markers, apsis markers, the Moon as a target.
-- `js/camera.js` (428 lines) — orbit and chase cameras and the map camera; drag, wheel, arrow-key and
+
+### Vehicle and exhaust
+
+- `js/saturn.js` (220 lines) — the Saturn V as drawn hardware: three stage groups in the real paint scheme,
+  engine fairings and fins, contoured bells, the launch escape system, and the command module as its
+  own group so it can fly on alone.
+- `js/chutes.js` (70 lines) — the command module's parachutes as drawn hardware: two drogues, then three
+  orange-and-white mains, inflated by the state `js/physics.js` publishes.
+- `js/vehicle.js` (210 lines) — the conductor: the hardware's pose each frame, staging and the debris it
+  leaves (dropped stages stop at the ground), and the one call that turns a burning stage into fire
+  and smoke.
+- `js/flame.js` (214 lines) — the drawn flames: one shader-shaped mesh per stage with hard tone bands, nearly
+  opaque at sea level and a translucent veil in vacuum.
+- `js/exhaust-pool.js` (148 lines) — the fixed pool of gas parcels and the `spawnParticle` contract.
+- `js/exhaust-emit.js` (322 lines) — where parcels are born: nozzles, the smoke trail, ignition steam, lunar dust.
+- `js/exhaust-sim.js` (491 lines) — how they move: drag from the same `airDensity` the vehicle flies in, the
+  flame trench, the hull.
+- `js/exhaust-draw.js` (308 lines) — how they are drawn: opaque three-tone puffs that write their own depth,
+  and a shadow-casting pass so the smoke column shades the ground.
+
+### Worlds
+
+- `js/world.js` (645 lines) — Earth, Moon, sky, starfield, the sun and its shadow camera, the launch pad welded
+  to the rotating planet; mounts the weather and the ground shaders. Exposes the terrain queries
+  `groundHeight`, `moonGroundHeight` and `fineGroundHeight` (km above the reference sphere) and
+  `padMatrix()`.
+- `js/terrain.js` (215 lines) — the near level: one streamed mesh per body that re-centres on the vehicle,
+  metres of spacing under the craft and a rim at ±220 km. Shape only; colour is drawn per fragment.
+- `js/surface.js` (288 lines), `js/surface-earth.js` (181 lines), `js/surface-moon.js` (120 lines) — the ground, drawn per
+  fragment from smooth data fields thresholded into flat tones with sharp edges at every zoom; the
+  same function on the globe and the near patch.
+- `js/earthpaint.js` (367 lines), `js/moonpaint.js` (276 lines), `js/paintkit.js` (314 lines) — the paint jobs that turn the
+  shipped satellite sheets into those fields (land mask, biomes, relief, coast distance, 560 lunar
+  craters), and their deterministic tool kit. No photographic pixel reaches the screen.
+- `js/toonmap.js` (142 lines) — the registry that hands the paint products out. `js/textures.js` (97 lines) — asset
+  loading and the shared sheets. `js/palette.js` (35 lines) — the two palettes the painters and ground
+  shaders share.
+- `js/padsite.js` (203 lines) — the authored launch site: relief held at exactly zero round the pad, and the
+  Merritt Island shore.
+- `js/pad.js` (225 lines) — Launch Complex 39 as drawn: mobile launcher with a real flame opening, the red
+  umbilical tower, swing arms that retract at ignition, crane, propellant farm, floodlights,
+  hardstand, flame trench, crawlerway, water tower.
+- `js/clouds.js` (645 lines), `js/cloudfields.js` (274 lines) — the weather: one shell from 4 to 11 km round the planet,
+  drawn as opaque cel-shaded shapes where one scalar field exceeds one threshold; the second file
+  is the field's data. Details: `docs/reference/painted-planets.md`.
+- `js/haze.js` (64 lines) — aerial perspective for the ground: one law in true distance on both the near
+  patch and the globe, so they agree at the patch's rim.
+
+### Rendering and interface
+
+- `js/main.js` (210 lines) — renderer bootstrap, keyboard input, the render loop (warp → substeps, pause),
+  and the `window.game` debug handle.
+- `js/origin.js` (29 lines) — the floating origin: each frame the scene is shifted by minus the camera's
+  position, so every matrix the GPU sees is eye-relative. Without it 32-bit floats step 0.49 m at
+  the Earth's radius and every shadow edge on the pad crawled.
+- `js/camera.js` (435 lines) — orbit and chase cameras and the map camera; drag, wheel, arrow-key and
   − / = input. Orbit is the default: the camera circles the ship on a heading carried along with it,
   never taken from the nose or the velocity, so the view moves only when you move it and nothing
   eases it "home" on a timer (double-click re-centres). Chase sits behind the flight path — heading
@@ -182,31 +223,24 @@ Repo-wide convention (see `docs/reference/README.md`): **km, s, tonnes, kN**.
   Moon — twice per frame because a chord between two legal points can pass through a body, and in
   three rounds each time because one push-out can land inside another solid
   (`tools/clip-test.mjs` sweeps it).
-- `js/main.js` (183 lines) — renderer bootstrap, keyboard input, the render loop (warp → substeps),
-  camera cycling, and the `window.game` debug handle.
-- `js/targeting.js` (111 lines) — the predicted lunar aim: propagates the live state forward through
-  `gravityAt` at the game's own 0.1 s step and publishes the closest lunar approach, incrementally
-  (a fixed step budget per frame) and only re-seeding after thrust, past the predicted encounter, or
-  when the result goes stale. Run headless from the recorded coast-start state it reproduces the
-  certified flights' periselene to about 1 km (476.5 / 345.7 / 217.0 km against the tool's
-  477 / 346 / 218), which means it predicts what this game will do rather than the converged two-body
-  answer.
-- `js/constants.js` (125 lines) — every physical constant: `RE`/`MU_E`, `RM`/`MU_M`/`SOI_M`,
-  `MOON_DIST`, Earth spin, LC-39 position, the exponential-atmosphere parameters, `SPECS` (stage
-  dry/fuel/thrust/Isp), `LAND_SAFE` (0.032 km/s), `SAFE_EARTH` (0.012 km/s), `WARPS`, `DTPHYS`, the SAS pitch program `TURN`,
-  and `MOON_PHASE0` — the solved launch window (the Moon's angle along its orbit at MET 0 for which
-  a TLI at the first perigee after insertion arrives at the Moon).
-- `js/textures.js` (232 lines) — the generated sheets: the weather's macro fields (zonal cumulus cover and cirrus veil) and the shared glow
-  sprite, deterministic so the weather is the same every run. The photographic diffuse/normal/specular maps
-  under `assets/` are inputs to the painter in `js/toonmap.js` (mask and biome signal); the normal
-  map is no longer bound to any surface, per `docs/reference/cartoon-art-direction.md`.
-- `js/clouds.js` (443 lines) — the weather: one shell from 4 to 11 km around the whole planet, its
-  opacity marched through the view ray as optical depth. The macro sheet sets coverage, a tileable rank
-  lattice at 0.31 km per texel gives the cells their shape, and two drifting copies of it make them
-  build and dissolve. The same march, aimed up the sun ray, is injected into the globe and the near
-  patch as ground shade. Details and measurements: `docs/reference/painted-planets.md`.
-- `js/haze.js` (62 lines) — aerial perspective for the ground: one exp² law in true distance, injected
-  into both the near patch and the globe so they agree at the patch's rim.
+- `js/mapview.js` (116 lines) — what the map adds to the scene: a marker for the ship, a name on each
+  body, the Moon's orbit and its sphere of influence, the whole coast path, and where the Moon will
+  be at closest approach. The map itself
+  is the real scene seen from the map camera; the old 2-D canvas map is gone.
+- `js/hud.js` (344 lines) — telemetry, stage fuel pips, throttle gauge, logs, the `NEXT` line (what
+  to do now and the key that does it, derived from the live state — including the braking deadline
+  on the way down to the Moon and the parachute calls on the way home), the end overlay and the
+  landing debrief with its stars and score.
+- `js/navball.js` (499 lines) — the KSP-style attitude ball: an orthographic view of the sky from
+  the nose, prograde/retrograde markers, apsis markers, the Moon as a target.
+- `js/ribbon.js` (213 lines) — a polyline as a screen-space ribbon (a 2 px feathered core under a 9 px
+  additive halo, per-point colour and opacity) rather than a thin `Line`, so it stays legible against
+  both the planet and black space.
+- `js/toon.js` (117 lines) — the cel shading itself: `toon()` materials on a quantising ramp (`RAMP_EARTH` is
+  four texels with the top two equal, so its steps sit at N·L = −0.5, 0, +0.5 — out by the
+  terminator; three samples the ramp at `dotNL · 0.5 + 0.5`, see `agents.md`) and `outline()` for
+  the single dark edge on hardware.
+- `js/halfres.js` (103 lines) — the half-resolution passes that fill-rate-bound translucent layers are drawn in.
 - `js/audio.js` (62 lines) — engine and impact audio, gated on first keypress as browsers require.
 
 `window.game` is the debugging/test handle wired in `js/main.js`: `state()` returns a full readback
@@ -269,13 +303,25 @@ braking deadline: stopping from the current speed at full thrust takes v²/2(a �
 says `BRAKE NOW` when the height in hand falls under 1.15 times that.
 
 Bringing the command module home is the other ending. With every stage dropped (X on the CSM) the
-capsule flies alone and settles heat shield first by itself; anything still wearing a stage, or a
-capsule that meets the heat apex-first, is `BURNED UP`. Press G for the drogues once the air has
-slowed you under 20 kPa of dynamic pressure and again for the mains under 4 kPa — earlier and the
-airstream tears them off. Measured headless from a 7.8 km/s entry at −1.5°: 7.2 g and 59 kPa at
-41 km, then 7.8 m/s under the mains against the 12 m/s limit; 114 m/s with no parachutes, 61 m/s on
-drogues alone. At lunar return speed (11 km/s) −6.5° lands after 14.4 g and −5° skips back out to
-space. A splashdown is one star, two if the flight passed through the Moon's sphere of influence
+capsule flies alone. From orbital speed it settles heat shield first by itself; from lunar return
+speed it does not have time, so hold retrograde before the air arrives. Anything still wearing a
+stage, or a capsule that meets the heat apex-first, is `BURNED UP`. More than 16 g for 2 s is
+`ENTRY TOO STEEP`. Press G for the drogues and again for the mains; a canopy is lost if it is opened
+above its dynamic pressure (20 kPa drogues, 4 kPa mains), above its Mach number (1.5 and 0.5), or
+in entry heat. Under a canopy SAS and attitude hold are ignored — the canopy steers. Measured
+headless from 122 km, drogues at 7.3 km and mains at 3 km:
+
+| entry | result |
+| --- | --- |
+| 7.8 km/s, −1.5° | 7.2 g, 59 kPa, splashdown at 7.8 m/s (limit 12) |
+| 7.8 km/s, −6° | 14.7 g, splashdown |
+| 7.8 km/s, −7° | `ENTRY TOO STEEP` (16.6 g) |
+| 11 km/s, −5° | skips back out to space |
+| 11 km/s, −5.5° / −6° / −6.5° | 5.6 / 10.0 / 14.4 g, splashdown |
+| 11 km/s, −7° | `ENTRY TOO STEEP` (16.8 g) |
+| no parachutes / drogues only | 114 m/s / 61 m/s |
+
+So the corridor home from the Moon is about a degree wide. A splashdown is one star, two if the flight passed through the Moon's sphere of influence
 first; three stars need the Moon. Details: `docs/reference/mission-design.md`.
 
 ## Known gaps
@@ -285,8 +331,10 @@ first; three stars need the Moon. Details: `docs/reference/mission-design.md`.
   346 km on the shipped window, against the simulation's 346 km — but it answers "how hard will the
   encounter be", not "where will I touch down", and it needs 865 frames of its step budget to finish
   after each manoeuvre (counted headless; about 14 s at 60 fps, not re-timed in a browser). It is
-  green between 140 and 600 km. That band is conservative, not exact: every measured flight inside
-  it landed, and so did three outside it (123, 610 and 745 km); below, 110 km and 91 km are lost.
+  green between 125 and 745 km, the measured edges of the band the tool's autopilot lands from
+  (123 km still landed and reads red by 3 km; 110 km and 91 km are lost). Below 420 km the
+  prediction includes drag — its source records a coast from a 150 km perigee whose lunar pass
+  moved 227 km once drag was counted.
   Nothing marks the launch window itself; the player finds it by waiting and warping.
 - **The Moon is a parametric circular orbit**, not an ephemeris: fixed 384 400 km radius, sidereal
   rate `MOON_RATE`, fixed 28.5° inclination, no eccentricity, no node regression.
@@ -295,7 +343,7 @@ first; three stars need the Moon. Details: `docs/reference/mission-design.md`.
   coarse: textbook-order coefficients rather than wind-tunnel data, body lift lumped at the planform
   centroid — which makes this vehicle statically stable where the real Saturn V was not and flew on
   engine gimbal. Heating is a threshold on a proxy (√ρ·v³), not a thermal model, and the capsule's
-  entry is ballistic: no lift to steer with, and nothing limits g. The one structural load is the
+  entry is ballistic: no lift to steer with, which is why its corridor is a degree wide. The one structural load is the
   lateral aerodynamic limit.
 - **The headless tool lands on the datum sphere.** In the browser contact is against the drawn
   relief (`groundHeight` / `moonGroundHeight`); `tools/mission-sim.mjs` injects no terrain, so its
@@ -303,6 +351,11 @@ first; three stars need the Moon. Details: `docs/reference/mission-design.md`.
 - **No way home from the surface.** A landed mission ends at touchdown: there is no lunar ascent
   stage and no TEI in the game. Re-entry and splashdown exist for flights that never landed — from
   Earth orbit, or round the Moon and back.
+
+- **Terrain under the vehicle can lag the planet by a frame.** Contact height is read through the
+  planet mesh's drawn rotation, which is updated once per rendered frame; at high warp the physics
+  substeps inside that frame see the terrain where it was drawn. Found in code review, not
+  measured, and not fixed. It cannot affect the headless tool, which has no terrain.
 
 ## Reference docs
 
@@ -316,3 +369,7 @@ note:
   staging Δv accounting, gravity loss.
 - `spacecraft.md` — Saturn V stage masses, F-1/J-2/DPS/SPS engines, propellants, the Apollo 11
   spacecraft stack.
+
+## Licence
+
+MIT — see `LICENSE`.

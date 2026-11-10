@@ -172,8 +172,8 @@ shipped configuration at eleven phases:
 
 | phase rad | periselene | outcome | touchdown | spare | Δv spent | aim readout |
 | --- | --- | --- | --- | --- | --- | --- |
-| 4.9157044 (−3e-3) | 745 km | WON | 2.8 m/s | 6.6 t | 16,341 m/s | 744 km, red |
-| 4.9167044 (−2e-3) | 610 km | WON | 2.6 m/s | 6.8 t | 16,321 m/s | red |
+| 4.9157044 (−3e-3) | 745 km | WON | 2.8 m/s | 6.6 t | 16,341 m/s | 744 km, green |
+| 4.9167044 (−2e-3) | 610 km | WON | 2.6 m/s | 6.8 t | 16,321 m/s | green |
 | 4.9177044 (−1e-3) | 477 km | WON | 2.8 m/s | 7.0 t | 16,298 m/s | 477 km, green |
 | 4.9182044 (−0.5e-3) | 412 km | WON | 3.0 m/s | 7.1 t | 16,287 m/s | green |
 | **4.9187044 (shipped)** | **346 km** | **WON** | **3.3 m/s** | **7.2 t** | **16,274 m/s** | **346 km, green** |
@@ -185,7 +185,7 @@ shipped configuration at eleven phases:
 | 4.9207044 (+2e-3) | 91 km | **LOST** | 71 m/s | 0.4 t | 17,160 m/s | 91 km, red |
 
 (The aim column is `js/targeting.js` run headless from the coast-start state where a number is
-given, and `CORRIDOR`'s 140–600 km test applied to the tool's periselene where it is not.)
+given, and `CORRIDOR`'s 125–745 km test applied to the tool's periselene where it is not.)
 
 So about **130 km of periselene per 1e-3 rad** (1e-3 rad is 376 s of lunar motion at
 `MOON_RATE = 2.6617e-6` rad/s), and the band is still **a slope on one side and a cliff on the
@@ -207,10 +207,13 @@ anyone has measured. Two consequences for the game:
   the integrator uses and the orbit panel shows it as `<km> km in <hh:mm:ss>`. From the shipped
   coast-start state the module's values are 345.7 km and MET 295,660.3 s, which the HUD's own
   formatting renders as `346 km in 80:50:12` (run headless; the string on screen has not been
-  read in a browser at this window). It is painted green inside `CORRIDOR = { lo: 140, hi: 600 }`
-  km. Against the table above the green band is conservative at both ends rather than wrong: every
-  flight inside it landed, and three flights outside it landed too (610 and 745 km above, 123 km
-  below). Red means "nobody has landed from here with margin", not "you will crash".
+  read in a browser at this window). It is painted green inside `CORRIDOR = { lo: 125, hi: 745 }`
+  km — the measured edges of the table above. Every flight inside it landed; the 123 km flight
+  landed too and reads red, because the module puts it at 122.0 km. Above 745 km nothing has been
+  flown, so red there means "unmeasured", not "you will crash". Below 420 km the prediction now
+  includes nose-on drag (`coastDrag`), so an aim read while still in a low parking orbit is no
+  longer blind to the air; from the shipped coast start (888 km up) it changes nothing, and the
+  numbers below were re-run to confirm that.
   The module runs incrementally — a fixed step budget per frame, 865 `updateAim()` calls from coast
   start to `done` — and it re-seeds only when the engine has pushed the vehicle, when the predicted
   encounter has passed, or when the result has gone stale, because a coast does not change the
@@ -317,6 +320,47 @@ PDI — against Apollo's derived 2,300 m/s for deorbit plus powered descent (PDI
 gravity losses). PDI sits at 70 km here rather than Apollo's 11.9 km / 1,696 m/s,
 because the envelope above needs path, not because it is more realistic.
 
+## Leaving the pad
+
+The launch complex is solid (`js/colliders.js`: one table of boxes in the pad's frame, which
+`js/pad.js` also draws the swing arms from). The vehicle is tested against it as a run of spheres
+along its axis from the moment the hold-down lets go, and contact with anything ends the flight —
+`COLLISION WITH THE LAUNCH TOWER`, `A SWING ARM`, `THE TOWER CRANE` and so on. The swing arms begin
+to retract at ignition and take `ARM_TIME = 1.5 s`; they are solid until 60 % of the way round,
+0.9 s. That is short on purpose and the source says why: this vehicle leaves the pad the instant it
+is lit, where Apollo's arms took 2–5 s against a vehicle held down for 8.9 s first (Apollo's
+numbers, from that comment, not fetched into `docs/reference/`).
+
+Measured headless (a script on the shipped modules):
+
+| what was flown | result |
+| --- | --- |
+| SPACE then SAS (P) | clears: 1.6 m up when the arms stop being solid at 0.9 s, 4.4 m up when they are home at 1.5 s; `LIFTOFF — THE TOWER CLEARS` at 8.9 s |
+| SAS off, yaw (A or D) held from ignition | `COLLISION WITH A SWING ARM` at 0.8 s, 3 m/s |
+| SAS off, pitch (W or S) held from ignition | tips over and falls back: `IMPACT WITH EARTH AT 142 m/s` at 13.9 s |
+| SAS off, any axis held from T+3 s or T+6 s | clears the steel, then `IMPACT WITH EARTH` at 176–204 m/s, 19–24 s after ignition |
+
+The third row used to be a tunnel: a stack that let go and came back down stayed in the `pad`
+state, which tests no ground, and went two kilometres into the Earth. Dropping back below the pad
+now starts the flight and its ground test.
+
+The pitch program runs on time **since the hold-down let go**, not on the mission clock. It has to:
+waiting on the pad is how a player moves the launch window, and on the mission clock a late launch
+was already "past" its vertical hold and tipped into the swing arms. Measured — wait, then SPACE
+and P, state at S-2 burnout 422.1 s after ignition:
+
+| wait on the pad | speed | apogee | max-Q | peak side load |
+| --- | --- | --- | --- | --- |
+| 0 s | 6.4162 km/s | 584 km | 25.4 kPa | 0.024 g |
+| 120 s | 6.4163 km/s | 584 km | 25.4 kPa | 0.024 g |
+| 300 s | 6.4163 km/s | 584 km | 25.4 kPa | 0.024 g |
+| 3,600 s | 6.4135 km/s | 584 km | 25.4 kPa | 0.024 g |
+
+(The hour-long wait differs in the fourth figure — the Moon has moved 0.55° by then, which is the
+likely cause, not a measured one; the ascent is the same ascent.) Other things the same review fixed, read from the code rather than measured:
+SPACE on a liquid stage now zeroes the throttle as well as cutting the engine, so the next step
+does not relight it; CTRL cannot throttle the solid; and a substep is never longer than `DTPHYS`.
+
 ## Coming home
 
 Drop every stage (X on the CSM) and what is left is the 10 t command module, flying alone. It has
@@ -331,8 +375,10 @@ What `js/physics.js` models (its comment block is the source of truth):
 | --- | --- | --- |
 | heat | proxy `sqrt(ρ)·v³` (kg/m³, km/s). Above `HEAT_SHIELD` the vehicle cooks unless it is a bare capsule flying apex-trailing (nose within ~53° of retrograde to the airflow); `HEAT_TIME` of cooking is `BURNED UP` | `HEAT_SHIELD = 4`, `HEAT_TIME = 3 s`; evaluated below 150 km |
 | attitude | the bare capsule gets a small normal-force area at its apex, ahead of the centre of mass, so it is statically stable heat-shield-first and turns round by itself | 3 m² at the apex station |
-| drogues | first press of G; plain `C_d·A` drag, 2.5 s to inflate; a deploy above the tear pressure rips them off, as does 1.4× of it once open | 30 m², tear 20 kPa |
-| mains | second press of G; same rules | 2,300 m², tear 4 kPa |
+| drogues | first press of G; plain `C_d·A` drag, 2.5 s to inflate. Lost if deployed above the tear pressure, above the Mach limit, or with the heat proxy over 0.5; lost once open at 1.4× the tear pressure | 30 m², tear 20 kPa, Mach 1.5 |
+| mains | second press of G; same rules | 2,300 m², tear 4 kPa, Mach 0.5 |
+| crew | felt acceleration (air on the hull plus the canopy's pull) over `G_LIMIT` for `G_TIME` is `ENTRY TOO STEEP` | 16 g, 2 s |
+| control | under an open canopy with q > 5 Pa, SAS and attitude hold are ignored: the canopy hauls the apex round to trail. Retrograde SAS below 120 km steers by ground-relative velocity, and holds the local vertical under 10 m/s | — |
 | canopy drag | solved implicitly per step (`v/(1 + k·v·dt)`), because a 0.1 s explicit step overshoots through zero under the mains | — |
 | splashdown | Earth contact, capsule alone, `groundVel ≤ SAFE_EARTH` | 12 m/s |
 
@@ -344,12 +390,23 @@ nominal deployment heights (Apollo's numbers, not fetched into `docs/reference/`
 | entry at 122 km | peak g | peak q | peak heat | outcome |
 | --- | --- | --- | --- | --- |
 | 7.8 km/s, −1.5° | 7.2 g at 40.6 km | 59.2 kPa | 8.9 | **splashdown 7.8 m/s**, 859 s after interface |
+| 7.8 km/s, −3° | 8.9 g | 73.3 kPa | 11.3 | splashdown 7.8 m/s |
 | 7.8 km/s, −6° | 14.7 g at 38.8 km | 120.9 kPa | 15.4 | splashdown 7.8 m/s |
+| 7.8 km/s, −7° | 16.6 g | 136.1 kPa | 16.6 | **`ENTRY TOO STEEP`**, 90 s after interface |
+| 7.8 km/s, −8° / −10° | 17.4 / 18.6 g | 142.7 / 153.0 kPa | 17.7 / 19.8 | `ENTRY TOO STEEP` |
+| 11 km/s, −3° / −4° | — / 0.2 g | 0.3 / 1.7 kPa | 2.9 / 6.6 | **skips out** at 10.90 / 10.77 km/s |
+| 11 km/s, −5° | 1.7 g at 71 km | 13.7 kPa | 16.7 | skips out, leaving at 9.49 km/s |
+| 11 km/s, −5.5° | 5.6 g at 39.0 km | 45.6 kPa | 23.8 | splashdown 7.8 m/s |
+| 11 km/s, −6° | 10.0 g at 49.9 km | 82.2 kPa | 29.5 | splashdown 7.8 m/s |
 | 11 km/s, −6.5° | 14.4 g at 46.2 km | 118.5 kPa | 33.7 | splashdown 7.8 m/s |
-| 11 km/s, −5° | 1.7 g at 71 km | 13.7 kPa | 16.7 | **skips out**, leaving at 9.49 km/s |
-| 11 km/s, −4° / −3° | 0.2 g / — | 1.7 / 0.3 kPa | 6.6 / 2.9 | skips out at 10.77 / 10.90 km/s |
+| 11 km/s, −7° | 16.8 g | 138.2 kPa | 37.2 | `ENTRY TOO STEEP`, 76 s after interface |
+| 11 km/s, −7.5° / −8° | 17.6 / 18.3 g | 144.2 / 149.9 kPa | 40.1 / 42.7 | `ENTRY TOO STEEP` |
 
-In the first three the chutes went out at the same state every time, because by 7.3 km the capsule
+**The corridor home from the Moon is about one degree wide** — −5° skips, −5.5° to −6.5° land,
+−7° kills the crew — and from low orbit anything from −1.5° to −6° lands. The 5.6 g at −5.5° is the
+entry's; that flight's largest load was 6.6 g when the mains opened at 3 km.
+
+In every flight that landed the chutes went out at the same state, because by 7.3 km the capsule
 is at terminal velocity whatever it arrived at: drogues at 9.0 kPa and 186 m/s, mains at 2.3 kPa
 and 73 m/s. What happens when the sequence is flown wrong, all from the 7.8 km/s, −1.5° entry:
 
@@ -357,14 +414,16 @@ and 73 m/s. What happens when the sequence is flown wrong, all from the 7.8 km/s
 | --- | --- |
 | no parachutes | `HARD LANDING`, 114 m/s |
 | drogues only | `HARD LANDING`, 61 m/s |
-| mains straight after the drogues, at 8.9 kPa | torn away (limit 4 kPa) → 114 m/s |
-| G at peak dynamic pressure, 56.5 kPa | torn away (limit 20 kPa) → 114 m/s |
+| mains straight after the drogues, at 8.9 kPa | lost (limit 4 kPa) → 114 m/s |
+| G at peak dynamic pressure, 56.5 kPa | drogues lost (limit 20 kPa) → 114 m/s |
+| G 60 s after interface: 110 km, 0.08 kPa, Mach 25 | drogues lost to the Mach limit → 114 m/s. Before that limit existed the same press put drogues out at 107 km and 10.5 km/s |
+| G at 27 km, Mach 3.9, 32.6 kPa | drogues lost (pressure) → 114 m/s |
+| drogues early but legal, at 20 km (10.8 kPa, 430 m/s) | fine: splashdown 7.8 m/s, 40 s later than nominal |
 | CSM still attached | `BURNED UP` 200 s after interface, at 80 km, heat 4.2 |
 | starts apex-first | turns round on its own before the heat arrives; splashdown 7.8 m/s |
 | starts apex-first **at 11 km/s, −6.5°** | `BURNED UP` 23 s after interface, at 95 km — the heat gets there before the capsule has come round |
 
-The corridor at lunar return speed is therefore narrow and its floor is not measured here: −6.5°
-lands and −5° skips. Apollo's entry was a *lifting* one — the real command module flew at an angle
+Apollo's entry was a *lifting* one — the real command module flew at an angle
 of attack and rolled its lift vector to hold the corridor and the load; this capsule cannot, which
 is why the game's entry g is what a ballistic body gets. The drawn mains are 17 m across against
 Apollo's 25 m (`js/chutes.js` says why: three of them and the capsule fit one frame); the 2,300 m²
@@ -392,8 +451,8 @@ calls `BRAKE NOW` when the height in hand falls below 1.15× that.
 - **No way home from the surface.** A landed mission ends at touchdown. Lunar ascent and TEI are
   not modelled, so the 18,092 m/s round-trip figure is a reference number, not a game target. The
   re-entry and splashdown that are modelled serve flights that never landed.
-- **Entry is ballistic and nothing limits g.** The capsule trims at zero angle of attack, so it has
-  no lift to steer with; the measured 14 g of a lunar-speed entry costs the player nothing.
+- **Entry is ballistic.** The capsule trims at zero angle of attack, so it has no lift to steer
+  with; that is why the lunar-return corridor is a degree wide and its survivable end is 14 g.
 - **The Moon is parametric** (`constants.js` `moonPos`/`moonVel`): a circular 384,400 km orbit in
   the launch plane at the sidereal rate. Real ephemerides would come from `astronomy-engine`; see
   [libraries.md](libraries.md) for why the integrator stays hand-written and what adopting it buys.
@@ -430,5 +489,5 @@ calls `BRAKE NOW` when the height in hand falls below 1.15× that.
 | Propellant margin | > 0 at touchdown | 7.2 t = 943 m/s unused | ✅ |
 | One-way budget | ≥ 15,142 m/s | 17,090 ideal / 16,274 spent | ✅ |
 | Survive the air | side load < 0.5 g | 0.024 g peak on the SAS ascent | ✅ |
-| Splash down a command module | < 12 m/s (`SAFE_EARTH`), capsule alone | 7.8 m/s under mains from 7.8 and 11 km/s entries | ✅ |
+| Splash down a command module | < 12 m/s (`SAFE_EARTH`), capsule alone, under 16 g | 7.8 m/s under mains from 7.8 km/s (−1.5° to −6°) and 11 km/s (−5.5° to −6.5°) | ✅ |
 | Return from the lunar surface | 18,092 m/s | not modelled | ❌ |
