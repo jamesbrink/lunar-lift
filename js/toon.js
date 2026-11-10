@@ -115,24 +115,3 @@ export function outline(mesh, scale = 1) {
   mesh.add(o);
   return o;
 }
-
-/* The drawn flame: a teardrop that leaves the bell at the bell's own width, swells a little and
-   tapers to a point. Its predecessor was a cone with its apex at the throat, widening aft to an
-   open mouth — a megaphone, and one per stage however many engines the stage had. Unit size: radius
-   1 at the root, length 1 along +y; the caller scales it per engine. Two tones, a saturated outer
-   and a pale core parented inside so scaling one scales both. */
-function flameGeo(seg) {
-  const prof = [[0.86, 0], [1.0, 0.07], [1.05, 0.18], [0.97, 0.36], [0.76, 0.58], [0.46, 0.79], [0.18, 0.93], [0, 1]];
-  return new THREE.LatheGeometry(prof.map(([r, y]) => new THREE.Vector2(r, y)), seg);
-}
-
-export function flameMeshes(parent, outerColour, coreColour) {
-  const mat = (color, opacity) => new THREE.MeshBasicMaterial({ color, transparent: true, opacity, blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide, fog: false });
-  const outer = new THREE.Mesh(flameGeo(20), mat(outerColour, 0.55));
-  const core = new THREE.Mesh(flameGeo(14), mat(coreColour, 0.9));
-  core.scale.set(0.55, 0.62, 0.55);
-  outer.add(core);
-  outer.castShadow = core.castShadow = false;
-  parent.add(outer);
-  return { outer, core };
-}

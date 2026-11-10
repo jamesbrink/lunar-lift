@@ -13,7 +13,7 @@ import { toon, outline, PALETTE } from './toon.js';
      the opening;
    - the opening is 20 × 16 u and everything within r 6 u of the axis above the deck is air — the
      first stage's fins sweep r 5.7 on the way up;
-   - the exhaust's analytic colliders (the trench bowl in js/vehicle.js) know nothing of this mesh.
+   - the exhaust's analytic colliders (the trench bowl in js/exhaust-sim.js) know nothing of this mesh.
 
    Scale is the point of the detail. A 110 m rocket on a bare slab reads as a model; the same rocket
    beside a tower with eleven floors, a handrail and a van reads as 110 m. So the small things here
