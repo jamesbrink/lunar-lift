@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import { airDensity, airVel, aeroForce, aeroState, ATMO_TOP, CN_BODY, machDrag, soundSpeed } from './aero.js';
 import { padHit, ARM_TIME } from './colliders.js';
 import { U_M, TAIL_Z, CM_TAIL_Z, NOSE_Z, R_STACK, R_CSM_AERO, R_CM_BASE, GEOM, FIN_AREA, FIN_Z } from './stations.js';
-import { RE, MU_E, RM, MU_M, SOI_M, PAD_UP, PAD_POS, PAD_ANGULAR, VS, CD_AREA, WARPS, WARP_ONE, LAND_SAFE, SAFE_EARTH, SPECS, CAPSULE_MASS, EARTH_SPIN, SPIN_AXIS, PAD_EAST, MOON_DIST, TURN, moonPos, moonVel } from './constants.js';
+import { G0, RE, MU_E, RM, MU_M, SOI_M, PAD_UP, PAD_POS, PAD_ANGULAR, VS, CD_AREA, WARPS, WARP_ONE, LAND_SAFE, SAFE_EARTH, SPECS, CAPSULE_MASS, EARTH_SPIN, SPIN_AXIS, PAD_EAST, MOON_DIST, TURN, moonPos, moonVel } from './constants.js';
 
 /* ---------------- injected dependencies (see initPhysics) ----------------
    hooks:      addLog(msg, cls), showEndOverlay(title, body, btn)
@@ -433,7 +433,7 @@ export function physStep(dt) {
     /* The vehicle is welded to LC-39, and LC-39 is a child of the spinning Earth mesh.
        While hold-down clamps the rocket it must ride the planet's rotation, otherwise the
        pad sweeps out from under it and the vehicle visibly slides off the mount. */
-    if (i < 0 || !burning || SPECS[i].thrust * throttle / totalMass() <= 9.81) {
+    if (i < 0 || !burning || SPECS[i].thrust * throttle / totalMass() <= G0) {
       _spinQ.setFromAxisAngle(SPIN_AXIS, EARTH_SPIN * dt);
       S.pos.applyQuaternion(_spinQ);
       S.q.premultiply(_spinQ);
@@ -445,7 +445,7 @@ export function physStep(dt) {
   if (tRelease === null) tRelease = simTime - dt;
   if (burning) {
     const sp = SPECS[i];
-    stages[i].fuel = Math.max(0, stages[i].fuel - sp.thrust * throttle / (sp.isp * 9.81) * dt);   // t/s
+    stages[i].fuel = Math.max(0, stages[i].fuel - sp.thrust * throttle / (sp.isp * G0) * dt);   // t/s
     thrustAcc = fwd().multiplyScalar(sp.thrust * throttle / totalMass() / 1000);                  // km/s²
     if (stages[i].fuel === 0 && !loggedStageOut[i]) {
       loggedStageOut[i] = true; engineOn = false; targetThrottle = 0;
@@ -479,7 +479,7 @@ export function physStep(dt) {
       }
     }
     /* Felt acceleration: everything but gravity. Air on the hull plus the canopy's pull. */
-    gLoad = (_aero.length() / mass + Math.abs(sp - vr.length()) / dt) * 1000 / 9.81;
+    gLoad = (_aero.length() / mass + Math.abs(sp - vr.length()) / dt) * 1000 / G0;
     gOver = gLoad > G_LIMIT ? gOver + dt : Math.max(0, gOver - dt);
     if (gOver >= G_TIME && state === 'flying' && !thrustAcc) { S.pos.addScaledVector(S.v, dt); return crushed(); }
     heat = Math.sqrt(rho) * sp * sp * sp;
@@ -573,7 +573,7 @@ export function physStep(dt) {
     omega.y *= Math.max(0, 1 - damp * dt);
     /* Bending. The normal force is carried by the airframe as a side load; a stack is a thin tank
        wall and a bare CSM is not. */
-    aeroLoad = (aeroState.nBody + aeroState.nFin) * 1000 / mass / 9.81;   // lateral g
+    aeroLoad = (aeroState.nBody + aeroState.nFin) * 1000 / mass / G0;   // lateral g
     const limit = i === 2 || i < 0 ? LOAD_LIMIT_CSM : LOAD_LIMIT_STACK;
     if (state === 'flying' && overstressed(aeroLoad, limit, dt)) return breakup();
   } else { aeroLoad = 0; strain = Math.max(0, strain - 0.5 * dt); }

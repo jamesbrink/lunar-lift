@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { SPECS, VS, RE, RM, moonPos } from './constants.js';
+import { G0, SPECS, VS, RE, RM, moonPos } from './constants.js';
 import { airDensity, getSimTime } from './physics.js';
 import { airVel } from './aero.js';
 import { TAIL_Z, R_S1_SKIRT, R_STACK, R_IU } from './stations.js';
@@ -33,7 +33,7 @@ function bellA(x, y, z, dx, dy, dz, rb, th) {
   return { x, y, z, dx, dy, dz, rb, th, u1x: _bb.x, u1y: _bb.y, u1z: _bb.z, u2x: _ba.x, u2y: _ba.y, u2z: _ba.z };
 }
 export const BELL_SETS = [
-  { ve: SPECS[0].isp * 9.81 / 1000, rate: 620, pal: 0, trail: 60, tailZ: TAIL_Z[0], hullR: R_S1_SKIRT, bells: (() => {
+  { ve: SPECS[0].isp * G0 / 1000, rate: 620, pal: 0, trail: 60, tailZ: TAIL_Z[0], hullR: R_S1_SKIRT, bells: (() => {
       const a = [bellA(0, 0, TAIL_Z[0], 0, 0, -1, 1.19, 0.28)];
       for (let i = 0; i < 4; i++) {
         const an = i * Math.PI / 2 + Math.PI / 4, c = Math.cos(an), s = Math.sin(an);
@@ -43,14 +43,14 @@ export const BELL_SETS = [
                      c * Math.sin(0.1), s * Math.sin(0.1), -Math.cos(0.1), 1.15, 0.28));
       }
       return a; })() },
-  { ve: SPECS[1].isp * 9.81 / 1000, rate: 320, pal: 1, trail: 0, tailZ: TAIL_Z[1], hullR: R_STACK, bells: (() => {
+  { ve: SPECS[1].isp * G0 / 1000, rate: 320, pal: 1, trail: 0, tailZ: TAIL_Z[1], hullR: R_STACK, bells: (() => {
       const a = [bellA(0, 0, TAIL_Z[1], 0, 0, -1, 0.72, 0.21)];
       for (let i = 0; i < 4; i++) {
         const an = i * Math.PI / 2 + Math.PI / 4, c = Math.cos(an), s = Math.sin(an);
         a.push(bellA(c * 1.44, s * 1.44, TAIL_Z[1], 0, 0, -1, 0.70, 0.21));
       }
       return a; })() },
-  { ve: SPECS[2].isp * 9.81 / 1000, rate: 240, pal: 1, trail: 0, tailZ: TAIL_Z[2], hullR: R_IU, bells: [bellA(0, 0, TAIL_Z[2], 0, 0, -1, 0.85, 0.30)] },
+  { ve: SPECS[2].isp * G0 / 1000, rate: 240, pal: 1, trail: 0, tailZ: TAIL_Z[2], hullR: R_IU, bells: [bellA(0, 0, TAIL_Z[2], 0, 0, -1, 0.85, 0.30)] },
 ];
 
 /* Emission bookkeeping. `rate` is parcels/s at full throttle — rendering resolution, not mass flow

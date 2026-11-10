@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { RE, RM, SOI_M, VS, SPECS, moonPos } from './constants.js';
+import { G0, RE, RM, SOI_M, VS, SPECS, moonPos } from './constants.js';
 import { S, getSimTime, getEngineOn, getThrottle, activeStage, totalMass, fwd, gravityAt, surfaceAlt, tailStation, getChute, coastDrag } from './physics.js';
 import { stages } from './saturn.js';
 import { ribbon } from './ribbon.js';
@@ -150,7 +150,7 @@ export function predict() {
     gravityAt(p, _g, t);
     coastDrag(_g, p, v, mass);            // the same nose-on, air-relative drag targeting uses (js/physics.js)
     if (sp && fuel > 0) {
-      fuel = Math.max(0, fuel - sp.thrust * throttle / (sp.isp * 9.81) * dt);
+      fuel = Math.max(0, fuel - sp.thrust * throttle / (sp.isp * G0) * dt);
       _g.addScaledVector(axis, sp.thrust * throttle / mass / 1000);
     }
     v.addScaledVector(_g, dt); p.addScaledVector(v, dt); t += dt;

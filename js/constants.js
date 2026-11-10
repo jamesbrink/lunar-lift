@@ -52,6 +52,14 @@ export const MOON_V = new THREE.Vector3().crossVectors(MOON_PLANE_N, MOON_U).nor
    the last late flight that lands. js/targeting.js turns that into a HUD readout, so the aim is
    no longer invisible; the corridor it paints green (120-745 km) is the landed band.
    Waiting on the pad and warping advances the Moon, so any other start time can still reach one. */
+/* Standard gravity as THIS GAME uses it, m/s²: Isp → exhaust velocity and mass flow, and the unit of
+   every g readout. The defined value is 9.80665; 9.81 is what the certified flight was flown with,
+   and changing it moves the propellant flow and with it the launch window. One name, so the HUD
+   and the predictor cannot disagree with the engine. The budget tools (tools/mission-sim.mjs,
+   tools/mission-math.py) keep the defined 9.80665 for their delta-v bookkeeping, as the Apollo
+   figures they are compared with do: their totals read 0.034 % under the engine's own (16,274 m/s
+   quoted, 16,280 at 9.81 - measured by switching the tool's constant on the shipped flight). */
+export const G0 = 9.81;
 export const MOON_PHASE0 = 4.9187044;                      // rad — 281.82° along the lunar orbit
 let moonPhase = MOON_PHASE0;
 export function setMoonPhase(p) { moonPhase = p; }

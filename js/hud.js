@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { RE, RM, MU_E, MU_M, SOI_M, MOON_DIST, WARPS, SPECS, CAPSULE_MASS, LAND_SAFE, SAFE_EARTH, TLI_LEAD, MOON_RATE, MOON_U, MOON_V, moonPos } from './constants.js';
+import { G0, RE, RM, MU_E, MU_M, SOI_M, MOON_DIST, WARPS, SPECS, CAPSULE_MASS, LAND_SAFE, SAFE_EARTH, TLI_LEAD, MOON_RATE, MOON_U, MOON_V, moonPos } from './constants.js';
 import { stages } from './saturn.js';
 import { S, getState, getSimTime, getEngineOn, getThrottle, getWarpIndex, getSasOn, getSasRetro, getDistFlown, getMaxQ, activeStage, orbitalElements, groundVel, bodyUp, navVel, surfaceAlt, aeroState, getAeroLoad, getRcsAssist, getHold, getStrain, getChute, getHeat, getCooking, isCapsule, HEAT_SHIELD, CHUTE, totalMass, landing, LOAD_LIMIT_STACK, LOAD_LIMIT_CSM } from './physics.js';
 import { getCamMode, getMapFocus } from './camera.js';
@@ -312,7 +312,7 @@ export function updateHUD(dt) {
   for (let k = 2, above = CAPSULE_MASS; k >= 0; k--) {
     if (stages[k].separated) continue;
     const m1 = above + stages[k].dry, m0 = m1 + stages[k].fuel;
-    dvs[k] = SPECS[k].isp * 9.80665 * Math.log(m0 / m1); above = m0;
+    dvs[k] = SPECS[k].isp * G0 * Math.log(m0 / m1); above = m0;
   }
   stages.forEach((st, idx) => {
     const row = $('pip' + idx); const fill = row.querySelector('i');
