@@ -133,7 +133,7 @@ export const SKY_DAY = new THREE.Color(0x79b1de), SKY_NULL = new THREE.Color(0x0
      - stage 2 over 0.95 g at ignition (1.09 g here) so the vehicle is still accelerating when it
        takes over from stage 1.
      - stage 3 is deliberately *over*-powered against Apollo's 45 kN descent propulsion system:
-       400 kN is 4.2 g_moon at the 59 t LOI mass and 6.8 g_moon at the 36 t landing mass, so
+       400 kN is 4.2 g_moon at the 59 t LOI mass and 7.0 g_moon at the 35 t landing mass, so
        hovering takes 15% throttle and no setting balances lunar gravity exactly. That is
        survivable only because the descent guidance commands a velocity envelope bounded by altitude
        instead of trying to hover. Throttle granularity, not thrust level, is what limits a soft

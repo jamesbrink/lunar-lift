@@ -9,7 +9,7 @@ the range clock reads zero, so stage masses at liftoff are marginally lower than
 
 | Item | Dry (t) | Oxidiser (t) | Fuel (t) | Total (t) |
 | --- | --- | --- | --- | --- |
-| S-IC first stage | 130.43 | 1,499.58 | 646.32 | **2,276.33** |
+| S-IC first stage | 130.42 | 1,499.48 | 646.32 | **2,276.22** |
 | S-IC/S-II interstage | 5.21 | — | — | 5.21 |
 | S-II second stage | 36.16 | 371.51 | 71.72 | **479.39** |
 | S-II/S-IVB interstage | 3.66 | — | — | 3.66 |
@@ -18,10 +18,10 @@ the range clock reads zero, so stage masses at liftoff are marginally lower than
 | Lunar Module + launch adapter | 15.09 (LM) | — | — | 1.79 (LA) |
 | Command/Service Module | 28.80 | — | — | 28.80 |
 | Launch escape system | — | — | — | 4.04 |
-| Boilerplates, ballast, crew, ordnance etc. | — | — | — | ~3.3 |
-| **Launch vehicle total** | | | | **2,937.92** |
+| Boilerplates, ballast, crew, ordnance etc. | — | — | — | ~3.8 |
+| **Launch vehicle total** | | | | **2,938.31** |
 
-Propellant by stage: S-IC 2,145.8 t, S-II 443.2 t, S-IVB 107.1 t — 2,696.1 t of the 2,937.9 t
+Propellant by stage: S-IC 2,145.8 t, S-II 443.2 t, S-IVB 107.1 t — 2,696.1 t of the 2,938.3 t
 at ignition, **91.8 %** of the vehicle. The payload to lunar orbit (CSM + LM) was 43.9 t,
 1.5 % of liftoff mass.
 

@@ -288,7 +288,7 @@ export function ejectaEvents(gx, gy, gz, nx, ny, nz, rx, ry, rz) {
   if (tl > 1e-9) {
     lastFanT = t;
     const nF = Math.max(3, Math.min(11, Math.round(11 * 160 / (altM + 110))));   // 11 @ 9 m, 6 @ 200 m, 3 from ~0.4 km
-    const vmax = 0.045 + 0.009 * Math.sqrt(altM);   // km/s: 72 @ 9 m, 187 @ 200 m, 330 @ 1 km
+    const vmax = 0.045 + 0.009 * Math.sqrt(altM);   // km/s: 72 @ 9 m, 172 @ 200 m, 330 @ 1 km
     const rf = (altM * Math.tan(0.30) + 6) * 0.001; // jet footprint radius (bell half-angle + jitter), km
     for (let c = 0; c < nF; c++) {
       /* Launch state sampled from a cone about the exhaust axis as the ground reflected it —

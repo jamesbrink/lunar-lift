@@ -79,9 +79,9 @@ flicker-test: ok
 
 The two pad views with the weather off (`window.__noWeather`) are the precision test: everything in
 frame is bolted to ground that moves 409 m/s through the inertial frame; the numbers above are from
-the review-fixes run, and the idle pad came out at a clean 0 (it was 69/1/0 when the ribbon still
-assumed `devicePixelRatio` under a reduced render scale, and 'pad close' was 167/7/4 before the pad
-parts took the sub-texel receiver rule). With the weather on the
+the review-fixes run, and the idle pad came out at a clean 0 (the run before recorded 69/1/0, and
+'pad close' 167/7/4; the cause of either drop was not isolated — the trajectory ribbon is empty on
+the pad, so the render-scale fix to it cannot be one). With the weather on the
 cloud outlines move on the wind and the gate is loose — the flips there are the known cloud-outline
 shimmer, gated at 150 (58 in the measurement that set the gate, 68 here) — and that view is the one
 a loaded machine fails: its strong count measured
@@ -172,7 +172,7 @@ always and says so in its source; anything that certifies a mission must use the
   or the debris — and `S` keeps the drawn state; the camera, the map and the HUD stay live.
   **×0.25** is the same 0.1 s steps, fewer per second; the interpolation is what makes it smooth.
 - Warp is capped by place (`warpCap()`, enforced every frame by `guardWarp()`): ×4 below 70 km
-  (×16 under an open main canopy), ×4 within 15 km of the Moon, ×32 within 50 km, ×128 within 400 km,
+  (×16 under fully open mains), ×4 within 15 km of the Moon, ×32 within 50 km, ×128 within 400 km,
   ×16 below 140 km of the Earth, ×8 while the engine burns, ×1000 below 2,000 km of the Earth,
   ×10000 within 30,000 km of the Earth or 5,000 km of the Moon, ×100000 beyond; it drops to ×1 on
   crossing the Moon's sphere of influence either way. `warpHorizon()` estimates the mission time to

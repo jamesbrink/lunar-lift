@@ -646,7 +646,7 @@ export function physStep(dt) {
   }
   if (!flightStarted) {
     const alt0 = S.pos.length() - RE;
-    if (alt0 > (PAD_POS.length() - RE) + 0.15 && thrustAcc && thrustAcc.length() > G0 / 1000) {   // still thrusting upward at over 1 g
+    if (alt0 > (PAD_POS.length() - RE) + 0.15 && thrustAcc && thrustAcc.length() > G0 / 1000) {   // thrust over 1 g still acting
       flightStarted = true; state = 'flying';
       hooks.addLog('LIFTOFF — THE TOWER CLEARS', 'good');
     }

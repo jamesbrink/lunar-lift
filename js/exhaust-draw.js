@@ -399,7 +399,7 @@ export function fillExhaust() {
   if (nAlive === 0) { clearExhaustDraw(); return; }
   /* ship.pos holds the last drawn pose through an end card (updateBurnVisuals stops with the
      clock), and that is where the wreckage is. Anchoring a wreck at the Moon instead put every
-     parcel ~380,000 km from the anchor, where float32 steps are ~45 m — the sparks of every
+     parcel ~380,000 km from the anchor, where float32 steps are ~31 m — the sparks of every
      Earth-loss screen drew on their own jumping grid, the exact failure this anchor exists to
      prevent. */
   anchor.copy(ship.pos);

@@ -123,7 +123,9 @@ setTimeout(function () {
   document.getElementById('bigBtn').style.display = 'none';
   document.getElementById('lookBtn').style.display = 'none';   // there is nothing to look around
   var t = setInterval(function () {
-    if (window.game) {
+    /* a fatal card wins: a game that arrived and then threw in its first frames must keep its message */
+    if (window.__fatal) clearInterval(t);
+    else if (window.game) {
       /* hide the card and give the buttons back: endOverlay only sets their text, so the end card
          would otherwise come up with no FLY AGAIN and no LOOK AROUND */
       o.classList.add('hidden');
@@ -131,7 +133,6 @@ setTimeout(function () {
       document.getElementById('lookBtn').style.display = '';
       clearInterval(t);
     }
-    else if (window.__fatal) clearInterval(t);
   }, 1000);
 }, 10000);
 </script>

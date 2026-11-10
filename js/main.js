@@ -27,7 +27,7 @@ function fatal(title, text) {
   o.querySelector('h1').firstChild.textContent = title;
   document.getElementById('overlayText').innerHTML = `<div class="brief">${text}</div>`;
   document.getElementById('bigBtn').style.display = 'none';
-  document.getElementById('lookBtn').style.display = 'none';   // there is nothing to look at: the loop never started
+  document.getElementById('lookBtn').style.display = 'none';   // nothing to look at: the game never started, or its loop has stopped
   window.__fatal = true;
 }
 let renderer;
