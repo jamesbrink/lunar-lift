@@ -38,7 +38,7 @@ Shipped flight right now: `RESULT WON`, periselene 346 km, LOI 849 m/s at 358 km
 **3.3 m/s** (`LAND_SAFE` is 32 m/s), 7.2 t spare, 16,274 m/s spent, 3.469 days. `retro` (the previous
 stack, at `--phase=1.4742618`) is LOST at 1,264 m/s with a dry tank. The window is solved for
 `AIM_PERI = 350` km, the middle of the band that lands: −3e-3 rad of phase (745 km) lands at 2.8 m/s
-with 6.6 t, +1.75e-3 rad (123 km) at 4.9 m/s with 7.6 t, and +2e-3 rad (91 km) is **LOST** at 71 m/s
+with 6.6 t, +1.75e-3 rad (123 km) at 4.9 m/s with 7.6 t, and +2e-3 rad (91 km) is **LOST** at 80 m/s
 with the tank run down. Nominal ascent under SAS: max-Q 25.4 kPa at T+65 s, peak side load 0.024 g
 at T+85 s (limit 0.5 g, then strain), static margin +4.4 m on the pad; the same ascent after 0, 120,
 300 or 3,600 s of waiting on the pad. Command module alone from 122 km: 7.8 km/s lands from −1.5°
@@ -181,8 +181,10 @@ air. Corollaries, each read off the code or measured:
   altitude-bounded velocity envelope) was tuned by measurement. Simplify it and you get 41 m/s, 62
   m/s or 220 m/s impacts, all of which have been observed. Attitude must be commanded through the
   body-rate in the game's SAS convention; writing `S.q` directly gives `align −0.93` and a crater.
-- Contact is `surfaceAlt() <= 0`: the lowest attached point (the active stage's bell, or the nose if
-  inverted) over the terrain. Headless there is no terrain — `initPhysics` gets no `relief`, so the
+- Contact is `surfaceAlt() <= 0`: the lowest attached point (the active stage's bell — for the last
+  stage the soles of its landing gear, `TAIL_Z[2] = 6.2` u, which `js/saturn.js` draws at `GEAR_Z`
+  0.6 u under the bell's exit; move one and move the other — or the nose if inverted) over the
+  terrain. Headless there is no terrain — `initPhysics` gets no `relief`, so the
   tool lands on the datum sphere, and its touchdown speed says nothing about a hillside. The descent
   guidance reads the same `P.surfaceAlt(true)`; when it read the altitude of `S.pos` instead it met
   the ground believing it had 52 m left, and the touchdown at that window was 20.4 m/s where the
@@ -295,6 +297,32 @@ air. Corollaries, each read off the code or measured:
   caster (js/clouds.js looks its own field up along the sun ray in the ground materials) — the old comment claiming Basic "gives the cloud shadows
   the soft filter blurs away" was never true, which is worth knowing before anyone reverts this to protect
   them. `logarithmicDepthBuffer` is unrelated: the compare uses `vShadowCoord` from the light's projection.
+- **Cel light is three's own chunks, patched once in `js/toon.js`.** Every lit surface is a
+  `MeshToonMaterial`, so the rules live in `ShaderChunk` (the patch throws if three's text moves):
+  a cast shadow is four fixed bilinear taps CUT at one half (a crisp contour through the texel
+  staircase, one screen pixel of smoothstep), and it caps the ramp at `CEL_FLOOR` instead of
+  removing the sun — `min(ramp, shade)`, so it has the tone of the form shadow next to it and a
+  face already turned from the sun is not darkened twice. Before, shadows were five noise-rotated
+  PCF taps with only the blue fill left in them: soft navy smears.
+- **Hardware is lit by where it is.** `hardware()` / `padware()` materials (the vehicle, the pad)
+  carry `CEL_HARDWARE` uniforms that `js/world.js` fills each frame: whether the sun clears the
+  limb of the Earth and the Moon at that place (the sun light has no planet in its shadow box, so a
+  rocket on the night side used to stand day-bright), the fill and emissive floors that drop with
+  it, and the pad's floodlights — one hard-stepped direction plus a two-ring pool on upward faces,
+  no second light, nothing the planet's materials can see. `HARD_GAIN = π` is there because
+  three's Lambert divides by π and no longer multiplies it back: the hull was sRGB 160, a grey
+  rocket. The planets keep the exposure their shaders were tuned at.
+- **The sun light moves in steps (`SUN_STEP`, 27 s).** A hard shadow edge and a hard cel band both
+  follow the light, and the true sun creeps over the ground at 7.3e-5 rad/s: shadow-map texels on
+  a silhouette flip one at a time and each takes a stretch of thresholded edge with it. Measured
+  idle on the pad with the hard shadow term: 77-85 unstable pixels and 12-13 strong; with the
+  shadow map frozen 29 and 8; with the light held in the Earth's frame between steps 2-23 and 0-5
+  (the tree before this: 63-78 and 0-3). What is left is single MSAA samples on silhouettes — the
+  view matrix still changes in its last bits every frame — and they count as "strong" more often
+  now only because white hardware against black ink is a bigger step than grey was.
+- **A mesh inside an invisible group is still `visible`.** The stowed parachutes sat at the origin
+  of their hidden cluster, all three canopies in one place, and `tools/flicker-test.mjs` (which
+  reads `o.visible`, not the ancestors') reported 23 coplanar pairs. Pose hidden things too.
 - **A factor written on one component of three is a bug wearing a tuning knob.** `groundHit` bled the
   tangential velocity of deflectate with `keep = 0.12` on `rx` while `ry`/`rz` kept `(1 + out·k)`, so two
   thirds of the deflected flow left the trench at near exhaust speed and every attempt to tune the blast
@@ -576,7 +604,7 @@ await tab.evaluate(`(async () => {
 
 ## Structure
 
-One concern per file; no god files. Current sizes: `physics.js` 773, `clouds.js` 715, `world.js` 645, `navball.js` 499, `exhaust-sim.js` 491, `camera.js` 437, `cloudfields.js` 405, `earthpaint.js` 367, `hud.js` 344, `exhaust-emit.js` 327, `paintkit.js` 314, `exhaust-draw.js` 308, `surface.js` 295, `predictor.js` 276, `moonpaint.js` 276, `saturn.js` 266, `terrain.js` 225, `pad.js` 225, `flame.js` 214, `ribbon.js` 213, `main.js` 211, `vehicle.js` 210, `padsite.js` 203, `surface-earth.js` 181, `exhaust-pool.js` 148, `toonmap.js` 142, `constants.js` 134, `surface-moon.js` 120, `targeting.js` 119, `toon.js` 117, `mapview.js` 116, `halfres.js` 103, `textures.js` 97, `aero.js` 81, `colliders.js` 72, `chutes.js` 70, `haze.js` 64, `audio.js` 62, `palette.js` 35, `origin.js` 29.
+One concern per file; no god files. Current sizes: `physics.js` 808, `clouds.js` 715, `world.js` 720, `navball.js` 499, `exhaust-sim.js` 491, `camera.js` 437, `cloudfields.js` 405, `earthpaint.js` 367, `hud.js` 344, `exhaust-emit.js` 327, `paintkit.js` 314, `exhaust-draw.js` 308, `surface.js` 295, `predictor.js` 276, `moonpaint.js` 276, `saturn.js` 496, `terrain.js` 225, `pad.js` 341, `flame.js` 214, `ribbon.js` 213, `main.js` 281, `vehicle.js` 210, `padsite.js` 203, `surface-earth.js` 181, `exhaust-pool.js` 148, `toonmap.js` 142, `constants.js` 134, `surface-moon.js` 120, `targeting.js` 119, `toon.js` 226, `mapview.js` 116, `halfres.js` 103, `textures.js` 97, `aero.js` 81, `colliders.js` 72, `chutes.js` 138, `haze.js` 64, `audio.js` 62, `palette.js` 35, `gear.js` 53, `origin.js` 29.
 `toonmap.js` is now only the registry of paint products; the painters are `earthpaint.js` and
 `moonpaint.js` on `paintkit.js`, the authored launch site is `padsite.js`, and the ground is drawn by
 `surface.js` + `surface-earth.js` + `surface-moon.js`.
@@ -591,7 +619,10 @@ New since the flight model: `colliders.js` (the one table of pad solids and swin
 `uOrigin`), `aero.js` (density, Mach drag rise, the one `aeroForce()` evaluation),
 `mapview.js` (ship marker, body names, lunar orbit, SOI ring, coast path and the Moon's arrival
 position for the map), `chutes.js` (the drawn
-drogues and mains; what is deployed is `physics.js`'s state). Tools: `mission-sim.mjs` (flies the
+drogues and mains; what is deployed is `physics.js`'s state; the pendulum is the mission clock's
+and the collapse after splashdown runs on real seconds, held while paused), `gear.js` (when the
+lander's legs are down — `saturn.js` owns the legs and `setGear()`, this reads the flight and
+trims each foot to its own ground once it stands). Tools: `mission-sim.mjs` (flies the
 mission headless), `mission-math.py` (derived numbers), `shader-lint.mjs`, `shots.mjs` (browser
 screenshots plus console errors and warnings), `clip-test.mjs` (camera never under terrain or inside
 the hull), `gpu-time.mjs` (GPU ms per frame by timer query), `cloud-views.mjs` (weather screenshots

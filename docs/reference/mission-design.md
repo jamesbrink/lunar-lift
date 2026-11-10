@@ -182,7 +182,7 @@ shipped configuration at eleven phases:
 | 4.9199544 (+1.25e-3) | 186 km | WON | 4.4 m/s | 7.5 t | 16,241 m/s | green |
 | 4.9202044 (+1.5e-3) | 154 km | WON | 4.7 m/s | 7.5 t | 16,234 m/s | green |
 | 4.9204544 (+1.75e-3) | 123 km | WON | 4.9 m/s | 7.6 t | 16,227 m/s | 122 km, green |
-| 4.9207044 (+2e-3) | 91 km | **LOST** | 71 m/s | 0.4 t | 17,160 m/s | 91 km, red |
+| 4.9207044 (+2e-3) | 91 km | **LOST** | 80 m/s | 0.4 t | 17,162 m/s | 91 km, red |
 
 (The aim column is `js/targeting.js` run headless from the coast-start state where a number is
 given, and `CORRIDOR`'s 120–745 km test applied to the tool's periselene where it is not.)
@@ -194,8 +194,10 @@ other** — but the window now stands in the middle of it. Early costs about 0.2
 (eleven minutes of lunar motion, a 123 km periselene), and +2e-3 rad is lost: its LOI burn ends at
 106 km, the tool's deorbit phase is skipped, and the descent starts from orbit height and speed with
 no transfer ellipse — 2,994 m/s against 2,055 at the window, the tank run down to 0.4 t, and still
-71 m/s at the surface. The edge is between 123 and 110 km: a 110 km periselene (phase 4.9205531,
-re-flown at this physics) is lost at 81 m/s. That is a statement about this autopilot's descent,
+80 m/s at the surface. The edge is between 123 and 110 km: a 110 km periselene (phase 4.9205531,
+re-flown at this physics) is lost at 76 m/s. (Both lost flights were re-flown when contact moved
+from the bell's exit to the footpads, 0.84 m lower: every landing in the table kept its touchdown
+speed, spare propellant and Δv to the printed digit; the two crashes are the only rows that moved.) That is a statement about this autopilot's descent,
 not about the Moon — a pilot who brakes differently may land from lower — but it is the only landing
 anyone has measured. Two consequences for the game:
 
@@ -291,8 +293,9 @@ a_cmd = (v_des − v)/τ + dv_des/dt − g_abs + g_moon          τ = 2.5 s
 
 with `h` the altitude above the Moon, the commanded acceleration slewed by the body-rate channel
 exactly as the game's own SAS does it, and the engine cut at 3 m (the last 3 metres fall at
-≈ 3 m/s, well inside `LAND_SAFE`). `h` is `surfaceAlt()` — the engine bell over the surface, the
-same number contact is judged by. It used to be the altitude of `S.pos`, the middle of the *full*
+≈ 3 m/s, well inside `LAND_SAFE`). `h` is `surfaceAlt()` — the lander's footpads over the surface
+(station 6.2 u, 0.6 u under the bell's exit; `GEAR_Z` in `js/saturn.js`), the same number contact is
+judged by. It used to be the altitude of `S.pos`, the middle of the *full*
 stack, while contact was declared when `S.pos` came within the full stack's half-height (52 m) of
 the surface: the guidance met "the ground" while still reading 52 m of altitude, and every
 touchdown before this fix came in near 20 m/s. With the heights agreeing the shipped flight touches at **3.3 m/s**.

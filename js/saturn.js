@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { SPECS, VS } from './constants.js';
-import { toon, outline, PALETTE, RAMP_HARD } from './toon.js';
+import { hardware as toon, outline, PALETTE, RAMP_HARD } from './toon.js';
 
 /* The Saturn V as drawn hardware: three stage groups and the launch escape system. Nothing here moves
    or burns — js/vehicle.js poses it every frame, and js/flame.js hangs a flame on every engine listed
@@ -26,7 +26,12 @@ import { toon, outline, PALETTE, RAMP_HARD } from './toon.js';
       they are open, and their inside is part of the drawing);
    3. paint is a separate open arc 0.05 u proud of the shell it sits on, never a recoloured shell;
    4. only silhouette parts carry the inverted-hull outline — outlining a ring or a panel draws a
-      line through the middle of the vehicle. */
+      line through the middle of the vehicle;
+   5. surface detail is a TONE, not a relief: stringers and corrugation are alternate strips of a
+      second flat grey 0.03 u proud of the skin (under the paint, which is 0.05 proud), wide
+      enough to hold several pixels at 60 m. Ribs as geometry are sub-pixel and shimmer;
+   6. small repeated parts are FUSED into one mesh per material (fuse(), below): a draw call each
+      for forty ullage motors, seams and radiator panels is a cost nobody can see. */
 
 export const rocketGroup = new THREE.Group(); rocketGroup.scale.setScalar(VS);
 export const capsuleGroup = new THREE.Group(); capsuleGroup.name = 'capsule';
@@ -48,6 +53,62 @@ silver.emissive = new THREE.Color(0x22262b);
 const metal = toon({ color: PALETTE.engine, side: THREE.DoubleSide });
 export const bellMetal = metal;             // every bell: js/vehicle.js warms its emissive while an engine fires
 const ink = toon({ color: PALETTE.dark, side: THREE.DoubleSide });   // paint arcs are open: both faces
+const tone = toon({ color: 0xcdd3dc, side: THREE.DoubleSide });      // the second flat grey of rule 5
+const seam = toon({ color: 0x8b929c, side: THREE.DoubleSide });      // panel lines
+const panelWhite = toon({ color: 0xf6f8fb, side: THREE.DoubleSide }); panelWhite.emissive = new THREE.Color(0x2c3036);
+/* Inside a bell. The liner and the lip share the bells' emissive COLOUR OBJECT, so when
+   js/vehicle.js warms `bellMetal` for a burn the throat and the rim glow with it, brighter. */
+const liner = toon({ color: 0x2b2e35, side: THREE.DoubleSide }); liner.emissive = metal.emissive; liner.emissiveIntensity = 1.8;
+const lip = toon({ color: 0x9a8f86, side: THREE.DoubleSide }); lip.emissive = metal.emissive; lip.emissiveIntensity = 3.2;
+
+/* Rule 6: transformed copies of small parts, merged into one non-indexed mesh. */
+const _v = new THREE.Vector3(), _n3 = new THREE.Matrix3(), _m4 = new THREE.Matrix4(), _q = new THREE.Quaternion(), _e = new THREE.Euler(), ONE = new THREE.Vector3(1, 1, 1);
+const AXIS_Y = new THREE.Vector3(0, 1, 0);
+function fuse(mat, { cast = false, edge = false } = {}) {
+  const pos = [], nrm = [];
+  return {
+    /* place `geo` at (x, y, z) after turning it by Euler (rx, ry, rz), then turn the lot `az` about the axis */
+    add(geo, x = 0, y = 0, z = 0, rx = 0, ry = 0, rz = 0, az = 0) {
+      _m4.compose(_v.set(x, y, z), _q.setFromEuler(_e.set(rx, ry, rz)), ONE);
+      if (az) _m4.premultiply(new THREE.Matrix4().makeRotationZ(az));
+      return this.put(geo, _m4);
+    },
+    put(geo, m) {
+      const g = geo.index ? geo.toNonIndexed() : geo, p = g.attributes.position, n = g.attributes.normal;
+      _n3.getNormalMatrix(m);
+      for (let i = 0; i < p.count; i++) {
+        _v.fromBufferAttribute(p, i).applyMatrix4(m); pos.push(_v.x, _v.y, _v.z);
+        _v.fromBufferAttribute(n, i).applyMatrix3(_n3).normalize(); nrm.push(_v.x, _v.y, _v.z);
+      }
+      return this;
+    },
+    into(group) {
+      const g = new THREE.BufferGeometry();
+      g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+      g.setAttribute('normal', new THREE.Float32BufferAttribute(nrm, 3));
+      const m = new THREE.Mesh(g, mat); m.castShadow = cast; if (edge) outline(m);
+      group.add(m); return m;
+    },
+  };
+}
+/* A cylinder (or cone, or an arc of one) already stood along the vehicle's axis and centred on z.
+   th0/thLen are azimuths in degrees from +x. */
+function zcyl(rt, rb, len, seg, open = false, az0 = 0, azLen = 360) {
+  const g = new THREE.CylinderGeometry(rt, rb, len, seg, 1, open, THREE.MathUtils.degToRad(az0 + 90), THREE.MathUtils.degToRad(azLen));
+  g.rotateX(Math.PI / 2);
+  return g;
+}
+/* Rule 5: `n` strips of the second tone round a shell of radius r (rt at the top for a cone),
+   every other one of 2n facets. */
+function stringers(group, r, z0, z1, n, rTop = r, mat = tone) {
+  const full = zcyl(rTop + 0.03, r + 0.03, z1 - z0, n * 2, true).toNonIndexed();
+  const p = full.attributes.position, nr = full.attributes.normal, pos = [], nrm = [];
+  for (let k = 0; k < n * 2; k += 2) for (let i = k * 6; i < k * 6 + 6; i++) { pos.push(p.getX(i), p.getY(i), p.getZ(i)); nrm.push(nr.getX(i), nr.getY(i), nr.getZ(i)); }
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3)); g.setAttribute('normal', new THREE.Float32BufferAttribute(nrm, 3));
+  const m = new THREE.Mesh(g, mat); m.position.z = (z0 + z1) / 2; group.add(m);
+  return m;
+}
 
 function cyl(rt, rb, len, z, mat, seg = SEG, edge = false) {
   const m = new THREE.Mesh(new THREE.CylinderGeometry(rt, rb, len, seg), mat);
@@ -79,7 +140,25 @@ function bell(rt, rb, len, z) {
   }
   const m = new THREE.Mesh(new THREE.LatheGeometry(pts, 20), metal);
   m.rotation.x = Math.PI / 2; m.position.z = z; m.castShadow = true;
+  m.userData = { rt, rb, len };
   return m;
+}
+
+/* What makes a bell an engine at 30 m: a dark liner and an injector face inside it, a lip that glows
+   when it fires, and the turbine-exhaust manifold band round its waist. One fused mesh per material
+   for all the bells of a stage, each placed by its bell's own matrix (the outboards are canted). */
+function dressBells(group, bells) {
+  const fl = fuse(liner), fp = fuse(lip), fb = fuse(ink), m = new THREE.Matrix4();
+  for (const b of bells) {
+    const { rt, rb, len } = b.userData, r = (s) => rb + (rt - rb) * Math.pow(s, 0.55), y = (s) => -len / 2 + len * s;
+    const prof = (s0, s1, inset) => { const pts = []; for (let i = 0; i <= 8; i++) { const s = s0 + (s1 - s0) * i / 8; pts.push(new THREE.Vector2(r(s) - inset, y(s))); } return new THREE.LatheGeometry(pts, 20); };
+    b.updateMatrix(); m.copy(b.matrix);
+    fl.put(prof(0.10, 0.9, 0.05), m);
+    const face = new THREE.CircleGeometry(r(0.9) - 0.05, 20); face.rotateX(Math.PI / 2); face.translate(0, y(0.9), 0); fl.put(face, m);
+    fp.put(prof(0.0, 0.10, 0.035), m);
+    const band = new THREE.CylinderGeometry(r(0.56) + 0.07, r(0.44) + 0.07, len * 0.12, 20, 1, true); band.translate(0, y(0.5), 0); fb.put(band, m);
+  }
+  fl.into(group); fp.into(group); fb.into(group);
 }
 
 /* Lettering stacked down the hull, as on the real first stage. Needs a canvas, so the headless
@@ -88,13 +167,26 @@ function lettering(text, colour) {
   if (typeof document === 'undefined') return null;
   const cv = document.createElement('canvas'); cv.width = 128; cv.height = 128 * text.length;
   const c = cv.getContext('2d');
-  c.font = '900 118px "Helvetica Neue", Arial, sans-serif'; c.textAlign = 'center'; c.textBaseline = 'middle';
+  c.font = '900 112px "Arial Black", "Helvetica Neue", Arial, sans-serif'; c.textAlign = 'center'; c.textBaseline = 'middle';
   c.fillStyle = colour;
   [...text].forEach((ch, i) => c.fillText(ch, 64, 64 + i * 128 + 6));
   const t = new THREE.CanvasTexture(cv); t.colorSpace = THREE.SRGBColorSpace; t.anisotropy = 4;
   return t;
 }
-const usa = lettering('USA', '#c8402a');
+const usa = lettering('USA', '#c8402a'), unitedStates = lettering('UNITED STATES', '#c8402a');
+/* The flag, drawn: thirteen stripes and a blue canton with a block of stars. */
+function flagTexture() {
+  if (typeof document === 'undefined') return null;
+  const cv = document.createElement('canvas'); cv.width = 190; cv.height = 100;
+  const c = cv.getContext('2d');
+  for (let i = 0; i < 13; i++) { c.fillStyle = i % 2 ? '#f4f5f7' : '#c8402a'; c.fillRect(0, Math.round(i * 100 / 13), 190, Math.ceil(100 / 13)); }
+  c.fillStyle = '#27407a'; c.fillRect(0, 0, 76, 54);
+  c.fillStyle = '#f4f5f7';
+  for (let j = 0; j < 5; j++) for (let i = 0; i < 6; i++) c.fillRect(7 + i * 11.5, 6 + j * 9.4, 4, 4);
+  const t = new THREE.CanvasTexture(cv); t.colorSpace = THREE.SRGBColorSpace; t.anisotropy = 4;
+  return t;
+}
+const flag = flagTexture();
 function decal(r, z0, z1, az, width, map) {
   const m = panel(r, z0, z1, az, width, toon({ map, transparent: true, alphaTest: 0.4, side: THREE.DoubleSide }));
   return m;
@@ -112,9 +204,25 @@ function decal(r, z0, z1, az, width, map) {
   g.add(cyl(3.62, 3.62, 0.3, -22.4, black));
   panels(g, 3.57, -15.2, -12.1, 45, 45);                      // forward roll pattern
   if (usa) { g.add(decal(3.57, -21.4, -15.9, 0, 26, usa)); g.add(decal(3.57, -21.4, -15.9, 180, 26, usa)); }
-  const tunnel = cyl(0.22, 0.22, 21.6, -23.2, white, 8); tunnel.position.x = 3.6; g.add(tunnel);   // systems tunnel, half sunk in the tank wall
+  if (flag) for (const az of [90, 270]) g.add(decal(3.57, -19.6, -17.9, az, 52, flag));   // 3.2 × 1.7 u, between the frames and the forward pattern
+  /* Systems tunnel, half sunk in the tank wall, at azimuth 30°: clear of the lettering (0°), the
+     flags (90°) and the aft roll pattern (±22.5°). It stood at 0° and ran through the "USA". */
+  const tunnel = cyl(0.22, 0.22, 21.6, -23.2, white, 8); tunnel.position.set(3.6 * Math.cos(Math.PI / 6), 3.6 * Math.sin(Math.PI / 6), -23.2); g.add(tunnel);
+  stringers(g, 3.57, -25.45, -22.55, 40);                     // intertank corrugation, between its two frames
   g.add(cyl(3.62, 3.62, 2.5, -10.75, white, SEG, true));      // interstage −12.0 .. −9.5: shrouds the J-2s until staging
   g.add(cyl(3.66, 3.66, 0.45, -11.75, black));                // its separation frame
+  stringers(g, 3.62, -11.45, -9.6, 40);                       // the interstage is corrugated skin
+  {
+    /* Eight ullage motors round the interstage, in pairs either side of each fin line: a fairing
+       half sunk in the skin with its nozzle looking aft. They leave with the interstage. */
+    const f = fuse(white, { cast: true, edge: true }), nz = fuse(black);
+    for (let i = 0; i < 8; i++) {
+      const az = (i * 45 + 22.5) * Math.PI / 180;
+      f.add(zcyl(0.1, 0.26, 1.25, 10), 3.66, 0, -10.55, 0, 0, 0, az);
+      nz.add(zcyl(0.2, 0.3, 0.3, 10), 3.7, 0, -11.3, 0, 0, 0, az);
+    }
+    f.into(g); nz.into(g);
+  }
   /* Engine fairings and fins at the four outboard positions. Each fairing is a half-buried cone
      over its F-1; the fin's root is inside the fairing along its whole length. */
   const fin = new THREE.Shape();                              // x = radial, y = axial z
@@ -131,14 +239,15 @@ function decal(r, z0, z1, az, width, map) {
   }
   /* Five F-1s: throats in the skirt solid, exits 2.4 u below its rim. Bolt circle r 2.35 puts the
      exit rims tangent; the outboards cant 0.1 rad outward, the real gimbal trim. */
-  g.add(bell(0.42, 1.19, 2.6, -40.7));
+  const bells = [bell(0.42, 1.19, 2.6, -40.7)];
   for (let i = 0; i < 4; i++) {
     const a = i * Math.PI / 2 + Math.PI / 4;
     const b = bell(0.42, 1.15, 2.6, -40.7);
     b.position.x = Math.cos(a) * 2.35; b.position.y = Math.sin(a) * 2.35;
     b.quaternion.setFromAxisAngle(new THREE.Vector3(-Math.sin(a), Math.cos(a), 0), -0.1).multiply(new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1, 0, 0), Math.PI / 2));
-    g.add(b);
+    bells.push(b);
   }
+  g.add(...bells); dressBells(g, bells);
   stages[0].tailZ = -42;
   stages[0].engines = [[0, 0], ...[0, 1, 2, 3].map(i => { const a = i * Math.PI / 2 + Math.PI / 4; return [Math.cos(a) * 2.35, Math.sin(a) * 2.35]; })];
 }
@@ -150,20 +259,26 @@ function decal(r, z0, z1, az, width, map) {
   g.add(cyl(3.57, 3.57, 16.85, -1.425, white, SEG, true));    // tanks −9.85 .. +7.0: clear of the S-1 tank's top (−9.9), same radius
   panels(g, 3.57, 3.4, 6.5, 0, 45);                           // forward roll pattern
   g.add(cyl(3.62, 3.62, 0.3, -7.4, black));                   // aft frame
-  const tunnel = cyl(0.2, 0.2, 13.4, -1.0, white, 8); tunnel.position.x = 3.6; g.add(tunnel);
+  const tunnel = cyl(0.2, 0.2, 13.4, -1.0, white, 8); tunnel.position.set(3.6 * Math.cos(Math.PI / 6), 3.6 * Math.sin(Math.PI / 6), -1.0); g.add(tunnel);
+  stringers(g, 3.57, -9.4, -7.6, 40);                         // aft skirt
+  stringers(g, 3.57, 3.45, 6.5, 40);                          // forward skirt, under the roll pattern
+  g.add(panel(3.57 - 0.02, -3.2, -2.9, 0, 360, tone));        // two weld lines round the hydrogen tank
+  g.add(panel(3.57 - 0.02, 1.3, 1.6, 0, 360, tone));
+  if (unitedStates) for (const az of [90, 270]) g.add(decal(3.57, -7.0, 3.1, az, 12.5, unitedStates));   // 0.78 u a letter
   g.add(cyl(2.55, 3.52, 1.9, 7.65, white, SEG, true));        // forward cone +6.7 .. +8.6, tapering 10 m to the S-IVB
   /* +6.58 .. +7.08: its top face stands 0.08 u over the tank's top cap (+7.0). At 0.4 tall it ended
      at +7.0 exactly, and the two caps shared the ring between the cone's foot (r 3.52) and the tank
      wall (r 3.57) — coplanar faces, which flickered as a speckled band round the shoulder. */
   g.add(cyl(3.61, 3.61, 0.5, 6.83, black));                   // the frame at its foot
-  g.add(bell(0.30, 0.72, 1.9, -10.85));                       // five J-2s on r 1.44, exits at −11.8
+  const bells = [bell(0.30, 0.72, 1.9, -10.85)];              // five J-2s on r 1.44, exits at −11.8
   const engines = [[0, 0]];
   for (let i = 0; i < 4; i++) {
     const a = i * Math.PI / 2 + Math.PI / 4;
     const b = bell(0.30, 0.70, 1.9, -10.85);
     b.position.x = Math.cos(a) * 1.44; b.position.y = Math.sin(a) * 1.44;
-    g.add(b); engines.push([b.position.x, b.position.y]);
+    bells.push(b); engines.push([b.position.x, b.position.y]);
   }
+  g.add(...bells); dressBells(g, bells);
   stages[1].tailZ = -11.8;
   stages[1].engines = engines;
 }
@@ -175,16 +290,74 @@ function decal(r, z0, z1, az, width, map) {
   const g = stages[2].meshes;
   g.add(cyl(2.36, 2.36, 11.5, 13.9, white, 32, true));        // S-IVB +8.15 .. +19.65, foot inside the S-II cone
   panels(g, 2.36, 8.7, 11.4, 45, 45);                         // aft roll pattern
-  g.add(bell(0.32, 0.85, 1.7, 7.65));                         // exit +6.8
-  g.add(cyl(2.42, 2.42, 2.18, 20.21, black, 32));             // instrument unit +19.12 .. +21.3, overlapping the S-IVB top
+  const j2 = bell(0.32, 0.85, 1.7, 7.65); g.add(j2); dressBells(g, [j2]);   // exit +6.8
+  /* The thrust structure: a dark cone from the tank's aft dome in to the engine. Without it the
+     lander was a tube with a flat bottom and a bell stuck on. Inside the S-II's forward cone while
+     stacked (r 2.75 there against 2.3 here). */
+  g.add(cyl(2.3, 0.72, 0.8, 7.85, black, 32, true));          // +7.45 .. +8.25, mouth inside the tank's foot
+  stringers(g, 2.36, 8.75, 11.35, 28);                        // aft skirt, under the roll pattern
+  stringers(g, 2.36, 17.2, 19.1, 28);                         // forward skirt
+  {
+    /* Two auxiliary propulsion pods on the aft skirt, at 135° and 315° (the roll pattern's black
+       quadrants, so they read), and two ullage motors on the other pair. */
+    const pod = fuse(white, { cast: true, edge: true }), dk = fuse(black);
+    for (const azd of [135, 315]) {
+      const az = azd * Math.PI / 180;
+      pod.add(new THREE.BoxGeometry(0.62, 0.95, 1.9), 2.5, 0, 10.0, 0, 0, 0, az);
+      pod.add(zcyl(0.05, 0.42, 0.6, 4), 2.48, 0, 11.25, 0, 0, Math.PI / 4, az);          // its pointed fairing
+      for (const sy of [-1, 1]) dk.add(new THREE.CylinderGeometry(0.1, 0.15, 0.3, 8), 2.62, sy * 0.52, 10.3, 0, 0, 0, az);   // thrusters, firing sideways
+      dk.add(zcyl(0.1, 0.15, 0.3, 8), 2.66, 0, 8.95, 0, 0, 0, az);                                                         // and one aft
+    }
+    for (const azd of [45, 225]) {
+      const az = azd * Math.PI / 180;
+      pod.add(zcyl(0.08, 0.22, 1.1, 10), 2.42, 0, 9.5, 0, 0, 0, az);
+      dk.add(zcyl(0.17, 0.25, 0.26, 10), 2.46, 0, 8.86, 0, 0, 0, az);
+    }
+    pod.into(g); dk.into(g);
+  }
+  /* Instrument unit and forward skirt, +19.12 .. +21.3: the skirt is the black band; the IU proper
+     is the ring of pale plate on top of it, with its antenna and umbilical boxes. */
+  g.add(cyl(2.42, 2.42, 2.18, 20.21, black, 32));
+  g.add(panel(2.42, 20.42, 21.12, 0, 360, seam));             // the IU: a grey ring 0.7 u tall, 0.05 proud of the band
+  {
+    const f = fuse(silver, { cast: true });
+    for (const azd of [20, 110, 200, 290]) f.add(new THREE.BoxGeometry(0.2, 0.5, 0.42), 2.5, 0, 20.77, 0, 0, 0, azd * Math.PI / 180);
+    f.into(g);
+  }
   g.add(cyl(1.55, 2.46, 1.95, 22.025, white, 32, true));      // spacecraft adapter +21.05 .. +23.0, foot over the IU rim
+  {
+    /* The adapter is four panels: their seams, and the hinge line they fold at. Arcs of the cone's
+       own slope (r 2.46 at +21.05 to 1.55 at +23.0), 0.03 u proud. */
+    const f = fuse(seam), rAt = (z) => 2.46 - (z - 21.05) * (2.46 - 1.55) / 1.95 + 0.03;
+    for (const azd of [45, 135, 225, 315]) f.add(zcyl(rAt(22.85), rAt(21.4), 1.45, 2, true, azd - 1.6, 3.2), 0, 0, 22.125);
+    f.add(zcyl(rAt(21.52), rAt(21.4), 0.12, 40, true), 0, 0, 21.46);
+    f.into(g);
+  }
   g.add(cyl(1.39, 1.39, 3.45, 24.625, silver, 32, true));     // service module +22.9 .. +26.35
   g.add(cyl(1.43, 1.43, 0.3, 26.1, black, 32));               // its forward frame
-  for (let i = 0; i < 4; i++) {                               // four RCS quads
-    const a = i * Math.PI / 2 + Math.PI / 4;
-    const q = new THREE.Mesh(new THREE.BoxGeometry(0.34, 0.34, 0.5), black);
-    q.position.set(Math.cos(a) * 1.44, Math.sin(a) * 1.44, 24.9); q.rotation.z = a; q.castShadow = true;
-    g.add(q);
+  {
+    /* The service module's skin: two big environmental radiators low on opposite sides, eight small
+       fuel-cell radiators under the forward frame, the sector seams between them — all paint
+       (rule 3) — and the things that stand off it: four RCS quads with their nozzles and two
+       scimitar antennas. */
+    const wp = fuse(panelWhite), sm = fuse(seam), dk = fuse(black, { cast: true }), sv = fuse(silver, { cast: true, edge: true });
+    for (const azd of [90, 270]) {
+      sm.add(zcyl(1.42, 1.42, 1.56, 12, true, azd - 36, 72), 0, 0, 23.95);
+      wp.add(zcyl(1.44, 1.44, 1.4, 12, true, azd - 33, 66), 0, 0, 23.95);
+      for (const d of [-11, 11]) sm.add(zcyl(1.46, 1.46, 1.4, 2, true, azd + d - 1.2, 2.4), 0, 0, 23.95);   // its tube runs
+    }
+    for (let i = 0; i < 8; i++) wp.add(zcyl(1.42, 1.42, 0.55, 4, true, i * 45 + 8, 29), 0, 0, 25.55);
+    for (const azd of [0, 180]) sm.add(zcyl(1.42, 1.42, 2.9, 2, true, azd - 1.8, 3.6), 0, 0, 24.45);
+    for (let i = 0; i < 4; i++) {
+      const az = i * Math.PI / 2 + Math.PI / 4;
+      dk.add(new THREE.BoxGeometry(0.3, 0.4, 0.5), 1.47, 0, 24.9, 0, 0, 0, az);
+      dk.add(zcyl(0.07, 0.12, 0.92, 8), 1.66, 0, 24.9, 0, 0, 0, az);                        // fore-and-aft pair
+      dk.add(new THREE.CylinderGeometry(0.07, 0.12, 0.92, 8), 1.66, 0, 24.9, 0, 0, 0, az);  // roll pair
+    }
+    const sc = new THREE.Shape(); sc.moveTo(0, -0.42); sc.lineTo(0.5, -0.3); sc.lineTo(0.62, 0); sc.lineTo(0.5, 0.3); sc.lineTo(0, 0.42); sc.closePath();
+    const scGeo = new THREE.ExtrudeGeometry(sc, { depth: 0.1, bevelEnabled: false }); scGeo.translate(0, 0, -0.05); scGeo.rotateX(Math.PI / 2);
+    for (const azd of [22, 202]) sv.add(scGeo, 1.34, 0, 23.5, 0, 0, 0, azd * Math.PI / 180);
+    sm.into(g); wp.into(g); dk.into(g); sv.into(g);
   }
   /* The command module is its own group on the rocket, not part of this stage: when the CSM is
      dropped (X on the last stage) it is what is left flying, and what the parachutes hang from. */
@@ -234,6 +407,63 @@ function decal(r, z0, z1, az, width, map) {
   stages[2].tailZ = 6.8;
   stages[2].engines = [[0, 0]];
 }
+
+/* ---- landing gear: four legs on the S-IVB's aft skirt, at 0°, 90°, 180° and 270° ----
+   This stage is what lands on the Moon, and it used to do it standing on its engine bell. Each leg
+   is a strut hinged at the foot of the tank: stowed it lies up the hull like a fairing (0.09 u
+   clear of the skin, above the S-II's forward cone and under every swing arm), deployed it swings
+   out and down through LEG_DOWN to put a footpad on GEAR_Z — the plane js/physics.js calls contact
+   for this stage (TAIL_Z[2]), 0.6 u below the bell's exit at +6.8, so the bell hangs clear. Two
+   telescoping stays per leg run from the hull to the strut; the pad stays level by turning against
+   the strut. setGear(0..1) poses all of it and is all of it: js/gear.js decides when. */
+export const GEAR_Z = 6.2;
+const HINGE_R = 2.62, HINGE_Z = 9.0, FOOT_R = 5.9, END_Z = GEAR_Z + 0.3;
+const LEG_L = Math.hypot(FOOT_R - HINGE_R, HINGE_Z - END_Z), LEG_DOWN = Math.atan2(FOOT_R - HINGE_R, END_Z - HINGE_Z);
+const STAY_AT = 0.62, STAY_R = 2.25, STAY_Y = 0.9, STAY_Z = 11.6;
+export const GEAR = { feet: [0, 1, 2, 3].map(i => [Math.cos(i * Math.PI / 2) * FOOT_R, Math.sin(i * Math.PI / 2) * FOOT_R, GEAR_Z]), perRad: LEG_L * Math.sin(LEG_DOWN) };
+const legs = [];
+{
+  const g = stages[2].meshes;
+  const strutGeo = new THREE.BoxGeometry(0.34, 0.62, LEG_L); strutGeo.translate(0, 0, LEG_L / 2);
+  { const p = strutGeo.attributes.position; for (let i = 0; i < p.count; i++) if (p.getZ(i) > LEG_L / 2) { p.setY(i, p.getY(i) * 0.5); p.setX(i, p.getX(i) * 0.8); } strutGeo.computeVertexNormals(); }
+  const padGeo = new THREE.CylinderGeometry(0.6, 0.72, 0.18, 18); padGeo.rotateX(Math.PI / 2);
+  const stayGeo = new THREE.CylinderGeometry(0.1, 0.1, 1, 8);
+  const fixed = fuse(black, { cast: true });
+  for (let i = 0; i < 4; i++) {
+    const az = i * Math.PI / 2, turn = new THREE.Group(); turn.rotation.z = az;
+    fixed.add(new THREE.BoxGeometry(0.56, 0.86, 0.5), HINGE_R - 0.08, 0, HINGE_Z, 0, 0, 0, az);          // hinge fitting
+    for (const sy of [-1, 1]) fixed.add(new THREE.BoxGeometry(0.34, 0.34, 0.34), STAY_R + 0.05, sy * STAY_Y, STAY_Z, 0, 0, 0, az);
+    const strut = new THREE.Mesh(strutGeo, silver); strut.castShadow = true; outline(strut);
+    const knee = new THREE.Mesh(new THREE.SphereGeometry(0.26, 12, 8), black); knee.position.z = LEG_L; strut.add(knee);
+    strut.position.set(HINGE_R, 0, HINGE_Z);
+    const pad = new THREE.Mesh(padGeo, black); pad.castShadow = true; outline(pad);
+    const stays = [-1, 1].map(sy => { const m = new THREE.Mesh(stayGeo, black); m.castShadow = true; m.userData.sy = sy; return m; });
+    turn.add(strut, pad, ...stays); g.add(turn);
+    legs.push({ strut, pad, stays });
+  }
+  fixed.into(g);
+}
+const _d = new THREE.Vector3();
+/* gear: 0 stowed .. 1 down (eased here). trim: optional rad per leg added when down, so each foot
+   can find its own ground. */
+export function setGear(gear, trim = null) {
+  const e = gear * gear * (3 - 2 * gear);
+  legs.forEach((leg, k) => {
+    const th = (LEG_DOWN + (trim ? trim[k] : 0)) * e, sn = Math.sin(th), cs = Math.cos(th);
+    leg.strut.rotation.y = th;
+    leg.pad.position.set(HINGE_R + LEG_L * sn - 0.15 * (1 - e), 0, HINGE_Z + LEG_L * cs + 0.5 - 0.71 * e);
+    leg.pad.rotation.y = (1 - e) * Math.PI / 2;
+    const bx = HINGE_R + STAY_AT * LEG_L * sn, bz = HINGE_Z + STAY_AT * LEG_L * cs;
+    for (const s of leg.stays) {
+      _d.set(bx - STAY_R, -s.userData.sy * STAY_Y, bz - STAY_Z);
+      const len = _d.length();
+      s.position.set((bx + STAY_R) / 2, s.userData.sy * STAY_Y / 2, (bz + STAY_Z) / 2);
+      s.quaternion.setFromUnitVectors(AXIS_Y, _d.multiplyScalar(1 / len));
+      s.scale.set(1, len, 1);
+    }
+  });
+}
+setGear(0);
 
 /* ---- launch escape system: its own group, so it can leave as a unit. Children carry absolute
    build coordinates and the group stays at the local origin, so detaching needs no bookkeeping. ---- */

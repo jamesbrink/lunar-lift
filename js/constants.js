@@ -46,7 +46,7 @@ export const MOON_V = new THREE.Vector3().crossVectors(MOON_PLANE_N, MOON_U).nor
      phase 4.9187044    -> periselene 346 km, touchdown 3.3 m/s, 7.2 t spare
      phase +1e-3    rad -> periselene 218 km, touchdown 4.1 m/s, 7.4 t spare
      phase +1.75e-3 rad -> periselene 123 km, touchdown 4.9 m/s, 7.6 t spare
-     phase +2e-3    rad -> periselene  91 km, LOST at 71 m/s, 0.4 t left
+     phase +2e-3    rad -> periselene  91 km, LOST at 80 m/s, 0.4 t left
    i.e. ~130 km of periselene per 1e-3 rad (376 s of lunar motion at MOON_RATE), a gentle slope on
    the early side and a cliff on the late one, with the window 1.75e-3 rad — eleven minutes — from
    the last late flight that lands. js/targeting.js turns that into a HUD readout, so the aim is

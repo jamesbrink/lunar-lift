@@ -7,6 +7,7 @@ import { S, keys, initPhysics, getState, getSimTime, setSimTime, getEngineOn, ge
 import { camera, initCamera, cycleCamera, updateCamera, resetCameraView, setCamMode, setCamDist, setCamView, resizeCamera, setMap, isMap, cycleMapFocus } from './camera.js';
 import { initMapView, updateMapView } from './mapview.js';
 import { updateChutes } from './chutes.js';
+import { updateGear } from './gear.js';
 import { setOrigin } from './origin.js';
 import { setArmSwing } from './pad.js';
 import { initHUD, addLog, updateHUD, toggleMapView, endOverlay, setWarn, hideOverlay, clearLog } from './hud.js';
@@ -241,6 +242,7 @@ function frame() {
   updateSunShadow(S.pos);
   updateMapView(isMap(), dtReal);
   updateChutes();
+  updateGear();
   setArmSwing(getArmSwing());
   setOrigin(scene, camera.position, getSpin());   // draw from where the eye is, in the Earth's axes: js/origin.js
   renderHalfRes(renderer, scene, camera);   // weather and exhaust, at a quarter of the pixels

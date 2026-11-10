@@ -158,7 +158,9 @@ export function bodyUp(out = new THREE.Vector3()) {
    on its engine bells and leaves a lone CSM — whose tail is 6.8 u ABOVE S.pos — hanging 61 m over
    the Moon at the moment it is judged to have touched down. Contact is the lowest attached point
    meeting the terrain underneath. Stations are js/saturn.js's, in build units. */
-const TAIL_Z = [-42, -11.8, 6.8], CM_TAIL_Z = 26.0, NOSE_Z = 28.7;   // 26.0: the heat shield's face
+/* The last stage stands on its landing gear: js/saturn.js puts the footpads' soles at GEAR_Z = 6.2,
+   0.6 u (0.84 m) under the bell's exit at 6.8, and that plane is this stage's contact. */
+const TAIL_Z = [-42, -11.8, 6.2], CM_TAIL_Z = 26.0, NOSE_Z = 28.7;   // 26.0: the heat shield's face
 const _cu = new THREE.Vector3();
 export function tailStation() { const i = activeStage(); return i >= 0 ? TAIL_Z[i] : CM_TAIL_Z; }
 /* km from the lowest attached point down to the surface of the Moon (onMoon) or the Earth. */
