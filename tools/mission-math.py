@@ -68,7 +68,10 @@ print(f"  Moon  sphere of influence: {MOON_A*MOON_MASS_RATIO**0.4:6.0f} km  (r =
 
 # ─────────────────────────────────────────── 2. Apollo 11 parking orbit checks
 heading("2. APOLLO 11 PARKING ORBIT (SP-4029 Ascent / Earth Orbit Phase tables)")
-v_eoi = 25567.9 * FT * 1000          # m/s, space-fixed at earth orbit insertion
+v_eoi = 25567.9 * FT * 1000          # m/s, space-fixed at earth orbit insertion. SP-4029's feet value
+                                     # converts to 7,793.1; the state tables in section 8,
+                                     # apollo-11-profile.md and orbital-mechanics.md quote 7,793.4 —
+                                     # a 0.3 m/s rounding split between the two published forms.
 alt_eoi = 103.176 * NMI              # km
 apo, per = 100.4 * NMI, 98.9 * NMI
 a_park = R_E + (apo + per) / 2
@@ -366,7 +369,10 @@ for name, mine in (("MU_E", MU_E), ("RE", R_E), ("RM", R_M), ("MOON_DIST", MOON_
 # (b) what the docs and comments quote is what was just derived
 quoted = [
     (f"{REQUIREMENT:.0f}", "one-way requirement, m/s",
-     ["README.md", "js/constants.js", "docs/reference/mission-design.md", "docs/reference/apollo-11-profile.md"]),
+     ["README.md", "js/constants.js", "docs/reference/mission-design.md",
+      "docs/reference/apollo-11-profile.md", "tools/mission-sim.mjs"]),
+    (f"{dv_sl * 1000:.0f}", "pad to 185 km parking orbit, m/s",
+     ["tools/mission-sim.mjs"]),
     (f"{IDEAL_SHIPPED*1000:.0f}", "shipped stack ideal budget, m/s",
      ["README.md", "js/constants.js", "docs/reference/mission-design.md", "docs/reference/spacecraft.md"]),
     (f"{IDEAL_SHIPPED*1000/REQUIREMENT:.2f}", "shipped margin over the requirement",

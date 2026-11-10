@@ -86,7 +86,9 @@ stack is 1.6 m up when the arms stop being solid); yaw held from ignition with S
 arm 0.8 s later; a stack pitched over at ignition falls back and hits the ground at 142 m/s — it
 used to tunnel into the Earth. The SAS pitch program is timed from the moment the hold-down lets
 go, so waiting on the pad for the launch window does not change the ascent: waits of 0, 120, 300
-and 3,600 s all reach the same S-2 burnout state (6.416 km/s, apogee 584 km, max-Q 25.4 kPa).
+and 3,600 s reach the same S-2 burnout state to within 3 m/s (6.416 km/s, apogee 584 km, max-Q
+25.4 kPa; the hour-long wait lands on 6.4135 — the per-figure note in
+`docs/reference/mission-design.md`).
 
 Flight controls are inertial: the keys apply torque against the vehicle's live moment of inertia, so
 the fueled stack turns slowly and gets livelier as propellant burns off (`game.state().authority`
@@ -305,13 +307,17 @@ them exits non-zero:
 | `tools/mission-sim.mjs game --phase=<MOON_PHASE0>` | the shipped mission is not `WON` |
 | `tools/mission-sim.mjs retro --phase=1.4742618` | the previous stack, kept as a recorded loss, does not lose |
 | `tools/mission-math.py` | the vehicle it budgets is not `SPECS`, or a derived number it prints is not the one the docs and `js/constants.js` quote |
+| `tools/crater-stats.mjs` | the lunar relief is discontinuous: a crater cut off along a lattice plane |
 | `tools/shots.mjs` | the browser console printed an error or a warning in eleven minutes of flight |
 | `tools/clip-test.mjs` | the camera gets under the terrain or inside the hull anywhere in its sweep |
+| `tools/trail-offset.mjs` | the smoke column stands off the flame at any warp |
+| `tools/orbit-line.mjs` | the ribbon's apoapsis is not the state vector's, engine lit or cut |
+| `tools/debris-orbit.mjs` | a dropped stage leaves the atmosphere on a ballistic arc instead of an orbit |
 | `tools/flicker-test.mjs` | a view in which nothing should change has changing pixels, or two meshes share a plane |
 
-The last three drive a real Chromium on a real GPU against a dev server `check.mjs` starts on its
+The last six drive a real Chromium on a real GPU against a dev server `check.mjs` starts on its
 own port, so CI (`.github/workflows/check.yml`, on every push and pull request) runs
-`node tools/check.mjs --no-browser`: the first four. `tools/flicker-test.mjs` counts, over ten
+`node tools/check.mjs --no-browser`: the first five. `tools/flicker-test.mjs` counts, over ten
 screenshots of a view with the HUD hidden, the pixels that change between consecutive frames and
 the *flips* — a pixel that changes and comes straight back. Gates: the idle pad with the weather
 off (at most 300 changing pixels of 1,296,000, 20 strong, 20 flips), the same from 60 m, the pad

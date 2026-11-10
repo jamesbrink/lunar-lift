@@ -5,7 +5,7 @@ import { S, airDensity, getSimTime, getState, landing } from './physics.js';
 import { ATMO_TOP } from './aero.js';
 import { TAIL_Z, R_SM_DRAWN } from './stations.js';
 import * as WORLD from './world.js';
-import { nAlive, alive, resetPool, spawnParticle as spawn, killKind, ship, plumeDebug, pPos, pVel, pAge, pMode, pSmoke, SM_SMOKE, SM_SEAM, SM_FLASH } from './exhaust-pool.js';
+import { nAlive, alive, resetPool, spawnParticle as spawn, killKind, ship, plumeDebug, pPos, pVel, pAge, pMode, pSmoke, onRecycle, SM_SMOKE, SM_SEAM, SM_FLASH } from './exhaust-pool.js';
 import { BELL_SETS, emitExhaust, emitIdle, resetEmit } from './exhaust-emit.js';
 import { stepExhaust } from './exhaust-sim.js';
 import { initExhaustDraw, fillExhaust, clearExhaustDraw, setFireLight } from './exhaust-draw.js';
@@ -49,6 +49,9 @@ export const plumeLive = () => nAlive > 0;
    difference between the vehicle as drawn and the vehicle as it was when they were spawned. */
 const pend = [], pendRef = new THREE.Vector3(), seamOff = new THREE.Vector3();
 let pendT = 0;
+/* A pool-full spawn recycles a random live slot. If that slot was still owed its re-seat, the
+   fresh parcel would take the delta a second time — drop it from pend at the moment of theft. */
+onRecycle(i => { const k = pend.indexOf(i); if (k >= 0) pend.splice(k, 1); });
 export function spawnParticle(pos, vel, life, color, size0, smoke) {
   const i = spawn(pos, vel, life, color, size0, smoke);
   if (pend.length === 0) { pendRef.copy(S.pos); pendT = getSimTime(); }
@@ -57,10 +60,12 @@ export function spawnParticle(pos, vel, life, color, size0, smoke) {
 }
 /* `dt` is what stepExhaust is about to advance them by: taken off first, so that after the step
    they stand exactly where the drawn vehicle is. Not after an ff() jump (the vehicle has gone), and
-   not when the vehicle itself is gone (the camera stays on the true state). */
+   not when the vehicle itself is gone (the camera stays on the true state). S is already this
+   frame's DRAWN state — main.js blends it before updateParticles, ahead of updateBurnVisuals
+   writing ship.pos — so settle reads S, the same pose the debris re-seat gets. */
 function settle(dt, gone) {
   if (!gone && Math.abs(getSimTime() - pendT) <= DTPHYS * 1.01) {
-    const sx = ship.pos.x - pendRef.x, sy = ship.pos.y - pendRef.y, sz = ship.pos.z - pendRef.z;
+    const sx = S.pos.x - pendRef.x, sy = S.pos.y - pendRef.y, sz = S.pos.z - pendRef.z;
     for (const i of pend) {
       if (pMode[i] !== 2 || pAge[i] !== 0) continue;
       const i3 = i * 3, k = pSmoke[i] === 0 ? 1 : 0;      // the staging sparks come from the seam, not the middle of the stack

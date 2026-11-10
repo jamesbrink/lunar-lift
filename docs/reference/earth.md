@@ -49,9 +49,10 @@ Escape speed at 100 km: 11 099 m/s. Surface gravity from GM/R²: 9.820 m/s² —
   sits at *geocentric* latitude
   `atan((1−f)² · tan 28.6084°) = 28.4469°`.
   SP-4029 lists Apollo 11 liftoff at geocentric **28.4470° N, 80.6041° W** — identical.
-  A spherical planet must use the **geocentric** value: `PAD_LAT = 28.4469`, `PAD_LON = -80.6041`.
-  Current repo values (`28.4961, -80.6194`) match neither; the pad lands ~1.9 km off
-  and the rotation credit is wrong by ~1 m/s. See [launch-site.md](launch-site.md).
+  A spherical planet must use the **geocentric** value, and the repo ships it:
+  `PAD_LAT = 28.4469`, `PAD_LON = -80.6041` (`js/constants.js`). An earlier pair
+  (`28.4961, -80.6194`) matched neither frame: the pad landed ~1.9 km off and the
+  rotation credit was wrong by ~1 m/s. See [launch-site.md](launch-site.md).
 - **Gravity error from J2** is ≤0.005 m/s² (0.05 %) at the surface, decaying as (RE/r)³·J2.
   Irrelevant against the game's 32 m/s landing tolerance; the 6 km radius difference
   between equator and pole matters more for the pad's altitude, and the sphere splits
@@ -70,6 +71,6 @@ game's single-exponential model: [atmosphere.md](atmosphere.md).
 
 The Moon's GM is 1.23 % of Earth's; at the Moon's distance it is not negligible and
 `js/physics.js` integrates it explicitly rather than switching patched conics. The Sun
-contributes 6.9 × 10⁻⁴ of the Earth's gravity *at Earth* and is only used for lighting
+contributes 6.0 × 10⁻⁴ of the Earth's gravity *at Earth* and is only used for lighting
 (see [sun.md](sun.md)); its tidal term across the Earth–Moon distance is ~0.5 % of the
 Moon's pull at the Moon, below the game's tolerance.

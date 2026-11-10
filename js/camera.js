@@ -93,7 +93,7 @@ const ORIGIN = new THREE.Vector3();
 
 // scratch, never aliased against each other
 const _up = new THREE.Vector3(), _h = new THREE.Vector3(), _dir = new THREE.Vector3();
-const _diff = new THREE.Vector3(), _target = new THREE.Vector3();
+const _diff = new THREE.Vector3(), _target = new THREE.Vector3(), _esc = new THREE.Vector3();
 const X_AXIS = new THREE.Vector3(1, 0, 0);
 const _ax0 = new THREE.Vector3(), _ax1 = new THREE.Vector3(), _ax2 = new THREE.Vector3();
 const _moon = new THREE.Vector3(), desired = new THREE.Vector3();
@@ -179,6 +179,7 @@ export function setCamMode(name) { const k = camModes.indexOf(name); if (k >= 0 
    frame it is asked for, not one the damping is on its way to. `placed = false` forces a re-place
    instead of a lerp from wherever the camera happened to be. */
 export function setCamDist(d, snap = true) {
+  if (!(d > 0)) return;   // 0 or NaN would put the eye on the target: a degenerate look-at is a NaN camera
   wantDist = d;
   if (snap) { curDist = d; placed = false; }
 }
@@ -292,7 +293,7 @@ function collide(pos, map) {
     _diff.subVectors(pos, _target); _diff.addScaledVector(_up, -_diff.dot(_up));
     if (_diff.lengthSq() < 1e-12) _diff.copy(_ax1);
     _diff.normalize();
-    pos.copy(_target).addScaledVector(_up, pos.clone().sub(_target).dot(_up)).addScaledVector(_diff, SHIP_R + spanHalf);
+    pos.copy(_target).addScaledVector(_up, _esc.copy(pos).sub(_target).dot(_up)).addScaledVector(_diff, SHIP_R + spanHalf);
     groundOut(pos);
   }
 }

@@ -4,7 +4,6 @@ import { paintEarthJob } from './earthpaint.js';
 import { paintMoonJob } from './moonpaint.js';
 
 export { sampleGrid } from './paintkit.js';
-export { padWeight, padShoreWeight, padAuthored, padShoreSd, padShoreZone, shoreDistance, fineEarth } from './padsite.js';
 
 /* The planets are painted, not photographed.
 
@@ -105,7 +104,10 @@ export function applyRelief(geometry, key) {
       /* the Moon's craters are analytic (js/mooncraters.js): this mesh takes the ones its vertex
          spacing can hold */
       if (g.crater) h += g.crater(n.x, n.y, n.z, uvs.getX(i), uvs.getY(i), g.farSpacing);
-      if (h === 0) continue;
+      /* A bake that writes a vertex attribute rejects non-finite output: one NaN here is the
+         documented unremovable black band on a planet (terrain.js's patchAudit and cape.js guard the
+         other bakes; the globes have no audit to catch it late). */
+      if (!Number.isFinite(h) || h === 0) continue;
       pos.setXYZ(i, pos.getX(i) + n.x * h, pos.getY(i) + n.y * h, pos.getZ(i) + n.z * h);
     }
     geometry.computeVertexNormals();

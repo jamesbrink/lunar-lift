@@ -1,7 +1,7 @@
 import * as THREE from 'three';
-import { airDensity, airVel, aeroForce, aeroState, ATMO_TOP, CN_BODY, machDrag, soundSpeed } from './aero.js';
+import { airDensity, airVel, aeroForce, aeroState, ATMO_TOP, CN_BODY, CN_FIN, machDrag, soundSpeed } from './aero.js';
 import { padHit, ARM_TIME } from './colliders.js';
-import { U_M, TAIL_Z, GEAR_Z, CM_TAIL_Z, NOSE_Z, R_STACK, R_CSM_AERO, R_CM_BASE, GEOM, FIN_AREA, FIN_Z } from './stations.js';
+import { U_M, TAIL_Z, GEAR_Z, CM_TAIL_Z, NOSE_Z, LES_TIP_Z, R_STACK, R_CSM_AERO, R_CM_BASE, GEOM, FIN_AREA, FIN_Z } from './stations.js';
 import { G0, RE, MU_E, RM, MU_M, SOI_M, PAD_UP, PAD_POS, PAD_ANGULAR, VS, CD_AREA, WARPS, WARP_ONE, LAND_SAFE, SAFE_EARTH, SPECS, CAPSULE_MASS, EARTH_SPIN, SPIN_AXIS, PAD_EAST, MOON_DIST, TURN, moonPos, moonVel } from './constants.js';
 
 /* ---------------- injected dependencies (see initPhysics) ----------------
@@ -62,6 +62,11 @@ export const getMaxQ = () => maxQ;
 export const getDistFlown = () => distFlown;
 export const addDistFlown = d => { distFlown += d; };
 
+/* The ONE pad-idle predicate: cold vehicle, clamped to the mount, throttle shut. js/main.js spends
+   an idle frame as a single hold-down step (which is what makes x10000 on the pad affordable) and
+   warpCap() allows it — the two MUST agree, so they share this. A pressed or open throttle is not
+   idle: a 167 s "idle" step once lit the engine inside itself. */
+export const padIdle = () => state === 'pad' && !engineOn && !keys['shift'] && targetThrottle < 0.05;
 /* How fast time may run here. Warp through thick air, a burn close to the ground or the last
    kilometres over the Moon is how a flight ends in two real seconds; out in the open it is free.
    Returns the highest allowed entry of WARPS. */
@@ -72,7 +77,7 @@ export function warpCap() {
   const altE = S.pos.length() - RE, altM = S.pos.distanceTo(_moon) - RM;
   /* Standing on the pad with the engines cold, time is free: warp through the day and the night
      and launch when the Moon is where you want it. */
-  if (state === 'pad' && !engineOn && !keys['shift'] && targetThrottle < 0.05) { capWhy = 'ON THE PAD'; return 10000; }            // a day in 8.6 s: the hold-down step is an exact rotation at any size
+  if (padIdle()) { capWhy = 'ON THE PAD'; return 10000; }            // a day in 8.6 s: the hold-down step is an exact rotation at any size
   if (altE < 70) { capWhy = chute === 2 && chuteOpen >= 1 ? 'UNDER PARACHUTES' : 'IN THE AIR'; return chute === 2 && chuteOpen >= 1 ? 16 : 4; }
   if (altM < 15) { capWhy = 'THIS LOW OVER THE MOON'; return 4; }
   if (altM < 50) { capWhy = 'THIS LOW OVER THE MOON'; return 32; }
@@ -251,7 +256,7 @@ function planformMoment(z0) {
    small angle of attack. Positive weathervanes; negative diverges. Moves forward-heavy as tanks drain. */
 export function stability() {
   const sh = aeroShape(), I = inertiaAxes();
-  const nb = CN_BODY * sh.aRef, nf = 3 * sh.aFin;
+  const nb = CN_BODY * sh.aRef, nf = CN_FIN * sh.aFin;   // aero.js's own coefficient: the margin and the torque cannot drift apart
   return nb + nf > 0 ? -((nb * (sh.zPlan - I.zc) + nf * (sh.zFin - I.zc)) / (nb + nf)) * U_M : 0;
 }
 export function getControlAuthority() { const I = inertiaAxes(); return { py: I0 ? I0.py / I.py : 1, roll: I0 ? I0.roll / I.roll : 1 }; }
@@ -414,7 +419,7 @@ export function gravityAt(p, out, t = simTime) {
   return out;
 }
 const _g = new THREE.Vector3(), _d = new THREE.Vector3(), _moon = new THREE.Vector3(), _md = new THREE.Vector3(), _sv = new THREE.Vector3(), _up = new THREE.Vector3();
-const _spinQ = new THREE.Quaternion(), _fw = new THREE.Vector3(), _tq = new THREE.Vector3(), _qi = new THREE.Quaternion();
+const _spinQ = new THREE.Quaternion(), _fw = new THREE.Vector3(), _tq = new THREE.Vector3(), _qi = new THREE.Quaternion(), _dir = new THREE.Vector3();
 const _aero = new THREE.Vector3();
 /* Nose-on drag of the hardware now attached, as an acceleration added to `out` — for anything that
    predicts a coast (js/targeting.js) and must not disturb the live aero readout. */
@@ -451,7 +456,6 @@ export function physStep(dt) {
 
   if (state !== 'pad' && state !== 'flying') return;
   const i = activeStage();
-  if (i === 0 && !stages[0].separated && engineOn) targetThrottle = 1;   // solid booster: full throttle or nothing
   if (!engineOn && targetThrottle > 0.05 && i >= 0 && stages[i].fuel > 0) {
     engineOn = true; audio.engine(true);        // raising the throttle lights the engine, KSP-style
   }
@@ -574,7 +578,7 @@ export function physStep(dt) {
       const thMax = tacc > 1e-3 ? Math.acos(THREE.MathUtils.clamp(radAcc / tacc, 0, 1)) : 0;
       const th = Math.min(thProg, thMax);
       _md.copy(PAD_EAST).addScaledVector(_up, -PAD_EAST.dot(_up)).normalize();
-      dir = _up.clone().multiplyScalar(Math.cos(th)).addScaledVector(_md, Math.sin(th));
+      dir = _dir.copy(_up).multiplyScalar(Math.cos(th)).addScaledVector(_md, Math.sin(th));
     } else dir = navVel(_md);
     if (dir.lengthSq() > 1e-4) servo(_sq.setFromUnitVectors(UP_Z, dir.normalize()), ratio, dt);
   }
@@ -598,7 +602,7 @@ export function physStep(dt) {
     _tq.crossVectors(_fw, aeroState.dir).applyQuaternion(_qi.copy(S.q).invert());    // body frame
     const acc = THREE.MathUtils.clamp(moment / Ipy, -2, 2);
     omega.x += _tq.x * acc * dt; omega.y += _tq.y * acc * dt;
-    const vAir = Math.max(30, aeroState.mach * 300);                // m/s
+    const vAir = Math.max(30, aeroState.mach * 300);   // m/s. 300 is a held stand-in for soundSpeed() (340→295): pitch damping, not force — retune with the damping, not with aero.js
     const damp = aeroState.q * CN_BODY * planformMoment(I.zc) / (vAir * Ipy * 1000);   // 1/s
     omega.x *= Math.max(0, 1 - damp * dt);
     omega.y *= Math.max(0, 1 - damp * dt);
@@ -623,7 +627,7 @@ export function physStep(dt) {
      contact with steel is the end of the flight. */
   if (S.pos.length() - RE < 1) {
     /* The escape tower is part of the hull while it is on: 8.9 u of mast above the apex. */
-    const hit = padHit(S.pos, _fw.copy(UP_REF).applyQuaternion(S.q), simTime, tailStation(), lesSeparated ? NOSE_Z : 37.6, armSwing < 0.6);
+    const hit = padHit(S.pos, _fw.copy(UP_REF).applyQuaternion(S.q), simTime, tailStation(), lesSeparated ? NOSE_Z : LES_TIP_Z, armSwing < 0.6);
     if (hit) return collide(hit);
   }
 
@@ -642,7 +646,7 @@ export function physStep(dt) {
   }
   if (!flightStarted) {
     const alt0 = S.pos.length() - RE;
-    if (alt0 > (PAD_POS.length() - RE) + 0.15 && thrustAcc && thrustAcc.length() > 9.81e-3) {
+    if (alt0 > (PAD_POS.length() - RE) + 0.15 && thrustAcc && thrustAcc.length() > G0 / 1000) {   // still thrusting upward at over 1 g
       flightStarted = true; state = 'flying';
       hooks.addLog('LIFTOFF — THE TOWER CLEARS', 'good');
     }

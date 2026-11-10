@@ -9,7 +9,7 @@ import * as THREE from 'three';
    whose alpha falls off toward its own edge, so it reads as light bleed rather than a fat
    stripe. The logdepthbuf chunks appear in both shader stages; without them the ribbon lands at
    linear depth and sinks behind the planet in this logarithmic-depth scene.
-   The resolution uniform mirrors renderer.setPixelRatio(Math.min(devicePixelRatio, 2)) +
+   The resolution uniform mirrors the game's live render scale (see setRenderScale below) times
    innerWidth/innerHeight and tracks resize events; call setResolution() if you draw elsewhere.
    Usage (handle IS a THREE.Group — scene.add(handle) directly):
      const r = ribbon({ color, widthPx, glowWidthPx, glowColor, vertexColors });
@@ -22,6 +22,17 @@ import * as THREE from 'three';
      r.material             the core ShaderMaterial; .opacity is live (both passes also via
      r.setOpacity(o, glowO?))
      r.count                current point count                                            */
+
+/* The game's live render scale. js/main.js owns it — it ratchets down under load and ?scale= pins
+   it — and a ribbon that assumed devicePixelRatio would draw lines at half width after the ratchet
+   and 1.5× fat under ?scale=3. main.js calls setRenderScale() at boot and on every drop. */
+let renderScale = Math.min(typeof devicePixelRatio === 'number' ? devicePixelRatio : 1, 2);
+const resyncs = new Set();
+export function setRenderScale(n) {
+  if (!(n > 0) || n === renderScale) return;
+  renderScale = n;
+  for (const f of resyncs) f();
+}
 
 const VERT = `
 #include <common> // logdepthbuf_vertex calls isPerspectiveMatrix; ShaderMaterial omits it
@@ -214,7 +225,11 @@ export function ribbon(
   group.clear = () => { count = 0; applyRange(); };
   group.setResolution = (w, h) => uRes.value.set(w, h);
 
-  const syncRes = () => uRes.value.set(innerWidth, innerHeight).multiplyScalar(Math.min(devicePixelRatio || 1, 2));
+  /* Line widths are computed in device pixels, so they must follow the game's LIVE render scale —
+     js/main.js ratchets it down under load and ?scale= pins it, and the pin is exactly what pixel
+     measurements rely on. setRenderScale re-syncs every ribbon when it changes. */
+  const syncRes = () => uRes.value.set(innerWidth, innerHeight).multiplyScalar(renderScale);
+  resyncs.add(syncRes);
   if (typeof window !== 'undefined') { syncRes(); window.addEventListener('resize', syncRes); }
 
   return group;

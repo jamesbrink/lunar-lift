@@ -287,13 +287,13 @@ export function ejectaEvents(gx, gy, gz, nx, ny, nz, rx, ry, rz) {
   const altM = ship.live ? Math.max(4, (ship.pos.distanceTo(moonP) - RM) * 1000) : 1200;
   if (tl > 1e-9) {
     lastFanT = t;
-    const nF = Math.max(3, Math.min(11, Math.round(11 * 160 / (altM + 110))));   // 10 @ 9 m, 8 @ 200 m, 3 ≥ ~3.7 km
+    const nF = Math.max(3, Math.min(11, Math.round(11 * 160 / (altM + 110))));   // 11 @ 9 m, 6 @ 200 m, 3 from ~0.4 km
     const vmax = 0.045 + 0.009 * Math.sqrt(altM);   // km/s: 72 @ 9 m, 187 @ 200 m, 330 @ 1 km
     const rf = (altM * Math.tan(0.30) + 6) * 0.001; // jet footprint radius (bell half-angle + jitter), km
     for (let c = 0; c < nF; c++) {
       /* Launch state sampled from a cone about the exhaust axis as the ground reflected it —
          that reflection IS t, the deflected flow (groundHit turns the jet tangentially and
-         keeps 0.45 of it here) — ±30° in azimuth. Every parcel therefore leaves on a ballistic
+         keeps 0.10 of it here) — ±30° in azimuth. Every parcel therefore leaves on a ballistic
          arc (apex v²sin²β/2g): the old launch had vn ≤ 1.5 m/s — an apex under 0.7 m, no arc to
          see, just a disc crawling sideways; the 10-68° law that replaced it put the field in the
          air (see the beta note below). */

@@ -539,7 +539,12 @@ void main() {
     }
   }
 
-  /* The veil: one thin sheet at 10 km, drawn where the ray crosses it. */
+  /* The veil: one thin sheet at 10 km, drawn where the ray crosses it. OFF: the march materials
+     define no VEIL, so this block compiles away — its two textureLod reads used to run for every
+     weather pixel every frame only to be multiplied by zero. Define VEIL on them (js/clouds.js,
+     march({...})) to bring it back; seen from above it read as a fan of pale parallel streaks
+     lying over sea and land, a rendering fault rather than cirrus (user screenshot, ~40 km down). */
+#ifdef VEIL
   {
     float Rc = VEIL_R;
     float A = dot( o, d ), C = dot( o, o ), disc = A * A - ( C - Rc * Rc );
@@ -553,13 +558,11 @@ void main() {
         float ls = lodOf( fkm, VEIL_TEX_KM );
         float streak = mix( textureLod( cloudCells, uvc * VEIL_REP + driftV, ls ).r, 0.5, smoothstep( 3.0, 5.0, ls ) );
         float mu = abs( dot( normalize( pc ), d ) );
-/* Switched off: seen from above the veil is a fan of pale parallel streaks lying over sea and land
-           that reads as a rendering fault, not as cirrus (user screenshot, ~40 km looking down). The
-           sheet stays computed so turning it back on is this one factor. */
-        veil = 0.0 * clamp( sheet * ( 0.35 + 0.9 * streak ), 0.0, 1.0 ) * exp( -min( tc, 10.0 / max( mu, 0.02 ) ) / HAZE_KM );
+        veil = clamp( sheet * ( 0.35 + 0.9 * streak ), 0.0, 1.0 ) * exp( -min( tc, 10.0 / max( mu, 0.02 ) ) / HAZE_KM );
       }
     }
   }
+#endif
   /* light goes out multiplied by coverage. The composite reads this target bilinearly, and a plain
      light let the pixels just OUTSIDE an outline — coverage near zero, light whatever the nearest
      miss happened to read, or the default — vote on the tone of the outline's own pixels. */

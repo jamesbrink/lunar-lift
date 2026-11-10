@@ -46,7 +46,9 @@ const P = await import('../js/physics.js');
 const { stages } = await import('../js/saturn.js');
 const C = await import('../js/constants.js');
 
-const WHICH = ['game', 'landed', 'nova', 'retro'].includes(process.argv[2]) ? process.argv[2] : 'game';
+const WHICH = process.argv[2] === undefined ? 'game'
+  : ['game', 'landed', 'nova', 'retro'].includes(process.argv[2]) ? process.argv[2]
+    : (console.error(`unknown stack '${process.argv[2]}' — game | landed | nova | retro`), process.exit(2));
 const PHASE_ARG = Number((process.argv.find(a => a.startsWith('--phase=')) || '').split('=')[1]);
 const TRACE = process.argv.includes('--trace');
 
@@ -461,7 +463,8 @@ console.log(`one-way requirement to lunar orbit = ${REQUIRE} m/s  (mission-math.
 let phase = Number.isFinite(PHASE_ARG) ? PHASE_ARG : NaN;
 if (!Number.isFinite(phase)) {
   let lo = 1.7595, hi = 2.2249, flo = probePeri(lo), fhi = probePeri(hi);
-  while (!(flo > AIM_PERI && fhi < AIM_PERI)) {                 // walk the bracket until it straddles
+  for (let walk = 0; !(flo > AIM_PERI && fhi < AIM_PERI); walk++) {   // walk the bracket until it straddles
+    if (walk > 32) { console.error('solve: no launch window straddles AIM_PERI — check AIM_PERI and the forces'); process.exit(1); }
     hi = (hi + 0.25) % (2 * Math.PI);
     fhi = probePeri(hi);
     if (fhi > AIM_PERI) { lo = hi; flo = fhi; }
@@ -473,7 +476,10 @@ if (!Number.isFinite(phase)) {
     if (fm > AIM_PERI) { lo = m; flo = fm; } else { hi = m; fhi = fm; }
     if (Math.abs(fm - AIM_PERI) < 5) break;
   }
-  phase = ((lo + hi) / 2 + 2 * Math.PI) % (2 * Math.PI);
+  /* The circular midpoint, exactly as the loop takes it: if the bracket ever straddles the 0/2π
+     seam — MOON_PHASE0 moved 0.036 rad in one physics commit — the naive (lo+hi)/2 lands antipodal
+     and certifies the wrong window. */
+  phase = (lo + (((hi - lo) % (2 * Math.PI) + 2 * Math.PI) % (2 * Math.PI)) / 2 + 2 * Math.PI) % (2 * Math.PI);
 }
 
 const r = mission(phase, { trace: TRACE });

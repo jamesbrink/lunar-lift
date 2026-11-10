@@ -113,12 +113,19 @@
 <div id="narrow">LUNAR LIFT is flown from a keyboard and wants a wider window — open it on a desktop or turn the device sideways.</div>
 <script>
 /* If the game has not started in ten seconds, say why it might not have: the module graph loads
-   three.js from a CDN and needs WebGL 2, and either failing used to leave a blank page. */
+   three.js from a CDN and needs WebGL 2, and either failing used to leave a blank page. If it
+   starts anyway (a slow CDN), the card retracts — a "did not start" over a running game is a lie. */
 setTimeout(function () {
   if (window.game || window.__fatal) return;
-  var o = document.getElementById('overlay'); o.classList.remove('hidden');
+  var o = document.getElementById('overlay');
+  o.classList.remove('hidden');
   document.getElementById('overlayText').innerHTML = '<div class="brief">The game did not start. It needs WebGL 2 and a network connection to load three.js from cdn.jsdelivr.net. Check the connection and reload.</div>';
   document.getElementById('bigBtn').style.display = 'none';
+  document.getElementById('lookBtn').style.display = 'none';   // there is nothing to look around
+  var t = setInterval(function () {
+    if (window.game) { o.classList.add('hidden'); clearInterval(t); }
+    else if (window.__fatal) clearInterval(t);
+  }, 1000);
 }, 10000);
 </script>
 <script type="importmap">

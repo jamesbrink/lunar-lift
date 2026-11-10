@@ -38,6 +38,17 @@ const KNOWN_CHUNKS = new Set([
   'logdepthbuf_pars_fragment', 'logdepthbuf_fragment',
 ]);
 
+/* The allowlist is a contract with the PINNED three: if the installed build no longer defines one
+   of these chunks, `#include <logdepthbuf_vertex>` splices to nothing and the object silently
+   draws at the wrong depth — the exact failure this linter exists to catch. Three's text moving is
+   a hard error, here, before the page ever sees it. */
+for (const c of KNOWN_CHUNKS) {
+  if (!(c in THREE.ShaderChunk)) {
+    console.error(`shader-lint: three ${THREE.REVISION} does not define chunk <${c}> — the pinned version moved`);
+    process.exit(1);
+  }
+}
+
 /* Every chunk name three's own shaders actually include — the union over ShaderLib, so an
    injection anchor that no longer exists in the template it splices into is a hard error. */
 const AVAILABLE = new Set();

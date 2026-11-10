@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { RE, RM } from './constants.js';
+import { RE } from './constants.js';
 
 /* The painters' tool kit: asset decode, mask morphology, box filters, the seeded lattice noise and
    the grid sampler. Everything here is deterministic — no Math.random anywhere — so the geology is
@@ -263,7 +263,7 @@ function latticeNoise() {
 /* lattice period for a wavelength in km around the globe. uv noise stretches with cos(lat), left
    alone on purpose: it vanishes in fine detail and is invisible under a three-band ramp. */
 export const period = (circKm, lambdaKm) => Math.max(8, Math.round(circKm / lambdaKm));
-export const EARTH_CIRC = 2 * Math.PI * RE, MOON_CIRC = 2 * Math.PI * RM;
+export const EARTH_CIRC = 2 * Math.PI * RE;
 
 export function fbm(u, v, p, oct, seed) {
   let sum = 0, amp = 0.5, tot = 0;

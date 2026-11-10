@@ -1,6 +1,6 @@
 import * as THREE from 'three';
-import { RE, RM, MOON_DIST, MOON_U, MOON_V, SOI_M, moonPos } from './constants.js';
-import { S, getSimTime, getState, gravityAt } from './physics.js';
+import { RE, RM, MOON_DIST, MOON_U, MOON_V, SOI_M, WARPS, moonPos } from './constants.js';
+import { S, getSimTime, getState, getWarpIndex, gravityAt } from './physics.js';
 import { ribbon } from './ribbon.js';
 import { path as orbit, marker } from './predictor.js';
 
@@ -149,7 +149,9 @@ export function updateMapView(on, dt = 0.016) {
   /* The coast runs whether or not the map is up: its closest lunar pass is the HUD's coarse aim
      while the engine is burning and the exact prediction (js/targeting.js) is not available. */
   tick += dt;
-  if (tick > 0.5) { tick = 0; if (getState() === 'flying') coast(); else { path.clear(); meet.r = Infinity; } }
+  /* Paused is a still: every input to the coast is frozen, so re-integrating it would recompute the
+     identical path — keep the last one on screen instead. */
+  if (tick > 0.5) { tick = 0; if (WARPS[getWarpIndex()] !== 0) { if (getState() === 'flying') coast(); else { path.clear(); meet.r = Infinity; } } }
   if (!on) return;
   moonPos(getSimTime(), _m);
   shipMark.position.copy(S.pos);

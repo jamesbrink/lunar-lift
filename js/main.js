@@ -3,7 +3,7 @@ import { RE, RM, WARPS, DTPHYS, PAD_POS, SPECS, moonPos } from './constants.js';
 import { initWorld, syncTime, updateSky, updateSunShadow, setWeatherVisible, getSpin, groundHeight, fineGroundHeight, moonGroundHeight } from './world.js';
 import { stages, lesGroup } from './saturn.js';
 import { initVehicle, spawnParticle, addDebris, detachStage, setVisible, updateParticles, updateDebris, updateBurnVisuals, clearDebris, resetStages, plumeLive } from './vehicle.js';
-import { S, keys, initPhysics, getState, getSimTime, setSimTime, getEngineOn, getThrottle, getWarpIndex, setWarpIndex, setTargetThrottle, getTargetThrottle, getSasOn, setSas, cycleWarp, warpHorizon, toggleSas, toggleSasRetro, activeStage, isBurning, accelAt, physStep, toggleIgnite, separateStage, separateLES, addDistFlown, resetSim, markTeleported, airDensity, groundVel, omega, getControlAuthority, toggleRcsAssist, toggleHold, deployChute, getArmSwing, guardWarp, setCutoffGuard, aeroState, getAeroLoad, stability } from './physics.js';
+import { S, keys, initPhysics, getState, getSimTime, setSimTime, getEngineOn, getThrottle, getWarpIndex, setWarpIndex, setTargetThrottle, getTargetThrottle, getSasOn, setSas, cycleWarp, warpHorizon, toggleSas, toggleSasRetro, activeStage, isBurning, accelAt, physStep, toggleIgnite, separateStage, separateLES, addDistFlown, resetSim, markTeleported, airDensity, groundVel, navVel, padIdle, omega, getControlAuthority, toggleRcsAssist, toggleHold, deployChute, getArmSwing, guardWarp, setCutoffGuard, aeroState, getAeroLoad, stability } from './physics.js';
 import { camera, initCamera, cycleCamera, updateCamera, resetCameraView, setCamMode, setCamDist, setCamView, resizeCamera, setMap, isMap, cycleMapFocus } from './camera.js';
 import { initMapView, updateMapView } from './mapview.js';
 import { updateChutes } from './chutes.js';
@@ -14,6 +14,7 @@ import { initHUD, addLog, updateHUD, toggleMapView, resetMilestones, endOverlay,
 import { audioInit, audioEngine, audioThud, audioExplosion, audioWin, updateAudio, toggleMute } from './audio.js';
 import { updateAim, resetAim, cutoffNow } from './targeting.js';
 import { initHalfRes, occlude, renderHalfRes } from './halfres.js';
+import { setRenderScale } from './ribbon.js';
 import { initPredictor, predict, updatePredictor, clearPredictor, predLine } from './predictor.js';
 
 /* ---------------- renderer / scene ---------------- */
@@ -26,6 +27,7 @@ function fatal(title, text) {
   o.querySelector('h1').firstChild.textContent = title;
   document.getElementById('overlayText').innerHTML = `<div class="brief">${text}</div>`;
   document.getElementById('bigBtn').style.display = 'none';
+  document.getElementById('lookBtn').style.display = 'none';   // there is nothing to look at: the loop never started
   window.__fatal = true;
 }
 let renderer;
@@ -38,12 +40,14 @@ catch (err) { fatal('CANNOT START', 'This game needs WebGL 2. Your browser or gr
 const SCALE_PIN = Number(new URLSearchParams(location.search).get('scale'));
 let pixelRatio = SCALE_PIN > 0 ? Math.min(SCALE_PIN, 3) : Math.min(devicePixelRatio, 2), slowFor = 0;
 renderer.setPixelRatio(pixelRatio);
+setRenderScale(pixelRatio);        // ribbon line widths must follow this ratio, not the device default
 function adaptScale(dtReal) {
   if (SCALE_PIN > 0 || pixelRatio <= 1 || document.hidden) { slowFor = 0; return; }
   slowFor = dtReal > 0.024 ? slowFor + dtReal : Math.max(0, slowFor - dtReal * 2);     // slower than ~42 fps
   if (slowFor > 3) {
     slowFor = 0; pixelRatio = Math.max(1, pixelRatio - 0.25);
     renderer.setPixelRatio(pixelRatio); renderer.setSize(innerWidth, innerHeight);
+    setRenderScale(pixelRatio);
     addLog(`RENDER SCALE ${pixelRatio.toFixed(2)} — KEEPING THE FRAME RATE`);
   }
 }
@@ -108,9 +112,15 @@ initHUD({ resetMission });
 initHalfRes(scene, plumeLive);
 occlude(scene);          // every opaque mesh built so far hides the half-resolution layer
 
+/* SHIFT is the throttle, so the SHIFTed faces of keys have to work while it is held — AND keyup must
+   land on the same entry keydown wrote: hold SHIFT, press '-', release SHIFT first, release '-' and
+   an unnormalised '_' stays true forever, zooming the camera out past the wheel. */
+const normKey = e => { let k = e.key.toLowerCase();
+  if (k === '}') k = ']'; else if (k === '{') k = '[';
+  else if (k === '_') k = '-'; else if (k === '+') k = '=';
+  return k; };
 addEventListener('keydown', e => {
-  let k = e.key.toLowerCase();
-  if (k === '}') k = ']'; else if (k === '{') k = '[';       // SHIFT is the throttle: warp must still work while it is held
+  const k = normKey(e);
   /* A focused chip or button takes SPACE and ENTER for itself, as any button does. */
   if (e.target && e.target.tagName === 'BUTTON' && (k === ' ' || k === 'enter')) return;
   if ([' ', 'arrowup', 'arrowdown', 'arrowleft', 'arrowright', '-', '='].includes(k) || (k === ']' || k === '[')) e.preventDefault();
@@ -145,7 +155,7 @@ addEventListener('keydown', e => {
   else if (k === 'r') resetMission();
   else if (k === 'escape' || k === 'pause') { setWarpIndex(WARPS[getWarpIndex()] === 0 ? WARPS.indexOf(1) : 0); addLog(WARPS[getWarpIndex()] === 0 ? 'PAUSED — ESC TO RESUME' : 'RESUMED'); }
 });
-addEventListener('keyup', e => { const k = e.key.toLowerCase(); keys[k] = false; if (k === 'shift') keys['}'] = keys['{'] = false; });
+addEventListener('keyup', e => { const k = normKey(e); keys[k] = false; if (k === 'shift') keys['}'] = keys['{'] = false; });
 addEventListener('blur', () => { for (const k in keys) keys[k] = false; });
 
 /* X drops a stage for good, and one slip of a finger used to throw away a burning S-1 with 74 % of
@@ -207,7 +217,7 @@ function frame() {
        At most 20,000 steps a frame; a frame too slow for the warp falls behind it.
        One exception: standing on the pad with the engines cold and the throttle shut, a step is
        an exact rotation with the planet at any size, so the frame is one step and x10000 is free. */
-    const idle = getState() === 'pad' && !getEngineOn() && !keys['shift'] && getTargetThrottle() < 0.05;
+    const idle = padIdle();   // the ONE predicate physics.js's warpCap shares: the two cannot disagree now
     if (idle) { physStep(simDt); bank = 0; prevValid = false; }
     else {
       /* at most a quarter of the way to the next place that changes the allowed warp (never less than
@@ -277,12 +287,13 @@ addEventListener('resize', () => {
 });
 
 /* ---------------- debug/test handle ---------------- */
+const _sg = new THREE.Vector3(), _sd = new THREE.Vector3(), _sm = new THREE.Vector3();
 window.game = {
   state: () => ({ state: getState(), simTime: getSimTime(), altE: S.pos.length() - RE,
     radialE: S.v.dot(new THREE.Vector3().copy(S.pos).normalize()),
     moon: moonPos(getSimTime(), new THREE.Vector3()).toArray(),
     altM: S.pos.distanceTo(moonPos(getSimTime(), new THREE.Vector3())) - RM,
-    radialM: S.v.dot(new THREE.Vector3().subVectors(S.pos, moonPos(getSimTime(), new THREE.Vector3())).normalize()),
+    radialM: navVel(_sg).dot(_sd.subVectors(S.pos, moonPos(getSimTime(), _sm)).normalize()),   // navVel: inside the Moon's SOI the inertial velocity carries 1.02 km/s of lunar motion
     speed: S.v.length(), fuel: stages.map(s => s.fuel), separated: stages.map(s => s.separated),
     engineOn: getEngineOn(), throttle: getThrottle(), sasOn: getSasOn(), warp: WARPS[getWarpIndex()],
     omega: [omega.x, omega.y, omega.z], authority: getControlAuthority().py,

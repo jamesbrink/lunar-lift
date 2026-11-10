@@ -9,8 +9,6 @@ import { craterHeight, listCraters, craterDepth, craterRim } from './mooncraters
 /* The Moon's paint job: the map canvas, the shader's fields, and the relief grid. The craters are
    not in the grid: they are js/mooncraters.js's ladder, added on top by field.crater(). */
 
-const MOON_CIRC = 2 * Math.PI * RM;
-
 const MARE_AT = 0.43;
 
 export async function paintMoonJob(path) {

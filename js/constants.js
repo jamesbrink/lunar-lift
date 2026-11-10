@@ -78,8 +78,11 @@ export function moonVel(t, out = new THREE.Vector3()) {
 
 export const VS = 0.0014;                 // vehicle visual scale: 75 build units → ~105 m, Saturn-V sized
 export const PAD_SCALE = VS;
-/* The state point on the pad: the deck top is 4 u above the datum and the vehicle's centre 37 u above
-   that (about half its height). Contact is js/physics.js surfaceAlt(), not this. */
+/* The state point on the pad: 41 u above the datum — the deck's top is z 1.0 (js/pad.js's height
+   table) and the vehicle's centre rests 40 u above the deck (about half its height). The 4 + 37
+   grouping below is the CERTIFIED arithmetic, kept verbatim on purpose: regrouping it to 41·VS
+   changes the float's last bit and moves the recorded retro loss from 1,264 to 1,274 m/s. Contact
+   is js/physics.js surfaceAlt(), not this. */
 export const PAD_POS = PAD_UP.clone().multiplyScalar(RE + 4 * PAD_SCALE + 37 * VS);
 export const PAD_ANGULAR = new THREE.Vector3().crossVectors(SPIN_AXIS, PAD_POS).multiplyScalar(EARTH_SPIN); // pad's inertial velocity
 
@@ -88,7 +91,7 @@ export const PAD_ANGULAR = new THREE.Vector3().crossVectors(SPIN_AXIS, PAD_POS).
 export const ATMO_H = 8.5, RHO0 = 1.225, CD_AREA = 28;   // kg/m³, m²
 /* Time warp steps. 0 is paused and 0.25 is slow motion; WARP_ONE is where a mission starts.
    DTPHYS is the one step the flight is integrated at. js/main.js banks frame time × warp and spends
-   it in whole DTPHYS steps (at most 600 a frame), so warp — x0.25 included — changes how MANY steps
+   it in whole DTPHYS steps (at most 20,000 a frame), so warp — x0.25 included — changes how MANY steps
    a frame takes, never their size, and the picture between two steps is interpolated. The one
    exception is a cold vehicle held down on the pad, where a step is an exact rotation with the
    planet at any size: there the frame is a single step, which is what makes x10000 affordable. */
@@ -130,7 +133,7 @@ export const SKY_DAY = new THREE.Color(0x79b1de), SKY_NULL = new THREE.Color(0x0
      - stage 2 over 0.95 g at ignition (1.09 g here) so the vehicle is still accelerating when it
        takes over from stage 1.
      - stage 3 is deliberately *over*-powered against Apollo's 45 kN descent propulsion system:
-       400 kN is 4.2 g_moon at the 59 t LOI mass and 6.9 g_moon at the 36 t landing mass, so
+       400 kN is 4.2 g_moon at the 59 t LOI mass and 6.8 g_moon at the 36 t landing mass, so
        hovering takes 15% throttle and no setting balances lunar gravity exactly. That is
        survivable only because the descent guidance commands a velocity envelope bounded by altitude
        instead of trying to hover. Throttle granularity, not thrust level, is what limits a soft

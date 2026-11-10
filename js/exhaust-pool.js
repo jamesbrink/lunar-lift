@@ -48,9 +48,15 @@ export let nAlive = 0;
 const freeSlots = new Int32Array(NP);
 let nFree = NP;
 for (let i = 0; i < NP; i++) freeSlots[i] = NP - 1 - i;   // pops come out in order 0,1,2,…
+/* Pool-full spawns steal a random live slot. Subscribers (js/vehicle.js) use this to retire any
+   per-slot bookkeeping the stolen parcel still owed, so the new one cannot inherit it. */
+let recycleHook = null;
+export function onRecycle(fn) { recycleHook = fn; }
 export function allocSlot() {
   if (nFree > 0) { alive[nAlive++] = freeSlots[--nFree]; return alive[nAlive - 1]; }
-  return alive[(Math.random() * nAlive) | 0];
+  const i = alive[(Math.random() * nAlive) | 0];
+  if (recycleHook) recycleHook(i);
+  return i;
 }
 export function killSlot(k) {
   const i = alive[k]; pMode[i] = 0;

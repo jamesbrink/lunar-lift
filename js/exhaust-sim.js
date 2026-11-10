@@ -123,16 +123,17 @@ function groundHit(vx, vy, vz, nx, ny, nz, frx, fry, frz, moon) {
        the trench at 0.55 × 2.9 km/s = 1.6 km/s — it crossed the 700 m pad in half a second, so at
        any shutter time later than the first frame the blast read as NOTHING but a glow (measured
        live MET 2.5: deck clear, 1 229 parcels already 700 m out and 6 cm thin). A trench sheet is
-       around Mach 1: 0.08 × 2.9 = 230 m/s leaves the pad still a wall of smoke. The Moon keeps
-       0.75 — Apollo's vacuum ejecta really did run far, and frames 13/14 are certified on it. */
+       around Mach 1: 0.08 × 2.9 = 230 m/s leaves the pad still a wall of smoke. The Moon's ejecta
+       is held to 0.02 with it — an early 0.75 ran the vacuum spray clean off frame, which reads as
+       a jet, not an impact; the lunar shoot frames are certified on the held value. */
     const out = (moon ? 0.02 : 0.08) * s;                            // impact → outward flow
     /* Tangential bleed. It used to survive the hit whole — `tx * (1 + out·k)` — so deflectate left
        the trench at close to exhaust speed and painted a 200 m field of discrete glowing domes around
        the pad. Air, the trench walls and the berm do not allow that: the flow arrives supersonic and
-       leaves as a ground-hugging sheet at a fraction of the speed. The Moon bled almost nothing (0.8)
-       and the spray left frame in one breath: a translucent gradient cone with no surface event at
-       all. 0.45 keeps a long Apollo-style throw but decelerates the dust
-       enough that it crawls, piles and reads as ground interaction. */
+       leaves as a ground-hugging sheet at a fraction of the speed. The shipped bleed is keep = 0.10
+       on the Moon and 0.12 on Earth; the early 0.8 kept nearly everything and the lunar spray left
+       frame in one breath — a translucent gradient cone with no surface event at all, and the 0.45
+       of one round between kept too long a throw for the dust to pile. */
     const keep = moon ? 0.10 : 0.12;
     /* Lift is bounded: real deflectate rises by entrainment, not by keeping 16% of Mach-9
        momentum — uncapped this launched the pad blast 2 km into the sky. */
@@ -177,7 +178,7 @@ function stepParcel(i, h) {
         if (pMode[i] === 2 && pSmoke[i] === SM_SPRAY) {
           /* Ground-pinned extras settle WITHOUT bouncing. groundHit's straight-on fallback
              (tl < 1e-6) builds `tx = -ny; ty = nx` — a unit DIRECTION consumed as a VELOCITY —
-             so anything landing exactly vertically gets the full keep(0.45) km/s tangential
+             so anything landing exactly vertically gets the full keep-fraction tangential
              kick; measured: a scorch parcel crawled +376 m/s upslope, riding that fallback
              every step it re-settled. That fallback is a corner case for the certified blast
              flow and stays untouched; the correct response for a settling patch of dust is to
@@ -442,7 +443,7 @@ function stepParcel(i, h) {
        At 67 km staging there is nothing to roll in, and the ungated growth bloomed 26 puffs into
        kilometre-soft bokeh discs against the black: the reviewer's worst frame. The law now reads
        the same atmosphere the plume physics uses — full billow at the pad, ~nothing up high. */
-    let grow = 2.4;
+    let grow = 0;   // sparks (pSmoke 0) fall through every branch below and keep the size they were drawn at
     if (pSmoke[i] === SM_SEAM) {
       /* Staging-seam puffs entrain exactly like certified smoke — the airDensity gate — but with
          a low ceiling: they read as dark silhouettes against the flash for 0.4-0.8 s, and at a

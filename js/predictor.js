@@ -216,7 +216,12 @@ export function predict() {
     const body = moonPos(sim, _m);
     const overMoon = S.pos.distanceToSquared(body) < S.pos.lengthSq();
     _d.copy(S.pos); if (overMoon) _d.sub(body);
-    if (S.v.dot(_d) / _d.length() <= 0.05) {
+    /* Radial rate in the frame of the body underneath, the same conversion the conic block above
+       makes: inside the Moon's sphere the Moon itself moves 1.02 km/s through the game frame, and
+       that frame term is twenty times the 50 m/s threshold — dotted with the INERTIAL velocity the
+       pill was suppressed on the leading limb and raised on a craft climbing away on the trailing. */
+    _v0.copy(S.v); if (overMoon) _v0.sub(moonVel(sim, _m));
+    if (_v0.dot(_d) / _d.length() <= 0.05) {
       msg = `IMPACT PREDICTED: ${path.impact === 'moon' ? 'MOON' : 'EARTH'} IN ${Math.round(impactT / 60)} min`;
     }
   }
@@ -272,7 +277,10 @@ export function updatePredictor(camera) {
   line.setPoints(vPos, m); line.setColors(vCol, m); line.setAlphas(vAlpha, m);
 
   const place = (mark, idx, alt, exact) => {
-    mark.visible = idx >= cursor;
+    /* A closed orbit is drawn as the whole ellipse, so the conic's own apsides stand whether or not
+       the sampled path reached one — a lap sampled from near periapsis stops ~22° short, and the
+       marker used to vanish while the HUD printed that same Pe. */
+    mark.visible = idx >= cursor || (path.closed && path.exact);
     if (!mark.visible) return;
     if (path.exact) mark.position.set(exact.x - ox, exact.y - oy, exact.z - oz);
     else mark.position.set(rel[idx * 3] - ox, rel[idx * 3 + 1] - oy, rel[idx * 3 + 2] - oz);

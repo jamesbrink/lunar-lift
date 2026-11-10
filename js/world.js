@@ -153,7 +153,6 @@ export function initWorld(target) {
      band alone left the sea black. ---- */
   earth = new THREE.Mesh(new THREE.SphereGeometry(RE, 384, 192),
     toon({ gradientMap: RAMP_EARTH, emissive: 0x07182c }));
-  earth.geometry.setAttribute('aUv', earth.geometry.attributes.uv);   // shared, not copied
   earth.geometry.setAttribute('sfUv', earth.geometry.attributes.uv);  // the ground shader's name for it
   earth.receiveShadow = true;
   /* The surface is DRAWN, per fragment, by js/surface.js — biomes, relief bands, the inked coast —
@@ -412,8 +411,9 @@ export function initWorld(target) {
   }
 
   /* ---- launch pad: a child of the Earth mesh, so it rides the spin and stays over the same ground.
-     Local frame: +Z = PAD_UP (radial), +X = PAD_EAST, +Y = north. Build units; the crawler deck
-     keeps the platform top at z = 4, the anchor physics expects, and the group scales by PAD_SCALE. ---- */
+     Local frame: +Z = PAD_UP (radial), +X = PAD_EAST, +Y = north. Build units; the crawler deck's
+     top is z 1.0 (js/pad.js's height table) and the vehicle's state point rests at z 41 — the anchor
+     physics expects (PAD_POS in js/constants.js) — and the group scales by PAD_SCALE. ---- */
   const built = buildPad(glowMap);
   pad = built.group;
   /* The floods, in the axes the frame is drawn in. Those are the Earth's own (js/origin.js turns the
@@ -431,9 +431,9 @@ export function initWorld(target) {
   pad.position.copy(PAD_UP).multiplyScalar(RE);
   pad.quaternion.setFromRotationMatrix(new THREE.Matrix4().makeBasis(PAD_EAST, PAD_NORTH, PAD_UP));
   earth.add(pad);
-  earth.add(buildCape());       // the rest of the Cape: js/cape.js welds itself the same way       // the rest of the Cape: js/cape.js welds itself the same way
+  earth.add(buildCape());       // the rest of the Cape: js/cape.js welds itself the same way
 
-  scene.fog = new THREE.FogExp2(SKY_DAY.getHex(), 0.002);
+  scene.fog = new THREE.FogExp2(SKY_DAY.getHex(), 0);   // updateSky sets the density every frame; a nonzero seed is one the comment above warns about
   updateSky(PAD_POS);
   return scene;
 }

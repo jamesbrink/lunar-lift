@@ -19,7 +19,10 @@ const TYPES = {
 
 const clients = new Set();
 function broadcast() {
-  for (const res of clients) res.write('event: reload\ndata: "changed"\n\n');
+  for (const res of [...clients]) {
+    try { res.write('event: reload\ndata: "changed"\n\n'); }
+    catch { clients.delete(res); }   // a half-closed EventSource must not kill the server
+  }
 }
 
 let pending = null;
@@ -34,15 +37,19 @@ function scheduleReload() {
 
 function watchTree(dir) {
   if (!fs.existsSync(dir)) return;
-  fs.watch(dir, { recursive: true }, (event, file) => {
+  /* recursive: macOS and Windows always; Linux from Node 20.13 — package.json engines says 20.13
+     so the advertised combos all boot. The error listener covers a watcher dying later. */
+  const w = fs.watch(dir, { recursive: true }, (event, file) => {
     if (!file) return;
     const ext = path.extname(file).toLowerCase();
     if (ext === '.js' || ext === '.css' || ext === '.html') scheduleReload();
   });
+  w.on('error', (e) => console.warn(`[watch] ${dir}: ${e.message} — hot reload is off for it`));
 }
 watchTree(path.join(ROOT, 'js'));
 watchTree(path.join(ROOT, 'css'));
-fs.watch(path.join(ROOT, 'index.html'), scheduleReload);
+const htmlWatch = fs.watch(path.join(ROOT, 'index.html'), scheduleReload);
+htmlWatch.on('error', (e) => console.warn(`[watch] index.html: ${e.message} — hot reload is off for it`));
 
 const RELOAD_CLIENT = `<script>(function(){try{const s=new EventSource('/__reload');s.addEventListener('reload',()=>location.reload());}catch(e){}})();</script>`;
 
@@ -87,6 +94,10 @@ const server = http.createServer((req, res) => {
   });
 });
 
+server.on('error', (e) => {
+  console.error(`LUNAR LIFT could not listen on ${PORT}: ${e.code || e.message}`);
+  process.exit(1);
+});
 server.listen(PORT, '127.0.0.1', () => {
   console.log(`LUNAR LIFT on http://127.0.0.1:${PORT}/index.html  (hot reload active)`);
 });

@@ -117,10 +117,8 @@ export function buildPad(glowMap) {
   const whiteMat = named('white', { color: 0xe9eef4 }); whiteMat.emissive = new THREE.Color(0x33383f);
 
   const B = batcher(), thin = batcher();
-  const unit = new THREE.BoxGeometry(1, 1, 1);
   const boxGeo = (w, d, h) => new THREE.BoxGeometry(w, d, h);
   const box = (w, d, h, mat, x, y, z, edge = false, rx = 0, ry = 0, rz = 0, into = B) => into.add(boxGeo(w, d, h), mat, edge, x, y, z, rx, ry, rz);
-  void unit;
 
   /* ---- mobile launcher: four slabs round a real opening, the trench floor under it ----
      The deck used to be one solid box with a dark box set into it, both tops at z = 3.0, and the
@@ -198,7 +196,12 @@ export function buildPad(glowMap) {
     const arm = new THREE.Group(); arm.position.set(ARM_FROM, 0, z);
     const part = (gw, gd, gh, mat, x, y, zz, edge, ry = 0) => {
       const m = new THREE.Mesh(boxGeo(gw, gd, gh), mat); m.position.set(x, y, zz); m.rotation.y = ry;
-      m.castShadow = m.receiveShadow = true; if (edge) outline(m); arm.add(m);
+      /* The rule the tower lattice encodes above: members thinner than a shadow texel (1.46 m /
+         1.4 m·u⁻¹ ≈ 1.05 u) cast but do not RECEIVE — a stay's own shadow on its neighbour is
+         rounding noise that drags a hard edge with it. The arm beams and hoods take the shadow;
+         the 0.3 u stays, walkways and plates do not. */
+      m.castShadow = true; m.receiveShadow = Math.min(gw, gd, gh) > 1.05;
+      if (edge) outline(m); arm.add(m);
     };
     part(len, w, w, red, len / 2, 0, 0, true);
     part(len * 0.6, 0.3, 0.3, red, len * 0.3, 0, w * 1.6, false, -0.42);     // stay from the tower to mid-arm

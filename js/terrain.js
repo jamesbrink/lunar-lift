@@ -64,7 +64,6 @@ function build(body, key, seg, ramp, extra) {
   geo.setAttribute('normal', new THREE.BufferAttribute(new Float32Array(n * 3), 3));
   const uv = new THREE.BufferAttribute(new Float32Array(n * 2), 2);
   geo.setAttribute('sfUv', uv);
-  geo.setAttribute('aUv', uv);          // the cloud-shade injection's name for the same buffer
   const idx = new Uint32Array(seg * seg * 6);
   let t = 0;
   for (let y = 0; y < seg; y++) {

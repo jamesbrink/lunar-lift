@@ -21,7 +21,7 @@ Values from the NASA planetary fact sheet
 Acceleration the Sun raises at the Earth:
 
 ```
-GM_sun / 1 AU² = 132 712.44e6 / (1.496e8)² = 5.930e-3 km/s²   → 0.060 % of surface g
+GM_sun / 1 AU² = 132 712.44e6 / (1.496e8)² = 5.930e-3 m/s²   → 0.060 % of surface g
 ```
 
 The whole Earth–Moon system free-falls in that field, so only the **tidal difference**

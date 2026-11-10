@@ -15,9 +15,11 @@
                           in inertial space it drifted against the pad a thousandth of a pixel a frame).
      pad close, weather off   from 60 m, <= 400 / 25 / 25: z-fighting between pad and vehicle parts.
      pad, weather on      clouds drift on the wind, so their hard outlines legitimately change pixels
-                          and the gate is loose: <= 6,000 unstable / 1,500 strong / 600 flips (a flip
-                          is a pixel that changes and comes straight back). KNOWN: the flips are the
-                          cloud-outline shimmer; the target is 150. This view measures real motion; on a
+                          and the gate is loose: <= 6,000 unstable / 1,500 strong / 150 flips (a flip
+                          is a pixel that changes and comes straight back). The flips are the
+                          cloud-outline shimmer: 353 before the weather's rays were built from the
+                          pixel and its coverage made one ramp, 58 after — the gate is 150, not the
+                          600 that ran for one round. This view measures real motion; on a
                           loaded machine its strong count goes over the gate (measured: 1,674 and 1,709 with
                           33 other Chromium processes running, 1,102 minutes later with the machine quiet)
                           — presumably the ten frames spread further apart; that cause is inferred.

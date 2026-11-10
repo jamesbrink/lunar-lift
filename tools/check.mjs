@@ -27,17 +27,20 @@ run('mission-math', 'python3', ['tools/mission-math.py']);
 run('crater-stats', 'node', ['tools/crater-stats.mjs']);        // the lunar relief is continuous: no crater cut off along a lattice plane
 if (browser) {
   const port = await new Promise(res => { const s = createServer(); s.listen(0, () => { const p = s.address().port; s.close(() => res(p)); }); });
-  const server = spawn('node', ['server.js', String(port)], { stdio: 'ignore' });
-  await new Promise(r => setTimeout(r, 800));
-  const out = mkdtempSync(`${tmpdir()}/lunarlift-check-`);
+  let server = null;
+  let out = '';
   try {
+    // stderr inherited: an EADDRINUSE or a boot crash must be visible, not swallowed by stdio: 'ignore'
+    server = spawn('node', ['server.js', String(port)], { stdio: ['ignore', 'ignore', 'inherit'] });
+    await new Promise(r => setTimeout(r, 800));
+    out = mkdtempSync(`${tmpdir()}/lunarlift-check-`);   // inside the try: a throw here must not orphan the server
     run('shots (console clean)', 'node', ['tools/shots.mjs', out, String(port)]);
     run('clip-test', 'node', ['tools/clip-test.mjs', String(port)]);
     run('trail-offset', 'node', ['tools/trail-offset.mjs', String(port)]);
     run('orbit-line', 'node', ['tools/orbit-line.mjs', String(port)]);
     run('debris-orbit', 'node', ['tools/debris-orbit.mjs', String(port)]);
     run('flicker-test', 'node', ['tools/flicker-test.mjs', String(port), out]);
-  } finally { server.kill(); }
+  } finally { if (server) server.kill(); }
   console.log(`screenshots and diff maps: ${out}`);
 }
 const bad = results.filter(r => !r.ok);

@@ -36,7 +36,7 @@ pins it (up to 3) — pin it for any pixel measurement.
 ```sh
 npm i --no-save three@0.187.0 playwright   # tools only; the game has no dependencies
 npm test                                    # tools/check.mjs: everything below. Must end `check: all ok`
-npm run test:headless                       # the first four only: what CI runs
+npm run test:headless                       # the first five only: what CI runs
 ```
 
 `tools/check.mjs` runs each tool as a child process, prints one `ok` / `FAIL` line per tool with
@@ -49,11 +49,15 @@ it starts itself on a free port, so nothing an editor saves can reload the page 
 | mission (shipped) | `node tools/mission-sim.mjs game --phase=<MOON_PHASE0>` | the result is not `WON` |
 | mission (retro loses) | `node tools/mission-sim.mjs retro --phase=1.4742618` | the previous stack does not `LOSE` (it is kept as a recorded loss) |
 | mission-math | `python3 tools/mission-math.py` | its vehicle is not `SPECS`, or a derived number it prints (15,142 / 17,090 / 16,303 / 20,608 m/s, 1.13×, 3,433 t, 66,184 km) is not the one the docs and `js/constants.js` quote. It does not check flown numbers |
+| crater-stats | `node tools/crater-stats.mjs` | the lunar relief ladder is discontinuous: a height step over 8 m between points 2 m apart along 4,000 random tracks (a crater cut off along a lattice plane) |
 | shots (console clean) | `node tools/shots.mjs <outdir> <port>` | the console printed any error or warning during eleven minutes of flight (ten screenshots are written to `<outdir>`) |
 | clip-test | `node tools/clip-test.mjs <port>` | the camera is under the drawn terrain or inside the hull anywhere in a yaw / pitch / zoom sweep at the pad, liftoff, ascent, orbit and 30 m over the Moon |
+| trail-offset | `node tools/trail-offset.mjs <port>` | newborn trail puffs stand off the vehicle's axis by a median over 5 m at any warp (a column laid a frame late) |
+| orbit-line | `node tools/orbit-line.mjs <port>` | the drawn ribbon's apoapsis is not the state vector's, engine lit or cut |
+| debris-orbit | `node tools/debris-orbit.mjs <port>` | a stage dropped in a 300 km orbit is gone, below 250 km, or over 200 km from the ship after most of a revolution |
 | flicker-test | `node tools/flicker-test.mjs <port> [outdir]` | a view in which nothing should change has too many changing pixels, or two meshes share a plane (below) |
 
-The last three need a GPU and a Playwright Chromium (`tools/lib/browser.mjs` finds it, or `$EXE`),
+The last six need a GPU and a Playwright Chromium (`tools/lib/browser.mjs` finds it, or `$EXE`),
 so CI (`.github/workflows/check.yml`: every push and pull request, Ubuntu, Node 22, Python 3.12)
 runs `node tools/check.mjs --no-browser` only. Run `npm test` locally before pushing.
 
@@ -65,18 +69,22 @@ and a *flip* if it changes by more than 60 and is back within 20 of where it was
 numbers from the run made for this file:
 
 ```
-ok   pad, weather off           unstable     69 (<= 300)   strong      1 (<= 20)   flips     0 (<= 20)
-ok   pad close, weather off     unstable    167 (<= 400)   strong      7 (<= 25)   flips     4 (<= 25)
-ok   pad, weather on            unstable   3761 (<= 6000)   strong   1102 (<= 1500)   flips   293 (<= 600)
+ok   pad, weather off           unstable      0 (<= 300)   strong      0 (<= 20)   flips     0 (<= 20)
+ok   pad close, weather off     unstable     27 (<= 400)   strong      5 (<= 25)   flips     7 (<= 25)
+ok   pad, weather on            unstable   1789 (<= 6000)   strong    182 (<= 1500)   flips    68 (<= 150)
 ok   paused in flight           unstable      0 (<= 0)   strong      0 (<= 0)   flips     0
 ok   coplanar overlapping faces: 0
 flicker-test: ok
 ```
 
 The two pad views with the weather off (`window.__noWeather`) are the precision test: everything in
-frame is bolted to ground that moves 409 m/s through the inertial frame. With the weather on the
+frame is bolted to ground that moves 409 m/s through the inertial frame; the numbers above are from
+the review-fixes run, and the idle pad came out at a clean 0 (it was 69/1/0 when the ribbon still
+assumed `devicePixelRatio` under a reduced render scale, and 'pad close' was 167/7/4 before the pad
+parts took the sub-texel receiver rule). With the weather on the
 cloud outlines move on the wind and the gate is loose — the flips there are the known cloud-outline
-shimmer, target 150 — and that view is the one a loaded machine fails: its strong count measured
+shimmer, gated at 150 (58 in the measurement that set the gate, 68 here) — and that view is the one
+a loaded machine fails: its strong count measured
 1,674 and 1,709 with 33 other Chromium processes running and 1,102 minutes later with the machine
 quiet (presumably the ten frames spread further apart; the cause is inferred). `paused in flight` must be exactly 0: a paused frame is a still. The last line
 is a static check, not a screenshot: opaque faces of different meshes of the vehicle or the pad
@@ -155,6 +163,8 @@ always and says so in its source; anything that certifies a mission must use the
 - **The pad-idle exception.** Standing on the pad with the engine off, SHIFT up and the target
   throttle under 0.05, a step is an exact rotation with the planet at any size (`physStep`'s
   hold-down branch), so the frame is ONE step of `frame time × warp` and nothing is interpolated.
+  That condition is the exported `padIdle()` in `js/physics.js` — the frame loop and `warpCap()`
+  both call it, so the step and the offer can never disagree.
   That is what makes **×10000 on the pad** affordable — a day in 8.6 s, for waiting out the night or
   the launch window — and `warpCap()` offers it under the same condition and no other. A pressed
   or open throttle is not idle: SHIFT at ×10000 once lit the engine inside a 167 s "idle" step.
@@ -162,7 +172,7 @@ always and says so in its source; anything that certifies a mission must use the
   or the debris — and `S` keeps the drawn state; the camera, the map and the HUD stay live.
   **×0.25** is the same 0.1 s steps, fewer per second; the interpolation is what makes it smooth.
 - Warp is capped by place (`warpCap()`, enforced every frame by `guardWarp()`): ×4 below 70 km
-  (×16 under fully open mains), ×4 within 15 km of the Moon, ×32 within 50 km, ×128 within 400 km,
+  (×16 under an open main canopy), ×4 within 15 km of the Moon, ×32 within 50 km, ×128 within 400 km,
   ×16 below 140 km of the Earth, ×8 while the engine burns, ×1000 below 2,000 km of the Earth,
   ×10000 within 30,000 km of the Earth or 5,000 km of the Moon, ×100000 beyond; it drops to ×1 on
   crossing the Moon's sphere of influence either way. `warpHorizon()` estimates the mission time to
@@ -530,7 +540,7 @@ These five are carried as written — rule and history together — because `js/
 
 - Collide the camera twice per frame — the wanted place and the blended one — three rounds each,
   ground last, with a sideways escape if it is still inside the hull. `tools/clip-test.mjs` sweeps it.
-- The pad collider is three ellipsoids in the pad's frame (`padMatrix()`), not a dome: the camera
+- The pad collider is two ellipsoids and a box in the pad's frame (`padMatrix()`), not a dome: the camera
   must be able to stand on the apron.
 - Start a damped quantity at its target.
 - Nothing moves the camera but the user: no "home", no timer. Orbit carries its heading with the
@@ -659,7 +669,7 @@ await tab.evaluate(`(async () => {
 
 **Tools**
 - `tools/check.mjs` — `npm test`. `tools/mission-sim.mjs` — flies the mission headless. `tools/mission-math.py` — derived numbers, checked against code and docs. `tools/shader-lint.mjs` — static GLSL rules.
-- `tools/shots.mjs`, `tools/clip-test.mjs`, `tools/flicker-test.mjs` — the browser gates. `tools/trail-offset.mjs` (smoke column on the flame at every warp) and `tools/crater-stats.mjs` (lunar relief continuity) are gates too. `tools/gpu-time.mjs`, `tools/cloud-views.mjs`, `tools/terrain-views.mjs`, `tools/boot-time.mjs` — measurements. `tools/lib/browser.mjs` — how all of them find and launch Chromium.
+- `tools/shots.mjs`, `tools/clip-test.mjs`, `tools/flicker-test.mjs` — the browser gates. `tools/trail-offset.mjs` (smoke column on the flame at every warp), `tools/orbit-line.mjs` (the ribbon is the ship's own orbit) and `tools/debris-orbit.mjs` (a dropped stage stays up) are browser gates too; `tools/crater-stats.mjs` (lunar relief continuity) is a headless one. `tools/gpu-time.mjs`, `tools/cloud-views.mjs`, `tools/terrain-views.mjs`, `tools/boot-time.mjs` — measurements. `tools/lib/browser.mjs` — how all of them find and launch Chromium.
 
   closed, and because every save hot-reloads, the user's own Chrome loaded the same shader and lost
   WebGL for the session (`GL_VENDOR = Disabled`; only a browser restart clears it). Two neighbours of
@@ -993,8 +1003,8 @@ await tab.evaluate(`(async () => {
   full crossing is `RE + 0.02`, exactly the skin.
 - **The pad's collider must let the camera onto the apron.** One 640 × 210 m dome kept the view out
   of the towers by keeping it out of the launch site, and the only angle from which a Saturn V looks
-  110 m tall — low, close, looking up — could not be reached. Three ellipsoids in the pad's own frame
-  now (deck, tower, tank farm), via `padMatrix()`, which also follows the planet's spin.
+  110 m tall — low, close, looking up — could not be reached. Two ellipsoids and a box (deck, tank
+  farm, umbilical tower) in the pad's own frame now, via `padMatrix()`, which also follows the planet's spin.
 - **Start a damped quantity at its target.** The camera's up vector, heading and lens eased in from
   module defaults, so each mission opened with the horizon rolling level; and "ease back behind the
   nose" ran on the pad, where the nose's heading is a fallback axis. Measured after: 0.000° of camera

@@ -34,7 +34,7 @@ export function audioInit() {
   } catch (e) { /* audio optional */ }
 }
 
-export function audioEngine(on) { if (AC) engGain.gain.setTargetAtTime(on ? .12 : 0, AC.currentTime, .08); }
+export function audioEngine(on) { if (!AC || !engGain) return; engGain.gain.setTargetAtTime(on ? .12 : 0, AC.currentTime, .08); }
 
 export function audioThud() {
   if (!AC) return;

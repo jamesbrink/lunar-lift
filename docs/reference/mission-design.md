@@ -295,7 +295,7 @@ a_cmd = (v_des − v)/τ + dv_des/dt − g_abs + g_moon          τ = 2.5 s
 with `h` the altitude above the Moon, the commanded acceleration slewed by the body-rate channel
 exactly as the game's own SAS does it, and the engine cut at 3 m (the last 3 metres fall at
 ≈ 3 m/s, well inside `LAND_SAFE`). `h` is `surfaceAlt()` — the lander's footpads over the surface
-(station 6.2 u, 0.6 u under the bell's exit; `GEAR_Z` in `js/saturn.js`), the same number contact is
+(station 6.2 u, 0.6 u under the bell's exit; `GEAR_Z` in `js/stations.js`), the same number contact is
 judged by. It used to be the altitude of `S.pos`, the middle of the *full*
 stack, while contact was declared when `S.pos` came within the full stack's half-height (52 m) of
 the surface: the guidance met "the ground" while still reading 52 m of altitude, and every
@@ -461,8 +461,6 @@ calls `BRAKE NOW` when the height in hand falls below 1.15× that.
   the right half-hour, no better: the commit that added it records lunar passes of 194, 348 and
   −68 km on the first three opportunities (its measurement, not repeated here), against 92,521 km
   for a burn "at periapsis". The aim readout and a trim burn have to do the rest.
-- **Stranded states have no end card.** A capsule left in orbit, or a ship out of propellant on an
-  escape path, flies on with nothing to say the mission is over.
 - **No way home from the surface.** A landed mission ends at touchdown. Lunar ascent and TEI are
   not modelled, so the 18,092 m/s round-trip figure is a reference number, not a game target. The
   re-entry and splashdown that are modelled serve flights that never landed.

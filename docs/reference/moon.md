@@ -15,7 +15,7 @@ Values from the NASA planetary fact sheet
 | mass ratio Moon/Earth | 0.012300 | used for SOI |
 | density | 3.344 g/cm³ | — |
 | surface gravity | 1.62 m/s² | `MU_M/RM² = 1.624` ✓ |
-| escape velocity | 2.38 km/s | `sqrt(2·GM/RM) = 2375.7 m/s` ✓ |
+| escape velocity | 2.38 km/s | `sqrt(2·GM/RM) = 2376.2 m/s` ✓ |
 | J2 | 202.7 × 10⁻⁶ | not modelled |
 | Bond albedo | 0.11 | — |
 | surface temperature | 95–390 K | — |

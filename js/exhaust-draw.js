@@ -397,7 +397,12 @@ const anchor = new THREE.Vector3();
    renders as a black band no material toggle removes. */
 export function fillExhaust() {
   if (nAlive === 0) { clearExhaustDraw(); return; }
-  if (ship.live) anchor.copy(ship.pos); else moonPos(getSimTime(), anchor);
+  /* ship.pos holds the last drawn pose through an end card (updateBurnVisuals stops with the
+     clock), and that is where the wreckage is. Anchoring a wreck at the Moon instead put every
+     parcel ~380,000 km from the anchor, where float32 steps are ~45 m — the sparks of every
+     Earth-loss screen drew on their own jumping grid, the exact failure this anchor exists to
+     prevent. */
+  anchor.copy(ship.pos);
   puffs.position.copy(anchor); shards.position.copy(anchor); dust.position.copy(anchor);
   /* Daylight where the vehicle is: over whichever body is nearer, is the sun above its horizon? */
   moonPos(getSimTime(), _moon);
