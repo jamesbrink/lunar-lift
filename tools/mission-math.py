@@ -8,9 +8,17 @@ Rocketdyne F-1/J-2 specification tables). Run it to reproduce the tables:
 
     python3 tools/mission-math.py
 
+It prints the derivation, then checks two things and exits 1 if either fails (section 9):
+the vehicle it budgets is the one in js/constants.js, and the derived numbers it has just
+computed are the ones the docs and the source comments quote. It does NOT check the flown
+numbers (periselene, touchdown, delta-v spent): those come from tools/mission-sim.mjs.
+
 Units: km and s for orbital mechanics, then m/s when printed as "m/s".
 """
 import math
+import os
+import re
+import sys
 
 G0 = 9.80665               # m/s^2, standard gravity (Isp -> exhaust velocity)
 LB = 0.45359237            # kg per pound-mass
@@ -217,9 +225,10 @@ PREVIOUS = [("S-1 SATURN I", 130, 2400, 46000, 263),
 NOVA = [("S-1 SATURN I", 130, 3000, 70000, 330),
         ("S-2 SATURN II", 110, 1500, 22000, 430),
         ("CSM ENGINE", 25, 700, 6000, 460)]
-game_stack(SHIPPED, "js/constants.js SPECS (shipped; flies, see mission-design.md)", total)
-game_stack(PREVIOUS, "SPECS as they were (reached lunar orbit, landed at 1233 m/s dry)", total)
-game_stack(NOVA, "NOVA candidate (oversized: nothing to spend the margin on)", total)
+REQUIREMENT = total
+IDEAL_SHIPPED = game_stack(SHIPPED, "js/constants.js SPECS (shipped; flies, see mission-design.md)", total)
+IDEAL_PREVIOUS = game_stack(PREVIOUS, "SPECS as they were (reached lunar orbit, hit the Moon at 1264 m/s dry)", total)
+IDEAL_NOVA = game_stack(NOVA, "NOVA candidate (oversized: nothing to spend the margin on)", total)
 print("  NOTE: ideal budget only — no gravity, drag, steering, or the fact that a lander")
 print("        must keep propellant back for the descent. tools/mission-sim.mjs flies the")
 print("        mission through the shipped physics and reports what it actually costs.")
@@ -319,3 +328,64 @@ print(f"  Apollo 11 max-q, SP-4029: 735.17 psf = {735.17*47.88026/1000:.2f} kPa;
       f"{rho_usa(13.57):.3f} kg/m^3 that implies v = {math.sqrt(2*735.17*47.88026/rho_usa(13.57)):.0f} m/s")
 print("  (the ascent table's velocity column cannot be reconciled with that q and altitude, so")
 print("   only q itself is quoted here; the state rows that orbital mechanics confirms are used)")
+
+# ───────────────────────────────────────────────── 9. script, code and docs agree
+heading("9. CHECK: THIS SCRIPT, js/constants.js AND THE DOCS QUOTE THE SAME NUMBERS")
+ROOT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..")
+failures = []
+
+
+def text(rel):
+    with open(os.path.join(ROOT, rel), encoding="utf-8") as f:
+        return f.read()
+
+
+def digits(s):
+    """drop thousands separators (comma, space, thin space) between digits: 17,090 == 17 090"""
+    return re.sub(r"(?<=\d)[,\u2009\u202f ](?=\d{3}(?!\d))", "", s)
+
+
+def check(ok, what):
+    print(f"  {'ok  ' if ok else 'FAIL'} {what}")
+    if not ok:
+        failures.append(what)
+
+
+# (a) the vehicle budgeted in section 6 is the vehicle the game flies
+consts = text("js/constants.js")
+specs = [(n, float(d), float(f), float(t), float(i)) for n, d, f, t, i in re.findall(
+    r"\{ name: '([^']+)', dry: ([\d.]+), fuel: ([\d.]+), thrust: ([\d.]+), isp: ([\d.]+) \}", consts)]
+check(specs == [(n, float(d), float(f), float(t), float(i)) for n, d, f, t, i in SHIPPED],
+      "SHIPPED here == SPECS in js/constants.js")
+cap = re.search(r"CAPSULE_MASS = ([\d.]+)", consts)
+check(bool(cap) and float(cap.group(1)) == CAPSULE, "CAPSULE here == CAPSULE_MASS in js/constants.js")
+for name, mine in (("MU_E", MU_E), ("RE", R_E), ("RM", R_M), ("MOON_DIST", MOON_A)):
+    got = re.search(r"\b%s = ([\d.]+)" % name, consts)
+    check(bool(got) and float(got.group(1)) == mine, f"{name} here == {name} in js/constants.js")
+
+# (b) what the docs and comments quote is what was just derived
+quoted = [
+    (f"{REQUIREMENT:.0f}", "one-way requirement, m/s",
+     ["README.md", "js/constants.js", "docs/reference/mission-design.md", "docs/reference/apollo-11-profile.md"]),
+    (f"{IDEAL_SHIPPED*1000:.0f}", "shipped stack ideal budget, m/s",
+     ["README.md", "js/constants.js", "docs/reference/mission-design.md", "docs/reference/spacecraft.md"]),
+    (f"{IDEAL_SHIPPED*1000/REQUIREMENT:.2f}", "shipped margin over the requirement",
+     ["js/constants.js", "docs/reference/mission-design.md"]),
+    (f"{IDEAL_PREVIOUS*1000:.0f}", "previous stack ideal budget, m/s",
+     ["js/constants.js", "docs/reference/mission-design.md", "docs/reference/spacecraft.md"]),
+    (f"{IDEAL_NOVA*1000:.0f}", "NOVA candidate ideal budget, m/s",
+     ["docs/reference/mission-design.md", "docs/reference/spacecraft.md"]),
+    (f"{sum(d + f for _, d, f, _, _ in SHIPPED) + CAPSULE:.0f}", "shipped ignition mass, t",
+     ["docs/reference/mission-design.md", "docs/reference/spacecraft.md"]),
+    (f"{MOON_A * MOON_MASS_RATIO ** 0.4:.0f}", "Moon sphere of influence, km",
+     ["docs/reference/moon.md", "docs/reference/libraries.md"]),
+]
+for value, what, files in quoted:
+    for rel in files:
+        check(re.search(r"(?<![\d.])%s(?![\d])" % re.escape(value), digits(text(rel))) is not None,
+              f"{what} = {value} is quoted in {rel}")
+
+if failures:
+    print(f"\nmission-math: {len(failures)} CHECK(S) FAILED")
+    sys.exit(1)
+print("\nmission-math: script, code and docs agree")
