@@ -34,6 +34,7 @@ const VERT = /* glsl */`
   attribute vec3 aUV;       // x: 0 at the apex of the cap, 1 at the tail's tip. y: angle. z: 0 sheath, 1 streak
   uniform float uR, uLead, uLen, uK, uAngry, uTime;
   varying float vT, vF, vU, vKind;
+  varying vec2 vC;
   /* the outline: x radius, y station along the direction of flight (+ ahead) */
   vec2 outline( float t, float th, float kind ) {
     float Rs = uR * ( 1.18 + 0.42 * uK + 0.3 * uAngry );
@@ -43,7 +44,8 @@ const VERT = /* glsl */`
       /* the streak: a long needle from behind the body */
       float w = sin( min( t * 6.0, 1.5708 ) ) * pow( max( 1.0 - t, 0.0 ), 0.6 );
       w *= 1.0 + 0.2 * sin( t * 26.0 - uTime * 17.0 ) * smoothstep( 0.1, 0.5, t );
-      return vec2( Rs * 0.42 * w, uLead - uR - uLen * 3.4 * t );
+      w *= 1.0 + 0.30 * sin( th * 2.0 + t * 9.0 - uTime * 8.0 ) * smoothstep( 0.12, 0.6, t );   // not a needle: it whips
+      return vec2( Rs * 0.46 * w, uLead - uR - uLen * 2.8 * t );
     }
     if ( t < TN ) {
       float s = t / TN;
@@ -52,7 +54,7 @@ const VERT = /* glsl */`
     float u = ( t - TN ) / ( 1.0 - TN );
     float w = pow( max( 1.0 - u, 0.0 ), 0.8 );
     w *= 1.0 + 0.10 * sin( u * 11.0 - uTime * 15.0 ) * smoothstep( 0.05, 0.35, u );                       // bulges running aft
-    w *= 1.0 + ( 0.10 + 0.14 * uAngry ) * sin( th * 5.0 + u * 7.0 - uTime * 12.0 ) * smoothstep( 0.1, 0.8, u );   // tongues
+    w *= 1.0 + ( 0.17 + 0.14 * uAngry ) * sin( th * 5.0 + u * 7.0 - uTime * 12.0 ) * smoothstep( 0.1, 0.8, u );   // tongues
     float tri = abs( fract( th * 1.11408 + floor( uTime * 9.0 ) * 0.37 ) - 0.5 ) * 2.0;                  // 7 spikes, redrawn 9 times a second
     w *= 1.0 + 0.5 * uAngry * ( tri - 0.4 ) * smoothstep( 0.0, 0.25, u ) * ( 1.0 - 0.5 * u );
     return vec2( Rs * w, uLead + stand - D - uLen * pow( u, 1.4 ) );
@@ -65,7 +67,7 @@ const VERT = /* glsl */`
     vec3 n = normalize( vec3( c * -tan.y, tan.x ) + vec3( 0.0, 0.0, 1e-7 ) );
     vec4 mv = modelViewMatrix * vec4( c * o.x, o.y, 1.0 );
     vF = dot( normalize( normalMatrix * n ), normalize( -mv.xyz ) );
-    vT = t; vKind = kind;
+    vT = t; vKind = kind; vC = c;
     vU = kind > 0.5 ? t : max( 0.0, ( t - TN ) / ( 1.0 - TN ) );
     gl_Position = projectionMatrix * mv;
     #include <logdepthbuf_vertex>
@@ -78,24 +80,30 @@ const FRAG = /* glsl */`
   uniform vec3 cCore, cMid, cOut, cDeep;
   uniform float uK, uAngry, uTime;
   varying float vT, vF, vU, vKind;
+  varying vec2 vC;
   void main() {
     #include <logdepthbuf_fragment>
     float f = clamp( abs( vF ), 0.0, 1.0 );
     float lat = sqrt( 1.0 - f * f );                 // 0 on the centre line, 1 on the silhouette
     float wob = 0.05 * sin( vU * 24.0 - uTime * 21.0 );
+    /* Where one tone gives way to the next along the fire is a row of tongues, not a ruled line: the
+       station each band ends at runs back and forth round the body (three licks, travelling aft).
+       Cut at a constant station the bands were hoops, and from the side the comet was a striped kite. */
+    float lick = abs( fract( atan( vC.y, vC.x ) * 0.477465 + vU * 1.3 - uTime * 1.7 ) - 0.5 ) * 2.0;
+    float uu = vU + 0.24 * ( lick - 0.5 ) * smoothstep( 0.05, 0.3, vU ) + wob;
     vec3 col; float a;
     if ( vKind > 0.5 ) {
       col = lat < 0.5 + wob ? cMid : cOut;
-      if ( vU > 0.45 + wob ) col = lat < 0.4 ? cOut : cDeep;
-      a = vU < 0.3 ? 0.92 : vU < 0.62 + wob ? 0.78 : 0.55;
+      if ( uu > 0.45 ) col = lat < 0.4 ? cOut : cDeep;
+      a = uu < 0.3 ? 0.92 : uu < 0.62 ? 0.78 : 0.55;
     } else if ( vT < TN ) {
       /* the bow shock: brightest at its own front edge */
       col = lat > 0.74 + wob ? cCore : lat > 0.42 ? cMid : cOut;
       a = 0.95;
     } else {
       col = lat > 0.80 + wob ? cOut : lat > 0.42 - 0.5 * vU ? cMid : cCore;
-      if ( vU > 0.5 + wob ) col = lat > 0.6 ? cDeep : cOut;
-      a = vU < 0.32 + wob ? 0.96 : vU < 0.66 ? 0.9 : 0.78;
+      if ( uu > 0.5 ) col = lat > 0.6 ? cDeep : cOut;
+      a = uu < 0.32 ? 0.96 : uu < 0.66 ? 0.9 : 0.78;
     }
     /* It leaves by shrinking into the body, as paint; only the very last of it is a veil. */
     a *= uK < 0.07 ? 0.6 : 1.0;
