@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { RE, RM, WARPS, DTPHYS, PAD_POS, SPECS, moonPos } from './constants.js';
-import { initWorld, spinBodies, syncTime, updateSky, updateSunShadow, setWeatherVisible, groundHeight, fineGroundHeight, moonGroundHeight } from './world.js';
+import { initWorld, spinBodies, syncTime, updateSky, updateSunShadow, setWeatherVisible, getSpin, groundHeight, fineGroundHeight, moonGroundHeight } from './world.js';
 import { stages, lesGroup } from './saturn.js';
 import { initVehicle, spawnParticle, addDebris, detachStage, setVisible, updateParticles, updateDebris, updateBurnVisuals, clearDebris, resetStages, plumeLive } from './vehicle.js';
 import { S, keys, initPhysics, getState, getSimTime, setSimTime, getEngineOn, getThrottle, getWarpIndex, setWarpIndex, setTargetThrottle, getSasOn, setSas, cycleWarp, toggleSas, toggleSasRetro, activeStage, fwd, isBurning, accelAt, physStep, toggleIgnite, separateStage, separateLES, addDistFlown, pushTrail, resetSim, markTeleported, airDensity, groundVel, omega, getControlAuthority, toggleRcsAssist, toggleHold, deployChute, getArmSwing, guardWarp, aeroState, getAeroLoad, stability } from './physics.js';
@@ -182,7 +182,7 @@ function frame() {
   updateMapView(isMap(), dtReal);
   updateChutes();
   setArmSwing(getArmSwing());
-  setOrigin(scene, camera.position);        // draw from where the eye is: js/origin.js
+  setOrigin(scene, camera.position, getSpin());   // draw from where the eye is, in the Earth's axes: js/origin.js
   renderHalfRes(renderer, scene, camera);   // weather and exhaust, at a quarter of the pixels
   renderer.render(scene, camera);
   } catch (err) {

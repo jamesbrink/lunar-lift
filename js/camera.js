@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import * as WORLD from './world.js';
-import { RE, RM, MU_E, SOI_M, MOON_DIST, MOON_PLANE_N, MOON_U, MOON_V, VS, PAD_SCALE, PAD_POS, PAD_UP, moonPos } from './constants.js';
+import { RE, RM, MU_E, SOI_M, MOON_DIST, EARTH_SPIN, MOON_PLANE_N, MOON_U, MOON_V, VS, PAD_SCALE, PAD_POS, PAD_UP, moonPos } from './constants.js';
 import { S, keys, fwd, getSimTime, activeStage, isBurning, getThrottle, airDensity, groundVel, navVel, orbitalElements, getChute } from './physics.js';
 import { stages } from './saturn.js';
 
@@ -53,7 +53,7 @@ const NOSE_Z = 28.7;                       // build units: the command module's 
 let focusZ = null, spanHalf = 37 * VS;
 let wantFov = 64, placedFov = false, shakeT = 0;
 const refH = new THREE.Vector3(1, 0, 0);     // the carried heading, horizontal and unit
-let refOk = false, climb = 0, frame = 1;
+let refOk = false, climb = 0, frame = 1, lastSimT = 0;
 const FULL_SPAN = 0.5 * (NOSE_Z + 42) * VS; // half-length of the whole stack
 const saved = { yaw: PAD_YAW, pitch: 0, dist: 0.13 };
 const CAM_RANGE = { chase: [0.02, 1000, 0.13], orbit: [0.02, 1000, 0.13] };
@@ -357,6 +357,16 @@ export function updateCamera(dt, paused = false) {
     if (!placed) { camUp.copy(_up); placedFov = false; }
     /* The carried heading: yesterday's, laid back into today's horizontal plane. Seeded from the
        ground track (east, on the pad), which is what makes yaw 2.33 the south-east apron shot. */
+    /* Near the ground the heading belongs to the ground: it turns with the planet. Carried purely in
+       inertial space it drifted against the pad at the Earth's rate — 15 degrees an hour, a
+       thousandth of a pixel a frame, which is enough to flip the coverage of every sub-pixel edge
+       (the last unstable pixels of tools/flicker-test.mjs), and under x10000 on the pad it swung the
+       view round the rocket. By 120 km up it is an orbit's heading and inertial again. */
+    {
+      const tNow = getSimTime(), dT = tNow - lastSimT; lastSimT = tNow;
+      const ground = 1 - THREE.MathUtils.smoothstep(S.pos.length() - RE, 20, 120);
+      if (refOk && ground > 0 && dT > 0 && dT < 1e5) refH.applyAxisAngle(AXIS, EARTH_SPIN * dT * ground);
+    }
     if (refOk) {
       refH.addScaledVector(_up, -refH.dot(_up));
       if (refH.lengthSq() < 1e-6) refOk = false; else refH.normalize();

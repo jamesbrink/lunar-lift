@@ -37,6 +37,8 @@ export const SUN_DIR = PAD_UP.clone().multiplyScalar(Math.sin(SUN_ELEV))
 let scene = null, earth = null, pad = null, weather = null, cloudMesh = null, hazeU = null, atmo = null, moon = null;
 let sun = null, sunTarget = null, flare = null, stars = null, sky = null;
 let spin = 0, simT = 0;
+export const getSpin = () => spin;
+const _sunF = new THREE.Vector3(), _camF = new THREE.Vector3(), Y_UP = new THREE.Vector3(0, 1, 0);
 /* The floodlight LENS sprites, kept for the night gate in updateSunShadow. They were ungated —
    created in buildPad and never touched again — so four additive warm discs baked daytime haze
    into the pad lenses at all hours. The lamps themselves (housing, truss) stay year-round. */
@@ -399,6 +401,7 @@ export function initWorld(target) {
 
 function setShadowBox(extent) {
   const sc = sun.shadow.camera;
+  shadowExtent = extent;
   sc.left = sc.bottom = -extent;
   sc.right = sc.top = extent;
   /* ±150 km around the vehicle's depth plane, not 1→5000 km: the depth range IS the bias
@@ -421,13 +424,20 @@ function updateShadowBox(pos) {
      them shadowed — measured as straight-edged wedges across the ocean from 150 km up. Nothing
      above this height casts a shadow worth catching either, so the pass comes off. */
   sun.castShadow = local < 30;
-  setShadowBox(THREE.MathUtils.clamp(SHADOW_MIN + local * 0.12, SHADOW_MIN, SHADOW_MAX));
+  /* In quarter-octave steps, not continuously: a box that is resized by a hair every frame
+     re-projects every shadow every frame (and defeats the texel snap in updateSunShadow), which is
+     shimmer on every edge. On the ground it is one size and stays there. */
+  const want = THREE.MathUtils.clamp(SHADOW_MIN + local * 0.12, SHADOW_MIN, SHADOW_MAX);
+  const stepped = Math.min(SHADOW_MAX, SHADOW_MIN * Math.pow(2, Math.round(Math.log2(want / SHADOW_MIN) * 4) / 4));
+  if (stepped !== shadowExtent) setShadowBox(stepped);
 }
 
 /* The launch complex's local-to-world matrix (build units, z up, the vehicle's axis on the origin),
    for anything that has to reason in the pad's own frame — the camera's colliders do. It rides the
    planet's spin, which a frame built from the constant PAD_UP does not. */
-const _eyeUp = new THREE.Vector3();
+const _eyeUp = new THREE.Vector3(), _sf = new THREE.Vector3(), _sx = new THREE.Vector3(), _sy = new THREE.Vector3(), _sp = new THREE.Vector3();
+let shadowExtent = 3, snapTexel = 0;
+const snapC = new THREE.Vector3(), _sd = new THREE.Vector3();
 const _padAbs = new THREE.Matrix4();
 export function padMatrix() { return pad ? absolute(pad.matrixWorld, _padAbs) : null; }   // planet-centred: see js/origin.js
 
@@ -435,11 +445,35 @@ export function padMatrix() { return pad ? absolute(pad.matrixWorld, _padAbs) : 
    shades the pad at liftoff and the lander on the moon. The near terrain patch travels with it
    too — one distance test per frame, a rebuild only after 12 km of ground travel, no allocation. */
 export function updateSunShadow(pos) {
-  sun.position.copy(pos).addScaledVector(SUN_DIR, SUN_RANGE);
-  sun.target.position.copy(pos);
+  updateShadowBox(pos);
+  /* The shadow map's texel grid is pinned to the GROUND. The box follows the vehicle, and following
+     it continuously slid the grid under every shadow by a fraction of a texel per frame — each edge
+     re-sampled, a few pixels flipping along it (the last ~125 unstable pixels on an idle pad). So the
+     box centre is snapped to whole texels, measured in the Earth-fixed frame along the shadow
+     camera's own axes (x = up × light, y = light × x): on the pad it does not move at all, and in
+     flight it moves in steps the map cannot see. */
+  const texel = 2 * shadowExtent / sun.shadow.mapSize.x;
+  _sf.copy(SUN_DIR).applyAxisAngle(Y_UP, -spin);                 // light, Earth-fixed
+  _sx.crossVectors(Y_UP, _sf).normalize(); _sy.crossVectors(_sf, _sx);
+  _sp.copy(pos).applyAxisAngle(Y_UP, -spin);                     // the vehicle, Earth-fixed
+  /* The centre is a point ON THE GROUND FRAME that stays where it is; the vehicle may wander 8
+     texels from it before it is moved, and then it moves by whole texels. (Snapping the vehicle's
+     own planet-centred coordinates to a lattice does not work: the light's axes turn with the sun,
+     6,371 km from the planet's centre that sweeps the lattice over the ground at 460 m/s — the
+     first two versions of this made the pad ten times worse.) */
+  _sd.subVectors(_sp, snapC);
+  const dx = _sd.dot(_sx), dy = _sd.dot(_sy);
+  if (texel !== snapTexel || Math.abs(dx) > 8 * texel || Math.abs(dy) > 8 * texel) {
+    if (texel !== snapTexel || Math.abs(dx) > 400 * texel || Math.abs(dy) > 400 * texel) snapC.copy(_sp);      // a new box, or a jump: start over
+    else snapC.addScaledVector(_sx, Math.round(dx / texel) * texel).addScaledVector(_sy, Math.round(dy / texel) * texel);
+    snapTexel = texel;
+  }
+  snapC.addScaledVector(_sf, _sd.subVectors(_sp, snapC).dot(_sf));   // along the light it may follow freely: depth is not sampled
+  _sp.copy(snapC).applyAxisAngle(Y_UP, spin);
+  sun.position.copy(_sp).addScaledVector(SUN_DIR, SUN_RANGE);
+  sun.target.position.copy(_sp);
   sun.target.updateMatrixWorld();
   flare.position.copy(pos).addScaledVector(SUN_DIR, SUN_DIST);   // flare stays on the sun's bearing
-  updateShadowBox(pos);
   /* Pad lamps burn at night only. PAD_UP is body-local; its world direction is rotY(current spin)
      of it — the exact inverse of spinLocal — and dotting that with the inertial SUN_DIR is the
      sine of the sun's elevation over the pad. The lamps light across twilight (el +0.05 → −0.10)
@@ -605,6 +639,11 @@ export function setWeatherVisible(on) {
 
 export function updateSky(pos, camPos) {
   if (weather && camPos) setWeatherEye(weather, camPos);
+  /* The frame is drawn in Earth-fixed axes (js/origin.js): shaders that work in planet-centred
+     positions get the sun, and the haze its eye, turned the same way. */
+  _sunF.copy(SUN_DIR).applyAxisAngle(Y_UP, -spin);
+  if (atmo) atmo.material.uniforms.sunDir.value.copy(_sunF);
+  if (sky) sky.material.uniforms.sunDir.value.copy(_sunF);
   const alt = Math.max(0, pos.length() - RE);
   _skyMix = Math.exp(-alt / SKY_SCALE);
   /* One part in eight of pale blue MIXED IN LINEAR SPACE already renders as 30 %-grey sRGB —
@@ -643,7 +682,7 @@ export function updateSky(pos, camPos) {
   if (hazeU) {
     const camAlt = Math.max(0, (camPos || pos).length() - RE);
     const kMix = Math.exp(-camAlt / SKY_SCALE);
-    updateHaze(hazeU, camPos || pos, 0.0038 * kMix * kMix, _sky);
+    updateHaze(hazeU, _camF.copy(camPos || pos).applyAxisAngle(Y_UP, -spin), 0.0038 * kMix * kMix, _sky);
   }
   /* Stars come up against what the EYE measures, not the linear buffer: sRGB lightness. With
      the squared background this crosses fully visible around 300 km and is exactly zero for

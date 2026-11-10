@@ -700,8 +700,7 @@ export function updateWeather(mesh, simT, spin, sunWorld) {
   U.driftV.value.set(fr(wind(30, VEIL_REP[0])), 0);
   U.macroRide.value = fr(-ride - simT * 4 / 1000 / KM_PER_U);
   U.sunWorld.value.copy(sunWorld).normalize().applyAxisAngle(Y_AXIS, -spin);
-  const c = Math.cos(spin), sn = Math.sin(spin);
-  U.fixRot.value.set(c, 0, -sn, 0, 1, 0, sn, 0, c);                          // RotY(−spin): inertial → Earth-fixed
+  U.fixRot.value.identity();     // the scene itself is drawn in Earth-fixed axes now (js/origin.js): nothing left to turn
   lastSpin = spin;
 }
 const Y_AXIS = new THREE.Vector3(0, 1, 0);

@@ -16,14 +16,38 @@ import * as THREE from 'three';
    it ever was, but it is only used for things kilometres across (cloud fields, haze, the limb). */
 export const uOrigin = { value: new THREE.Vector3() };
 
-export function setOrigin(scene, eye) {
-  uOrigin.value.copy(eye);
-  scene.position.copy(eye).negate();
+/* ...and in the Earth's own axes. Shifting to the eye removed the half-metre steps, but every matrix
+   under the planet was still rebuilt each frame from a rotation that had advanced, and an edge of
+   sub-pixel steel sitting on a sample boundary could land either side: ~125 pixels of 1.3 million
+   still changed on an idle pad (tools/flicker-test.mjs). So the whole scene is also turned back by
+   the planet's spin: a thing bolted to the ground gets RotY(−spin)·RotY(+spin) = the same matrix
+   every frame, to the last bit that float32 keeps. The camera, the sun and the Moon are children of
+   the scene and turn with it, so the picture is unchanged — it is the same view, described in axes
+   in which the ground stands still.
+
+   What follows from it:
+   - uOrigin is the eye in those turned axes; a shader that adds it gets a planet-centred position
+     in the EARTH-FIXED frame. Any inertial direction such a shader uses (the sun) must be turned
+     the same way first: frameDir().
+   - a matrixWorld read in JavaScript is eye-relative AND turned: absolute() undoes both. */
+const Y = new THREE.Vector3(0, 1, 0);
+const frameQ = new THREE.Quaternion(), frameQi = new THREE.Quaternion(), _eye = new THREE.Vector3(), _m = new THREE.Matrix4();
+
+export function setOrigin(scene, eye, spin = 0) {
+  frameQ.setFromAxisAngle(Y, -spin); frameQi.copy(frameQ).invert();
+  _eye.copy(eye);
+  uOrigin.value.copy(eye).applyQuaternion(frameQ);
+  scene.quaternion.copy(frameQ);
+  scene.position.copy(uOrigin.value).negate();
 }
 
-/* A matrixWorld read back in JavaScript is eye-relative; this puts the planet back under it. */
+/* An inertial direction, in the axes the frame is drawn in. */
+export function frameDir(v) { return v.applyQuaternion(frameQ); }
+
+/* A matrixWorld read back in JavaScript, put back into the game's inertial, planet-centred frame. */
 export function absolute(matrixWorld, out) {
-  out.copy(matrixWorld);
-  out.elements[12] += uOrigin.value.x; out.elements[13] += uOrigin.value.y; out.elements[14] += uOrigin.value.z;
+  out.copy(matrixWorld).premultiply(_m.makeRotationFromQuaternion(frameQi));
+  const e = out.elements, o = _eye;       // the rotation moved the translation to R⁻¹·(R·(p − eye)) = p − eye
+  e[12] += o.x; e[13] += o.y; e[14] += o.z;
   return out;
 }

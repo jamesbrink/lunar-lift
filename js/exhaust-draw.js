@@ -3,6 +3,8 @@ import { RE } from './constants.js';
 import { getSimTime } from './physics.js';
 import { moonPos } from './constants.js';
 import { SUN_DIR } from './world.js';
+import { frameDir } from './origin.js';
+const _sunF = new THREE.Vector3();
 import { LAYER_FX, RES_SCALE } from './halfres.js';
 import { NP, pPos, pR, pLife, pAge, pInv, pHeat, pMode, pSmoke, pMoon, pPal, pColB, alive, nAlive, ship, plumeDebug, isSmoke,
   SM_SEAM, SM_SPRAY, SM_FLASH, SM_TRAIL, SM_STEAM } from './exhaust-pool.js';
@@ -215,7 +217,7 @@ puffs.onBeforeRender = (renderer, sc, cam) => {
   if (!cam.isPerspectiveCamera) return;
   renderer.getDrawingBufferSize(_dbSize);
   uScale.value = _dbSize.y * RES_SCALE / (2 * Math.tan(cam.fov * Math.PI / 360));
-  puffMat.uniforms.uSun.value.copy(SUN_DIR).transformDirection(cam.matrixWorldInverse);
+  puffMat.uniforms.uSun.value.copy(frameDir(_sunF.copy(SUN_DIR))).transformDirection(cam.matrixWorldInverse);
 };
 
 export function initExhaustDraw(scene) { scene.add(puffs); scene.add(lights); scene.add(casters); }
