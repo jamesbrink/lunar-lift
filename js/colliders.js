@@ -34,6 +34,18 @@ const FIXED = [
   ['THE KEROSENE TANKS', 61.2, 28, 3.3, 7.6, 6, 2.2],
   ['THE WATER TOWER', 120, -150, 32, 8, 8, 36],
 ];
+/* The big solids of the rest of the Cape (js/cape.js draws them from js/padsite.js SITE; these are
+   the same footprints in this file's units: km / 0.0014). Exported for the camera, which must not
+   end up inside one either. */
+export const CAPE_SOLIDS = [
+  ['THE VEHICLE ASSEMBLY BUILDING', -3985.7, 0, 60, 56.4, 77.9, 64],
+  ['THE VEHICLE ASSEMBLY BUILDING', -3985.7, -124.6, 22, 29.8, 48.2, 26],          // its low bay
+  ['THE LAUNCH CONTROL CENTRE', -3857.1, -153.6, 7, 19.6, 41.1, 9.5],
+  ['A MOBILE LAUNCHER', -3728.6, 150, 4, 17.5, 14.6, 6.2],
+  ['A MOBILE LAUNCHER', -3737.1, 150, 50, 4.7, 4.7, 46],
+  ['THE CRAWLER', -3771.4, 0, 2.5, 14.3, 12.5, 4],
+];
+FIXED.push(...CAPE_SOLIDS);
 const ARM_BOXES = ARMS.map(([z, hullR, w]) => {
   const tip = -(hullR + 0.9);
   return ['A SWING ARM', (ARM_FROM + tip) / 2, 0, z, (tip - ARM_FROM) / 2, w / 2, w / 2];
@@ -53,7 +65,8 @@ const _p = new THREE.Vector3(), _a = new THREE.Vector3();
 export function padHit(pos, axis, t, tailZ, noseZ, armsIn) {
   _p.copy(pos).applyAxisAngle(Y, -EARTH_SPIN * t).addScaledVector(PAD_UP, -RE);
   const lx = _p.dot(PAD_EAST) / VS, ly = _p.dot(NORTH) / VS, lz = _p.dot(PAD_UP) / VS;
-  if (Math.abs(lx) > 260 || Math.abs(ly) > 260 || lz > 220 || lz < -60) return null;      // nowhere near
+  /* nowhere near: the launch complex is within 260 u of the origin, the assembly building's group 5.5 km west */
+  if (lx > 260 || lx < -4100 || Math.abs(ly) > 260 || lz > 220 || lz < -60 || (lx < -260 && lx > -3650)) return null;
   _a.copy(axis).applyAxisAngle(Y, -EARTH_SPIN * t);
   const ax = _a.dot(PAD_EAST), ay = _a.dot(NORTH), az = _a.dot(PAD_UP);
   const step = Math.min(2.4, Math.max(0.6, (noseZ - tailZ) / 4));       // a bare capsule is 2.7 u long: sample it finely
