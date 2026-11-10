@@ -78,9 +78,20 @@ await page.evaluate(async () => {
     const ax = new T.Vector3().crossVectors(up, Y).normalize();
     return up.applyAxisAngle(ax, tilt).normalize();
   };
-  H.moon = (turn, tilt, alt, t = 1000, landed = false) => {
+  /* a direction given in the Moon's OWN axes, at the hour of the month that puts the sun `sunEl`
+     rad above its horizon (or as near as the month gets) */
+  H.moonAt = (lx, ly, lz, alt, sunEl = 0.9) => {
+    const loc = new T.Vector3(lx, ly, lz).normalize(), w = new T.Vector3();
+    let best = 0, err = 9;
+    for (let t = 0; t < 2360590; t += 600) {
+      const e = Math.abs(Math.asin(w.copy(loc).applyAxisAngle(Y, C.MOON_RATE * t).dot(W.SUN_DIR)) - sunEl);
+      if (e < err) { err = e; best = t; }
+    }
+    return H.moon(0, 0, alt, best, false, loc.applyAxisAngle(Y, C.MOON_RATE * best));
+  };
+  H.moon = (turn, tilt, alt, t = 1000, landed = false, dir = null) => {
     const m = C.moonPos(t, new T.Vector3()), mv = C.moonVel(t, new T.Vector3());
-    const up = H.moonDir(turn, tilt, t);
+    const up = dir || H.moonDir(turn, tilt, t);
     game.reset();
     const put = (a) => game.teleport(m.clone().addScaledVector(up, C.RM + W.moonGroundHeight(up) + a).toArray(), mv.toArray(), t);
     put(alt + 1); game.stage(); game.stage();       // staging only works in flight: teleport first
@@ -137,9 +148,14 @@ await shot('night-pad-40km', `game.reset(); game.ff(16.5 * 3600); game.setView(0
 await shot('tod-15h', `game.reset(); game.ff(15 * 3600)`);
 await shot('tod-9h-3km', `game.reset(); game.ff(9 * 3600); game.setView(0.5, 0.15, 3)`);
 
+if (want('pad') || want('cape')) console.log('earth patch', JSON.stringify(await page.evaluate(() => { game.reset(); return __tv.W.terrainAudit ? __tv.W.terrainAudit().earth : null; })));
+
 /* ---- Moon ---- */
 await shot('moon-4000', `__tv.moon(0.7, 0.1, 4000); game.setView(0, 1.3, 0.3)`);
 await shot('moon-4000-b', `__tv.moon(-0.9, -0.3, 4000); game.setView(0, 1.3, 0.3)`);
+await shot('moon-4000-rays', `__tv.moonAt(0.352, -0.292, -0.889, 4000); game.setView(0, 1.3, 0.3)`);
+await shot('moon-1500-rays', `__tv.moonAt(0.2, -0.1, -0.95, 1500, 0.6); game.setView(0, 1.3, 0.3)`);
+await shot('moon-4000-low-sun', `__tv.moonAt(-0.919, -0.175, 0.354, 4000, 0.35); game.setView(0, 1.3, 0.3)`);
 await shot('moon-100', `__tv.moon(0.7, 0.1, 100); game.setView(0, 1.3, 0.3)`);
 await shot('moon-100-limb', `__tv.moon(0.7, 0.1, 100); game.setView(0.6, 0.3, 0.3)`);
 await shot('moon-10-horizon', `__tv.moon(0.7, 0.1, 10); game.setView(0.6, 0.12, 0.2)`);
@@ -148,10 +164,24 @@ await shot('moon-2-horizon', `__tv.moon(0.7, 0.1, 2); game.setView(0.6, 0.1, 0.1
 
 /* three landings: drop from 30 m, wait for rest, measure */
 let landFail = 0;
-const sites = [['a', 0.7, 0.1], ['b', 1.1, 0.4], ['c', -0.5, -0.5]];
+const sites = [['a', 0.7, 0.1], ['b', 1.1, 0.4], ['c', -0.5, -0.5], ['bowl', 0.7, 0.1]];
 for (const [tag, turn, tilt] of sites) {
   if (!want('moon-landed')) break;
-  await page.evaluate(([turn, tilt]) => { __tv.moon(turn, tilt, 0.03, 1000, true); game.warp(1); game.setView(0.6, 0.2, 0.09); }, [turn, tilt]);
+  await page.evaluate(([turn, tilt, tag]) => {
+    let dir = null;
+    if (tag === 'bowl') {
+      /* the deepest ground within ~9 deg of site a: a crater floor, under the datum sphere */
+      const { T, W } = __tv, c = __tv.moonDir(turn, tilt, 1000), d = new T.Vector3(); let low = 1e9;
+      const e1 = new T.Vector3(0, 1, 0).cross(c).normalize(), e2 = c.clone().cross(e1);
+      for (let i = 0; i < 6000; i++) {
+        const r = 0.16 * Math.sqrt((i + 0.5) / 6000), a = i * 2.399963;
+        d.copy(c).addScaledVector(e1, r * Math.cos(a)).addScaledVector(e2, r * Math.sin(a)).normalize();
+        const h = W.moonGroundHeight(d);
+        if (h < low) { low = h; dir = d.clone(); }
+      }
+    }
+    __tv.moon(turn, tilt, 0.03, 1000, true, dir); game.warp(1); game.setView(0.6, 0.2, 0.09);
+  }, [turn, tilt, tag]);
   await wait(9000);
   const r = await page.evaluate(async () => {
     const { T, C, P, W } = __tv, PR = await import('/js/predictor.js');
@@ -187,7 +217,14 @@ for (const [tag, turn, tilt] of sites) {
       drawnMinusFn_m: gap === null ? null : +gap.toFixed(2), touchdown: document.getElementById('overlayText')?.textContent.replace(/\s+/g, ' ').slice(0, 90) };
   });
   console.log(`landing ${tag}`, JSON.stringify(r));
-  if (r.drawnMinusFn_m === null || Math.abs(r.drawnMinusFn_m) > 1 || Math.abs(r.contact_m) > 1) landFail++;
+  console.log(`  patch`, JSON.stringify(await page.evaluate(() => __tv.W.terrainAudit().moon)));
+  await page.addStyleTag({ content: '#overlay{display:none!important}' });
+  /* the drawn ground must BE the height function (1 m). Contact is reported, not gated at 1 m: the
+     integrator stops on the first 0.1 s step that finds the tail under the ground, so a 10 m/s
+     arrival comes to rest up to 1 m into it — physics' step, not the terrain's. */
+  if (r.drawnMinusFn_m === null || Math.abs(r.drawnMinusFn_m) > 1 || r.contact_m > 0.5 || r.contact_m < -1.6) landFail++;
+  const au = await page.evaluate(() => __tv.W.terrainAudit().moon);
+  if (!au || Object.values(au.nonFinite).some(n => n > 0)) { landFail++; console.log('  NON-FINITE in the lunar patch'); }
   await page.screenshot({ path: `${out}/moon-landed-${tag}.png` });
   await page.evaluate(() => game.setView(2.2, 0.12, 0.6)); await wait(1200);
   await page.screenshot({ path: `${out}/moon-landed-${tag}-wide.png` });

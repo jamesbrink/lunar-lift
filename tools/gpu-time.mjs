@@ -4,7 +4,8 @@
 
      node tools/gpu-time.mjs [port=8078] [query-string]      e.g.  node tools/gpu-time.mjs 8078 '?logdepth=0'
 
-   Stations: pad idle, full throttle at liftoff, 15 km, 500 km orbit. Prints median / p90 ms. */
+   Stations: pad idle, full throttle at liftoff, 15 km, 500 km orbit, the Moon from 100 km and
+   from 10 km. Prints median / p90 ms. */
 import { chromium } from 'playwright';
 import { existsSync, readdirSync } from 'node:fs';
 import { homedir } from 'node:os';
@@ -54,4 +55,14 @@ await page.evaluate(() => { game.ignite(); game.setSas(true, false); });
 await page.waitForTimeout(5000); await measure('liftoff');
 await page.evaluate(() => game.ff(65)); await page.waitForTimeout(800); await measure('15km');
 await page.evaluate(() => game.ff(580)); await page.waitForTimeout(3000); await measure('orbit');
+/* the Moon, paused over a sunlit site: nadir from 100 km, and toward the horizon from 10 km */
+const moonAt = (alt, pitch) => page.evaluate(async ([alt, pitch]) => {
+  const C = await import('/js/constants.js'), T = await import('three'), W = await import('/js/world.js');
+  const t = 1000, m = C.moonPos(t, new T.Vector3()), mv = C.moonVel(t, new T.Vector3());
+  const up = W.SUN_DIR.clone().setY(0).normalize().applyAxisAngle(new T.Vector3(0, 1, 0), 0.7);
+  const put = a => game.teleport(m.clone().addScaledVector(up, C.RM + W.moonGroundHeight(up) + a).toArray(), mv.toArray(), t);
+  game.reset(); put(alt + 1); game.stage(); game.stage(); put(alt); game.warp(0); game.setView(0.6, pitch, 0.2);
+}, [alt, pitch]);
+await moonAt(100, 1.3); await page.waitForTimeout(1500); await measure('moon100');
+await moonAt(10, 0.12); await page.waitForTimeout(1500); await measure('moon10');
 await browser.close();

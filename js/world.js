@@ -7,7 +7,7 @@ import { toon, RAMP_EARTH, RAMP_MOON } from './toon.js';
 import { applyRelief, sampleGrid, reliefField, coastField, paintedCanvas } from './toonmap.js';
 import { fineRelief } from './padsite.js';
 import { surfaceInject, setSun, setEye } from './surface.js';
-import { makePatch, attachEarthPatch, updatePatch, makeMoonPatch, attachMoonPatch, updateMoonPatch, hidePatch } from './terrain.js';
+import { makePatch, attachEarthPatch, updatePatch, makeMoonPatch, attachMoonPatch, updateMoonPatch, hidePatch, patchAudit } from './terrain.js';
 import { makeWeather, makeCloudShell, updateWeather, cloudShadeInject, setWeatherEye } from './clouds.js';
 import { makeHaze, hazeInject, updateHaze } from './haze.js';
 import { buildPad } from './pad.js';
@@ -552,7 +552,9 @@ export function groundHeight(dir) {
 
 export function moonGroundHeight(dir) {
   if (!moonField || !uvAlong(moon, dir)) return 0;
-  return sampleGrid(moonField, _uvw.u, _uvw.v);
+  // the relief grid plus the crater ladder at full detail: the same two terms js/terrain.js writes
+  // into the lunar patch's vertices under the vehicle
+  return sampleGrid(moonField, _uvw.u, _uvw.v) + moonField.crater(_ld.x, _ld.y, _ld.z, _uvw.u, _uvw.v, 0);
 }
 
 export function fineGroundHeight(dir) {
@@ -561,8 +563,11 @@ export function fineGroundHeight(dir) {
   // the same two terms js/terrain.js writes into the near patch's vertices under the vehicle
   return sampleGrid(earthField, _uvw.u, _uvw.v) + fineRelief(shore, _uvw.u, _uvw.v);
 }
-// The Moon has no fine getter: its near patch is the relief grid itself, so moonGroundHeight IS
-// the drawn ground.
+// The Moon has no separate fine getter: moonGroundHeight IS the drawn ground under the vehicle.
+
+/* For the harness (tools/terrain-views.mjs): non-finite counts, worst normal tilt and the cost of
+   the last rebuild, for both near patches. */
+export const terrainAudit = () => ({ earth: earthPatch && patchAudit(earthPatch), moon: moonPatch && patchAudit(moonPatch) });
 
 /* The painted canvases, for the orbital map screen (js/hud.js): the same authored pixels the
    planets wear, so the map can blit real coastline instead of a flat blue disc, and never kicks

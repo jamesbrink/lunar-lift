@@ -507,6 +507,34 @@ air. Corollaries, each read off the code or measured:
   the shader instead (`setHole`), and the patch is exactly `moonGroundHeight` / `fineGroundHeight`
   under the vehicle (0.07 m / 0.27 m worst over the 625 nearest vertices). A test camera must add the
   ground height to its altitude or it is underground.
+- **A toon ramp shades a form; night is not the shadow side of one.** `RAMP_EARTH`'s lowest band is
+  34 % of noon, so the globe's night side was lit at a third of daylight and the far ground glowed
+  green at night beside a navy near field (the 3 km shadow box hid it close in). The Earth's ground
+  exports `sfLit` (cuts the sun's term below the horizon) and `sfTwi` (twilight, as INDIRECT sky
+  light: a set sun has no direction for a shadow map, and left in the direct term the shadow box
+  drew its own outline 40 km across the dusk). Anything standing on the ground that is not
+  floodlit takes the same two numbers (`js/cape.js` does, for itself and the pad's slabs).
+- **A flat step in sun elevation is a ruled line across the landscape.** Everything else in the
+  ground shader is a flat tone behind an edge; daylight is the exception, twice tried.
+- **Light that must read as light is written past 1.** A lit toon surface shows albedo × light / π.
+  Foam and the sun's glint as palette whites came out grey; they are 2.3–3.0 in linear.
+- **A lattice reject box must be the exact bound of what the cell can reach.** `js/mooncraters.js`
+  derives it (0.644 of a cell); the shader uses the same number. Tighter cuts craters off along
+  lattice planes — an 85° wall in the lunar patch, a ruled edge in the drawing — and
+  `tools/crater-stats.mjs` gates the largest 2 m height step at 8 m (it found 499 m). Looser costs
+  frame time: 3.4 candidate cells of 8 instead of 2.1 was half the Moon's frame again.
+- **The lunar ground is relief grid + crater ladder, in three places that must stay one function**:
+  `moonGroundHeight` (contact, camera, dust), the patch's vertices (`js/terrain.js`), and the
+  drawing (`js/surface-moon.js`, same hash). The patch re-centres by HEIGHT, not by distance flown,
+  or a lander arrives on 400 m triangles that are not the craters it is landing in. Verify with
+  `tools/terrain-views.mjs <dir> <port> moon-landed`: it raycasts the drawn patch under a landed
+  CSM (measured 0.00–0.07 m at four sites, one 2.45 km under the datum).
+- **A patch rebuild is sliced.** Rows into back buffers inside 3.5 ms a frame, swapped in whole with
+  the anchor and the globe's hole. Anything new in the per-vertex height must be cheap per call and
+  safe to evaluate across frames (no state that the next frame changes).
+- **Flat things on the ground are drawn by the ground; only what stands up is geometry.** Roads,
+  the crawlerway beyond the pad's own slabs, ponds, beach and canal are in `js/surface-earth.js`
+  from `js/padsite.js`'s fields. A slab on terrain is two surfaces on one plane.
 - **Test a filter against brute force before trusting what was tuned on it.** `boxSignal` returned 11
   for a constant field of 1 at r 1; the biome classifier and the mare cut ran on it for rounds.
 
@@ -576,7 +604,7 @@ await tab.evaluate(`(async () => {
 
 ## Structure
 
-One concern per file; no god files. Current sizes: `physics.js` 773, `clouds.js` 715, `world.js` 645, `navball.js` 499, `exhaust-sim.js` 491, `camera.js` 437, `cloudfields.js` 405, `earthpaint.js` 367, `hud.js` 344, `exhaust-emit.js` 327, `paintkit.js` 314, `exhaust-draw.js` 308, `surface.js` 295, `predictor.js` 276, `moonpaint.js` 276, `saturn.js` 266, `terrain.js` 225, `pad.js` 225, `flame.js` 214, `ribbon.js` 213, `main.js` 211, `vehicle.js` 210, `padsite.js` 203, `surface-earth.js` 181, `exhaust-pool.js` 148, `toonmap.js` 142, `constants.js` 134, `surface-moon.js` 120, `targeting.js` 119, `toon.js` 117, `mapview.js` 116, `halfres.js` 103, `textures.js` 97, `aero.js` 81, `colliders.js` 72, `chutes.js` 70, `haze.js` 64, `audio.js` 62, `palette.js` 35, `origin.js` 29.
+One concern per file; no god files. Current sizes: `physics.js` 773, `clouds.js` 715, `world.js` 681, `navball.js` 499, `exhaust-sim.js` 491, `camera.js` 460, `cloudfields.js` 405, `earthpaint.js` 367, `hud.js` 344, `exhaust-emit.js` 327, `paintkit.js` 314, `exhaust-draw.js` 308, `surface.js` 337, `predictor.js` 276, `moonpaint.js` 249, `saturn.js` 266, `terrain.js` 285, `pad.js` 225, `flame.js` 214, `ribbon.js` 213, `main.js` 211, `vehicle.js` 210, `padsite.js` 307, `surface-earth.js` 321, `exhaust-pool.js` 148, `toonmap.js` 142, `constants.js` 134, `surface-moon.js` 187, `targeting.js` 119, `toon.js` 117, `mapview.js` 116, `halfres.js` 103, `textures.js` 97, `aero.js` 81, `colliders.js` 85, `chutes.js` 70, `haze.js` 64, `audio.js` 62, `palette.js` 35, `origin.js` 29, and new: `cape.js` 274, `mooncraters.js` 119.
 `toonmap.js` is now only the registry of paint products; the painters are `earthpaint.js` and
 `moonpaint.js` on `paintkit.js`, the authored launch site is `padsite.js`, and the ground is drawn by
 `surface.js` + `surface-earth.js` + `surface-moon.js`.
@@ -596,6 +624,10 @@ mission headless), `mission-math.py` (derived numbers), `shader-lint.mjs`, `shot
 screenshots plus console errors and warnings), `clip-test.mjs` (camera never under terrain or inside
 the hull), `gpu-time.mjs` (GPU ms per frame by timer query), `cloud-views.mjs` (weather screenshots
 and GPU time).
+New in the terrain round: `cape.js` (everything that stands within 6 km of the pad, one merged
+mesh), `mooncraters.js` (the crater ladder as numbers; display-free), and the tools
+`terrain-views.mjs` (the ground's review stations and the landed-on-the-drawn-ground check),
+`boot-time.mjs`, `crater-stats.mjs` (in `npm test`).
 `physics.js`, `aero.js` and `colliders.js` stay display-free: `tools/mission-sim.mjs` imports them headless, and
 `saturn.js` with them for the stage records (so anything there that needs a canvas must tolerate having none).
 
