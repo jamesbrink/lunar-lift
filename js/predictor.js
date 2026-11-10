@@ -1,7 +1,6 @@
 import * as THREE from 'three';
-import { G0, RE, RM, SOI_M, VS, SPECS, moonPos } from './constants.js';
-import { S, getSimTime, getEngineOn, getThrottle, activeStage, totalMass, fwd, gravityAt, surfaceAlt, tailStation, getChute, coastDrag } from './physics.js';
-import { stages } from './saturn.js';
+import { RE, RM, MU_E, MU_M, SOI_M, VS, moonPos, moonVel } from './constants.js';
+import { S, getSimTime, getEngineOn, getThrottle, gravityAt, surfaceAlt, tailStation, getChute } from './physics.js';
 import { ribbon } from './ribbon.js';
 
 /* Where the vehicle is going: the trajectory ribbon ahead of the ship and its apsis markers.
@@ -36,7 +35,7 @@ const MINT = [0.36, 0.95, 0.62], RED = [1, 0.22, 0.18];
 
 /* The stored prediction. rel is km from the frame body's centre at time t. */
 const rel = new Float64Array(PRED_MAX * 3), tt = new Float64Array(PRED_MAX);
-const path = { n: 0, frame: 'earth', impact: null, closed: false, ap: -1, pe: -1, apAlt: 0, peAlt: 0 };
+export const path = { n: 0, frame: 'earth', impact: null, closed: false, ap: -1, pe: -1, apAlt: 0, peAlt: 0, exact: false, apPos: new THREE.Vector3(), pePos: new THREE.Vector3() };
 let cursor = 1;
 
 const line = ribbon({ widthPx: 2.2, glowWidthPx: 9, vertexColors: true, capacity: CAP, opacity: 1, glowOpacity: 0.55 });
@@ -91,6 +90,7 @@ export function clearPredictor() {
 }
 
 const _p = new THREE.Vector3(), _v = new THREE.Vector3(), _g = new THREE.Vector3(), _m = new THREE.Vector3();
+const _r0 = new THREE.Vector3(), _v0 = new THREE.Vector3(), _h = new THREE.Vector3(), _e = new THREE.Vector3();
 const _q = new THREE.Vector3(), _mq = new THREE.Vector3(), _d = new THREE.Vector3(), _base = new THREE.Vector3();
 
 /* Every stored point is lifted to just above whatever surface it flies over: a line grazing a
@@ -118,42 +118,42 @@ function store(q, t) {
   tt[path.n++] = t;
 }
 
-/* Integrate the current state forward. Variable step: short where the arc bends or the ground is
-   close, long across a multi-hour coast. It is a picture of the trajectory, not a certificate —
-   js/targeting.js reproduces the game's own discretisation when a number has to be right. */
+/* THE ORBIT YOU ARE ON, not the one you are flying toward. The path is the coast from the present
+   state with the engine off and no air: what a conic through this position and velocity does, bent
+   only by the other body's gravity. That is what the HUD's apoapsis and periapsis are (osculating
+   elements), so the line, its markers and the numbers are one thing, and cutting the engine changes
+   none of them.
+
+   It used to integrate the burn in progress — thrust along the nose's present direction until the
+   tank ran dry — plus drag. The line then showed where the ship would be IF nothing was touched for
+   minutes, swung sideways with every degree of attitude, and its apoapsis dropped the moment the
+   engine was cut (reported from play: "they don't truly show my current AP").
+
+   Velocity Verlet, variable step: short where the arc bends or the ground is close, long across a
+   multi-hour coast. A picture of the trajectory, not a certificate — js/targeting.js is the number. */
 export function predict() {
   const sim = getSimTime();
-  const i = activeStage();
-  const throttle = getThrottle();
-  const burning = getEngineOn() && throttle > 0.01 && i >= 0 && stages[i].fuel > 0;
-  const sp = burning ? SPECS[i] : null;
-  let fuel = burning ? stages[i].fuel : 0;
+  const burning = getEngineOn() && getThrottle() > 0.01;
   const p = _p.copy(S.pos), v = _v.copy(S.v);
   const rM0 = S.pos.distanceTo(moonPos(sim, _m));
   /* Parked or already down: the first step of a vehicle sitting on a body reaches that body's
      contact shell at once, which used to publish "IMPACT PREDICTED: EARTH IN 0 min" over a rocket
      waiting for ignition. Nothing about a pad sit has anything to predict. */
-  const onSurface = surfaceAlt() <= 0.002;
   const reach = -tailStation() * VS;      // contact is the tail meeting the ground (js/physics.js surfaceAlt), flown upright
-  if (onSurface && !burning) { clearPredictor(); return; }
+  if (surfaceAlt() <= 0.002) { clearPredictor(); return; }
 
-  path.n = 0; path.impact = null; path.closed = false; path.ap = path.pe = -1;
+  path.n = 0; path.impact = null; path.closed = false; path.ap = path.pe = -1; path.exact = false;
   path.frame = rM0 < SOI_M ? 'moon' : 'earth';
   cursor = 1;
   store(p, sim);
   let t = sim, impactT = 0, swept = 0;
-  const axis = fwd();
+  gravityAt(p, _g, t);
   for (let s = 0; s < 20000 && path.n < PRED_MAX - 1; s++) {
     const alt = Math.min(p.length() - RE, p.distanceTo(moonPos(t, _m)) - RM);
     const dt = THREE.MathUtils.clamp(Math.min(alt, v.length() * 40, 3000) * 0.006, 0.2, 20);
-    const mass = totalMass();
+    v.addScaledVector(_g, dt / 2); p.addScaledVector(v, dt); t += dt;
     gravityAt(p, _g, t);
-    coastDrag(_g, p, v, mass);            // the same nose-on, air-relative drag targeting uses (js/physics.js)
-    if (sp && fuel > 0) {
-      fuel = Math.max(0, fuel - sp.thrust * throttle / (sp.isp * G0) * dt);
-      _g.addScaledVector(axis, sp.thrust * throttle / mass / 1000);
-    }
-    v.addScaledVector(_g, dt); p.addScaledVector(v, dt); t += dt;
+    v.addScaledVector(_g, dt / 2);
     moonPos(t, _m);
     const rM = p.distanceTo(_m);
     /* Never store a point already inside a body: lift() would drag it onto the surface, and a
@@ -185,6 +185,24 @@ export function predict() {
     if (path.ap < 0 && r1 > r0 && r1 > r2) { path.ap = j; path.apAlt = r1 - R; }
     if (path.pe < 0 && r1 < r0 && r1 < r2) { path.pe = j; path.peAlt = r1 - R; }
     r0 = r1; r1 = r2;
+  }
+
+  /* Where the path is a closed conic round its body, the markers sit on the conic's own apsides —
+     the eccentricity vector's two ends — and carry the HUD's numbers exactly. Found on the sampled
+     path alone they hopped from sample to sample as the path was redrawn. */
+  {
+    const moon = path.frame === 'moon', mu = moon ? MU_M : MU_E;
+    _r0.copy(S.pos); _v0.copy(S.v);
+    if (moon) { _r0.sub(moonPos(sim, _m)); _v0.sub(moonVel(sim, _m)); }
+    const r = _r0.length(), v2 = _v0.lengthSq(), a = 1 / (2 / r - v2 / mu);
+    _h.crossVectors(_r0, _v0); _e.crossVectors(_v0, _h).multiplyScalar(1 / mu).addScaledVector(_r0, -1 / r);
+    const e = _e.length();
+    if (a > 0 && e < 1 && e > 1e-4 && a * (1 + e) < (moon ? SOI_M : 300000)) {
+      _e.multiplyScalar(1 / e);
+      path.exact = true;
+      path.apAlt = a * (1 + e) - R; path.peAlt = a * (1 - e) - R;
+      path.apPos.copy(_e).multiplyScalar(-a * (1 + e)); path.pePos.copy(_e).multiplyScalar(a * (1 - e));
+    }
   }
 
   /* The impact pill is for UNPOWERED flight heading down, where the state vector is the whole
@@ -249,14 +267,15 @@ export function updatePredictor(camera) {
   }
   line.setPoints(vPos, m); line.setColors(vCol, m); line.setAlphas(vAlpha, m);
 
-  const place = (mark, idx, alt) => {
+  const place = (mark, idx, alt, exact) => {
     mark.visible = idx >= cursor;
     if (!mark.visible) return;
-    mark.position.set(rel[idx * 3] - ox, rel[idx * 3 + 1] - oy, rel[idx * 3 + 2] - oz);
+    if (path.exact) mark.position.set(exact.x - ox, exact.y - oy, exact.z - oz);
+    else mark.position.set(rel[idx * 3] - ox, rel[idx * 3 + 1] - oy, rel[idx * 3 + 2] - oz);
     /* An apsis the ship is sitting on is a label stuck to the hull. It comes back once it is far
        enough ahead to point at something. */
     if (mark.position.length() < 14 * gap) { mark.visible = false; return; }
     mark.userData.label(alt);
   };
-  place(apMark, path.ap, path.apAlt); place(peMark, path.pe, path.peAlt);
+  place(apMark, path.ap, path.apAlt, path.apPos); place(peMark, path.pe, path.peAlt, path.pePos);
 }

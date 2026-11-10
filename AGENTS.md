@@ -509,6 +509,10 @@ These five are carried as written — rule and history together — because `js/
 
 ### Camera, map and trajectory ribbon
 
+- The trajectory ribbon is the engine-off, drag-free coast from the present state (the orbit the
+  ship is ON), and its apsis markers are the conic's own; `tools/orbit-line.mjs` gates that the
+  ribbon's apoapsis equals the state vector's, engine lit and cut. Do not integrate the burn into it.
+
 - Collide the camera twice per frame — the wanted place and the blended one — three rounds each,
   ground last, with a sideways escape if it is still inside the hull. `tools/clip-test.mjs` sweeps it.
 - The pad collider is three ellipsoids in the pad's frame (`padMatrix()`), not a dome: the camera
