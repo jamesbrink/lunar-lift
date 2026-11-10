@@ -219,13 +219,20 @@ const MAX_RATE_PY = 0.45, MAX_RATE_ROLL = 1.0;        // rad/s ceilings on body 
              Above HEAT_SHIELD only a heat shield survives it, and only shield-first: anything
              still wearing a stage, or a capsule flying nose-first, cooks in HEAT_TIME seconds.
              A bare capsule is aerodynamically stable shield-first (aeroShape gives it a forward
-             'fin'), so letting go of the stick is the right entry attitude.
+             'fin') and rights itself in time from orbital speed; from lunar-return speed the
+             heat arrives before the air has turned it (measured: burned up 23 s after interface
+             at 11 km/s), so retrograde has to be held BEFORE the atmosphere.
      chutes  G deploys the drogues, G again the mains. Each has a dynamic pressure it tears at, so
              the order and the timing are the pilot's: drogues once q is under 20 kPa, mains once
              the drogues have you under 4 kPa. Mains set the capsule down at about 8 m/s; the
              splashdown limit is SAFE_EARTH. */
 export const HEAT_SHIELD = 4, HEAT_TIME = 3;
-export const CHUTE = { drogue: { area: 30, tear: 20000 }, mains: { area: 2300, tear: 4000 } };   // CdA m², q Pa
+export const CHUTE = { drogue: { area: 30, tear: 20000, mach: 1.5 }, mains: { area: 2300, tear: 4000, mach: 0.5 } };   // CdA m², q Pa
+/* What a crew survives: G_LIMIT sustained for G_TIME. Sets the floor of the entry corridor — come
+   in too steep and the air stops you faster than people can take; too shallow and you skip out. */
+export const G_LIMIT = 16, G_TIME = 2;
+let gLoad = 0, gOver = 0;
+export const getG = () => gLoad;
 /* Swing arms: 0 across the stack, 1 swung clear. They start to move at ignition and take
    ARM_TIME; until they are most of the way round they are solid (js/colliders.js). */
 let armSwing = 0;
@@ -243,9 +250,15 @@ export function deployChute() {
   if (chute >= 2) return;
   if (aeroState.q < 20) { hooks.addLog('NO AIR TO OPEN A PARACHUTE IN', 'warn'); return; }
   const next = chute === 0 ? CHUTE.drogue : CHUTE.mains;
-  if (aeroState.q > next.tear) {
+  const what = chute === 0 ? 'DROGUES' : 'MAIN PARACHUTES';
+  /* Three ways to lose a canopy on the way out: too much dynamic pressure, too fast for fabric to
+     inflate at all (q alone lets a drogue out at 10 km/s in thin air), or into the entry plasma. */
+  const why = aeroState.q > next.tear ? `${(aeroState.q / 1000).toFixed(1)} kPa, LIMIT ${next.tear / 1000} kPa`
+    : aeroState.mach > next.mach ? `MACH ${aeroState.mach.toFixed(1)}, LIMIT ${next.mach}`
+    : heat > 0.5 ? 'BURNED AWAY IN THE ENTRY HEAT' : '';
+  if (why) {
     chute = -1; chuteOpen = 0;
-    hooks.addLog(`${chute === 0 ? 'DROGUES' : 'PARACHUTES'} TORN AWAY — ${(aeroState.q / 1000).toFixed(1)} kPa, LIMIT ${next.tear / 1000} kPa`, 'bad');
+    hooks.addLog(`${what} LOST — ${why}`, 'bad');
     audio.thud(); return;
   }
   chute++; chuteOpen = 0;
@@ -421,11 +434,15 @@ export function physStep(dt) {
         hooks.addLog('PARACHUTES TORN AWAY BY THE AIRSTREAM', 'bad'); audio.thud();
       }
     }
+    /* Felt acceleration: everything but gravity. Air on the hull plus the canopy's pull. */
+    gLoad = (_aero.length() / mass + Math.abs(sp - vr.length()) / dt) * 1000 / 9.81;
+    gOver = gLoad > G_LIMIT ? gOver + dt : Math.max(0, gOver - dt);
+    if (gOver >= G_TIME && state === 'flying' && !thrustAcc) { S.pos.addScaledVector(S.v, dt); return crushed(); }
     heat = Math.sqrt(rho) * sp * sp * sp;
     const shielded = i < 0 && _fw.dot(vr) < -0.6 * sp;             // capsule, apex trailing
     cooking = heat > HEAT_SHIELD && !shielded ? cooking + dt : Math.max(0, cooking - dt);
     if (cooking >= HEAT_TIME && state === 'flying') { S.pos.addScaledVector(S.v, dt); return burnUp(i < 0); }
-  } else { heat = 0; cooking = 0; }
+  } else { heat = 0; cooking = 0; gLoad = 0; gOver = 0; }
   S.pos.addScaledVector(S.v, dt);
 
   // ---- true flight controls: keys command torque; ω integrates against live inertia ----
@@ -638,11 +655,16 @@ function collide(what) {
   hooks.addLog(`COLLISION WITH ${what} AT ${v.toFixed(0)} m/s — VEHICLE LOST`, 'bad');
   hooks.showEndOverlay('COLLISION', `The vehicle struck <b>${what.toLowerCase()}</b> at ${v.toFixed(0)} m/s. Climb straight until the tower is below you — SAS (P) holds the vertical for the first 55 seconds — and steer east, away from it.`, 'RETRY');
 }
+function crushed() {
+  explode(); state = 'lost';
+  hooks.addLog(`${gLoad.toFixed(0)} g FOR ${G_TIME} s — NOBODY SURVIVES THAT`, 'bad');
+  hooks.showEndOverlay('ENTRY TOO STEEP', `The air stopped the capsule at <b>${gLoad.toFixed(0)} g</b>; a crew takes ${G_LIMIT} for a moment. Come in shallower — a periapsis just inside the atmosphere, not a dive at it.`, 'RETRY');
+}
 function burnUp(capsule) {
   explode(); state = 'lost';
   hooks.addLog(capsule ? 'BURNED UP — THE HEAT SHIELD WAS NOT FACING THE AIRSTREAM' : 'BURNED UP ON ENTRY — ONLY THE COMMAND MODULE HAS A HEAT SHIELD', 'bad');
   hooks.showEndOverlay('BURNED UP', capsule
-    ? 'The capsule met the atmosphere apex-first. Let it fly itself — a bare command module settles heat shield forward — or hold retrograde (V + P) before the air thickens.'
+    ? 'The capsule met the atmosphere apex-first. Hold retrograde (V + P) before the air arrives: from orbit a bare command module rights itself in time, from the Moon it does not.'
     : 'Stages do not survive re-entry. Drop everything but the command module (X) before the atmosphere, and come in heat shield first.', 'RETRY');
 }
 function breakup() {
@@ -701,7 +723,7 @@ export function resetSim() {
   engineOn = false; throttle = targetThrottle = 0;
   sasOn = false; sasRetro = false; simTime = 0; warpIdx = 0; maxQ = 0;
   tliLogged = loiLogged = loggedMaxQ = turnHintLogged = false; distFlown = 0; trail = [];
-  flightStarted = false; state = 'pad'; omega.set(0, 0, 0); I0 = null; holdOn = false; armSwing = 0; chute = 0; chuteOpen = 0; heat = 0; cooking = 0; rcsAssist = true; aeroLoad = 0; strain = 0;
+  flightStarted = false; state = 'pad'; omega.set(0, 0, 0); I0 = null; holdOn = false; armSwing = 0; gLoad = 0; gOver = 0; chute = 0; chuteOpen = 0; heat = 0; cooking = 0; rcsAssist = true; aeroLoad = 0; strain = 0;
 }
 
 /* teleport() starts the flight directly, bypassing the liftoff guard */

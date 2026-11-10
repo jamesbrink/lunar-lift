@@ -106,7 +106,7 @@ function nextStep({ state, engineOn, live, i, dry, altE, alt, nearMoon, el, radi
     if (ch === 2) return [`Under the mains — ${Math.abs(radial * 1000).toFixed(0)} m/s down, splashdown limit ${SAFE_EARTH * 1000} m/s`, 'ok'];
     if (ch < 0) return ['Parachutes are gone — nothing left to slow you', 'bad'];
     if (altE > 120) return el.pe > 60 ? [`Capsule only. To come home: retrograde burn is gone — you need a path that meets the air (periapsis ${Math.round(el.pe)} km)`, 'warn']
-      : [`Re-entry ahead — let the capsule settle heat shield first; ${K('G')} is for later`];
+      : [`Re-entry ahead — heat shield first: ${K('V')} ${K('P')} retrograde before the air; ${K('G')} is for later`];
     if (ch === 1) return q < CHUTE.mains.tear * 0.8 && altE < 6 ? [`${K('G')} MAIN PARACHUTES — now`, 'ok']
       : [`Drogues out — mains (${K('G')}) once under ${CHUTE.mains.tear / 1000} kPa: now ${(q / 1000).toFixed(1)}`];
     if (q < CHUTE.drogue.tear * 0.8 && altE < 12 && radial < 0) return [`${K('G')} DROGUE CHUTES — now`, 'ok'];

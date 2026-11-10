@@ -37,7 +37,9 @@ import { S, getState, getSimTime, getEngineOn, getThrottle, gravityAt, orbitalEl
    band for that autopilot, not a promise about *where* you land: that also depends on when you
    brake. */
 
-export const CORRIDOR = { lo: 140, hi: 600 };
+/* Widened to the measured edges after the window was re-centred: a sweep of launch phases landed
+   everything from 745 km down to 123 km (2.6-4.9 m/s); 110 km and 91 km ran the tank dry. */
+export const CORRIDOR = { lo: 125, hi: 745 };
 
 export const aim = { status: 'na', altKm: NaN, tMet: NaN, corridor: false, steps: 0 };
 
