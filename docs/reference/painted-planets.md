@@ -310,14 +310,60 @@ looking at wrong pictures:
 - **Three samples with the middle one highest mean the field peaked between samples.** A parabola
   through them says where; without it silhouettes are serrated at the sample spacing.
 
+Three more were learned from pixels that flickered. On an idle pad nothing the camera sees moves
+but the weather on its wind, a twentieth of a pixel a frame, so an outline should creep; instead
+`tools/flicker-test.mjs` counted 353 pixels in ten frames that changed and came straight back
+(A, B, A). Each cause below was found by reading the half-resolution target back on consecutive
+frames, not from the picture:
+
+- **Build the ray from the pixel, never from the shell's surface.** The ray was
+  `normalize(vWorld − eye)`, with `vWorld` the interpolated position on the shell: a vertex
+  6,382 km from the planet's centre minus an eye 6,371 km from it, in float32. Each vertex lands on
+  a half-metre step, and which step depends on the last bit of a matrix rebuilt every frame (the
+  shell does not turn with the ground, so in Earth-fixed axes its matrix does). Half a metre on a
+  surface 11 km overhead is a twentieth of a half-resolution pixel of fresh noise in every ray, and
+  a hard threshold turns noise in its argument into flips along its whole outline. The proof: with
+  the wind, the sun and the macro ride all frozen (`cloud-views.mjs --flicker --freeze=…`), so that
+  nothing the weather reads was changing, 884 pixels of 2.7 million still flipped; with the ray
+  built from `gl_FragCoord` and the camera's inverse projection (`rayDir`), 49. The mesh now only
+  says which pixels the shell covers; where the ray meets it is solved, not interpolated.
+  (Unproject the pixel on the *near* plane: on the far one `w` is 500 − 500 in float32.)
+- **Coverage is one ramp, continuous from miss to hit.** A flank seen from below wrote 1 on a hit
+  and at most 0.5 on a miss, so a pixel on the outline read 0.5 or 1.0 according to which side of
+  zero an estimate fell, and the edge on screen jumped a pixel each time: coverage series such as
+  `255 255 129 129 255 129 255` in the target. The ramp is now on the highest the field stands over
+  its threshold anywhere along the ray, on both sides: a hit that is not clearly inside looks one
+  stride further on (still climbing: the ray is going in; turned: the three values give the crest).
+  Its width is analytic — the field's slope across a pixel plus the threshold's climb across a
+  pixel of height — where it used to be `fwidth` of the estimate, a 2 × 2 block of noise.
+- **A crest between samples is looked at when it is found**, not only if the whole ray misses.
+  A lobe standing in front of a larger cloud was drawn on the frames a sample landed in it and
+  skipped on the others, and the pixel went from the lobe's tone to the cloud's and back
+  (`137 173 139 … 174` in the light channel). And the surface is put where the chord through the
+  last outside/inside pair crosses zero (false position), which moves smoothly when the field does;
+  a bisection's midpoint moved in quarter-strides and the tone band read there moved with it.
+
+Light leaves the march multiplied by coverage. The composite reads the target bilinearly, and plain
+light let the pixels just outside an outline — coverage near zero, light whatever the nearest miss
+read — vote on the tone of the outline's own pixels.
+
+What these did not need: more samples, a wider blur, or temporal filtering. Two things that were
+tried and made it worse are worth knowing: reading the billows on every near-miss sample (the
+strongly-changing count doubled), and narrowing the ramp to one pixel either side.
+
+Measured, ten frames, flips (A-B-A) before → after: pad, weather on (`flicker-test.mjs`,
+1440 × 900) 353 → 58, of which 5 are there with the weather off. With `cloud-views.mjs --flicker`
+(2160 × 1250, camera bolted to the ground, two runs each): pad 810/783 → 137/130; 15 km
+1465/2373 → 221/281; 500 km nadir 130/145 → 42/25; 500 km toward the limb 86/110 → 7/16.
+
 The slow part of the field (macro sheets, first octave) is read at three points of the ray and
 interpolated; if it is so low all along the ray that the other octaves at their 99.8th percentile
 could not lift it over the threshold, the walk is skipped.
 
 ### Ink
 
-The march does not write a colour. It writes four numbers per pixel — light, haze, veil, and
-coverage as a *ramp* through 0.5 at the silhouette — and the shell's own geometry in the main pass
+The march does not write a colour. It writes four numbers per pixel — light (times coverage), haze,
+veil, and coverage as a *ramp* through 0.5 at the silhouette — and the shell's own geometry in the main pass
 turns them into ink at full resolution: coverage is cut at 0.5, light into three tones (lit, mid,
 shade). A bilinear-upsampled ramp thresholded per pixel is a clean edge at the screen's resolution,
 the way distance-field type is; an upsampled colour is a blur. That is how a quarter-pixel march

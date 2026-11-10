@@ -369,6 +369,15 @@ These five are carried as written — rule and history together — because `js/
   long and a field read at its width aliases into rows of dashes at the limb; a mask multiplied by
   a latitude gate has the gate's straight edge (add the gate to the noise before the threshold).
   `tools/cloud-views.mjs --climb` is the pop test, `--flicker` the idle-frame diff.
+- **A hard threshold turns noise in its argument into flicker along its whole outline, so nothing
+  noisy may reach one.** Cloud outlines flipped (353 A-B-A pixels in ten idle frames) for three
+  reasons, each found by reading the half-resolution target back frame by frame: the view ray was
+  built from the shell's interpolated surface — 6,382 km minus 6,371 km in float32, half a metre of
+  new rounding every frame — instead of from `gl_FragCoord` and the inverse projection; coverage
+  was 1 on a hit and at most 0.5 on a miss, so an outline pixel jumped between the two; and a crest
+  between samples was only looked at when the whole ray missed. `tools/cloud-views.mjs --flicker
+  --freeze=drift,sun,ride` is the instrument: with every input the weather reads held still, any
+  pixel that still flips is arithmetic, not weather (884 before, 49 after). Do not reach for a blur.
 - **A half-resolution pass can still have a full-resolution edge.** The weather target holds
   coverage as a ramp through 0.5 and light as a scalar, not a colour; the main pass thresholds them
   per screen pixel. Upsampling a colour blurs it, upsampling a ramp and cutting it does not.
@@ -537,7 +546,6 @@ await tab.evaluate(`(async () => {
 
 ## Structure
 
-One concern per file; no god files.
 
 **Flight (display-free where noted — `tools/mission-sim.mjs` imports these headless)**
 - `js/constants.js` — every physical constant, `SPECS`, `WARPS`, `DTPHYS`, `TURN`, `MOON_PHASE0`, each with the measurement behind it. Display-free.
@@ -571,53 +579,6 @@ One concern per file; no god files.
 - `tools/check.mjs` — `npm test`. `tools/mission-sim.mjs` — flies the mission headless. `tools/mission-math.py` — derived numbers, checked against code and docs. `tools/shader-lint.mjs` — static GLSL rules.
 - `tools/shots.mjs`, `tools/clip-test.mjs`, `tools/flicker-test.mjs` — the browser gates. `tools/gpu-time.mjs`, `tools/cloud-views.mjs` — measurements. `tools/lib/browser.mjs` — how all of them find and launch Chromium.
 
-`js/constants.js` holds every physical constant and the vehicle `SPECS`, each with the measurement
-that justifies it in a comment. `docs/reference/` holds the source-cited external data and the
-mission derivation; `docs/reference/README.md` is the index.
-
-## Discipline
-
-- Never commit a number you did not produce by running something, and never commit a spec, plan or
-  comment that describes behaviour you have not observed. If a constant changes, re-run the tool and
-  correct the prose in the same commit.
-- Distinguish what is measured from what is inferred, in code comments and docs alike. Apollo's
-  numbers stay labelled as Apollo's.
-- Commit in focused steps with messages that state the evidence, not the intent.
-
-## Appendix: how each renderer rule was found
-
-The history behind the rules above, under the same headings. Entries that cite r160 were measured
-on three r160; the game loads 0.187.0 now. The rules are still followed (`tools/shader-lint.mjs`
-enforces the shader ones) but three's internals were not re-read on 0.187.
-
-### Shaders
-
-- **A custom `ShaderMaterial` must declare `#include <common>` as the first line of its vertex
-  shader.** The renderer runs with `logarithmicDepthBuffer: true`, and r160's `logdepthbuf_vertex`
-  chunk calls `isPerspectiveMatrix`, which lives in `<common>` and is *not* in `ShaderMaterial`'s
-  auto-prefix. So every custom shader also needs `#include <logdepthbuf_pars_vertex>` /
-  `<logdepthbuf_vertex>` in the vertex stage and `<logdepthbuf_pars_fragment>` / `<logdepthbuf_fragment>`
-  in the fragment stage, or it fails to compile and the object silently disappears.
-- **`logdepthbuf_fragment` is a statement — it belongs inside `void main()`.** With
-  `logarithmicDepthBuffer: true` the chunk expands to a live `gl_FragDepthEXT = …;` line, and sitting
-  it between the pars include and `main` (as the sky dome did for its whole life) is a fragment-syntax
-  error at compile: the boot console read `Shader Error 0 … 'gl_FragDepth' : syntax error` while every
-  screenshot kept rendering a world missing exactly one object. After moving it inside main and giving
-  the limb shell its missing chunks, a clean boot reports ZERO shader errors (measured over reload).
-  Count the console after any custom-shader change; a failed program fails silently in the image.
-- **A comment inside a GLSL template literal must not contain a backtick.** It ends the JS string and
-  the module stops parsing; the hot-reloaded page then has no `window.game`.
-- **A GLSL comment with a backtick did it again**, in `js/exhaust-draw.js`, and the symptom this time
-  was `tools/shader-lint.mjs` reporting a brace mismatch in a shader whose braces were fine. If the
-  linter and your eyes disagree about braces, look for a backtick first.
-- **A function-like GLSL macro rewrites its parameter everywhere in its body, swizzles included.**
-  `#define SLOW(x) ... slow.x ...` expands to `slow.( expr )` and the program dies with "illegal
-  character at fieldname start"; and `#define SLOW( x )` with a space is not a function at all.
-- **A define used by an injected helper must be in the injected text.** The shell compiled with
-  `TURRET` defined in its own preamble while the ground materials got the shared field without it:
-  the planet went black and the clouds, drawn over nothing, looked better than ever.
-- **A shader bug can take down the GPU process, and the dev server ships it to every open tab.**
-  `for (int i = 0; i < N; i)` — no increment — hung the harness browser so hard the tab could not be
   closed, and because every save hot-reloads, the user's own Chrome loaded the same shader and lost
   WebGL for the session (`GL_VENDOR = Disabled`; only a browser restart clears it). Two neighbours of
   that bug render *nothing* with no error at all: `atan2` (not GLSL; fails the link) and an array

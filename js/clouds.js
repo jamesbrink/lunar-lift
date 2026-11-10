@@ -14,7 +14,7 @@ import { skyOnly, sky, RES_SCALE } from './halfres.js';
    to dither and no jitter to hide a march's terraces behind.
 
    What leaves the half-resolution pass is not a colour. It is four numbers per pixel —
-       r  light: how clear the path sunward of the hit is, 0 buried .. 1 open
+       r  light: how clear the path sunward of the hit is, 0 buried .. 1 open (times coverage)
        g  haze: how much air lies between the eye and the hit
        b  the high veil
        a  coverage as a RAMP through 0.5 at the silhouette, about two pixels wide
@@ -288,8 +288,9 @@ void bandSegment( vec3 o, vec3 d, out float tA, out float tB ) {
      FLOOR (the inner sphere) for rays that end on it. Without the floor a camera between 4 and 11 km
      saw clear air beneath it and cloud shadows on the sea with nothing casting them. */
 const FACE = /* glsl */`
+  vec3 d = rayDir();
   float eye2 = dot( camAbs, camAbs );
-  float Ae = dot( camAbs, normalize( vWorld - camAbs ) );
+  float Ae = dot( camAbs, d );
   bool grounded = Ae < 0.0 && Ae * Ae - ( eye2 - GROUND_R * GROUND_R ) > 0.0;
   #ifdef INNER
     if ( !gl_FrontFacing || eye2 <= BAND_IN * BAND_IN || eye2 >= SHELL_R * SHELL_R || !grounded ) discard;
@@ -301,11 +302,11 @@ const FACE = /* glsl */`
 
 const SHELL_VERT = /* glsl */`
 #include <common>
-/* The weather is computed in the EARTH-FIXED frame. The scene is drawn eye-relative (js/origin.js),
-   so modelMatrix * position is a small exact vector from the eye; fixRot turns it into the planet's
-   own axes and eyeFixed (the eye in that frame, from doubles in JS) puts it on the globe. In the
-   inertial frame the pad moves 409 m/s and the cloud lookup re-quantised every frame: 2.4 m of
-   float32 in uv, half a pixel of cloud edge at half resolution — the flicker on every outline. */
+/* The weather is computed in the EARTH-FIXED frame, which is also the frame the scene is drawn in
+   (js/origin.js): eyeFixed is the eye there, from doubles in JS. vWorld is the shell's surface
+   under the pixel, and it is only good to half a metre (see RAY_FN, which is why no ray is built
+   from it any more): the composite uses it for the one thing that does not care, the side of the
+   planet the sun is on. */
 uniform mat3 fixRot;
 uniform vec3 eyeFixed;
 #include <logdepthbuf_pars_vertex>
@@ -321,13 +322,45 @@ void main() {
 }
 `;
 
+/* The view ray of a pixel, from the pixel and the camera alone.
+
+   It used to be normalize( vWorld - eye ), with vWorld the shell's own surface under the pixel. That
+   surface is a vertex 6 382 km from the planet's centre minus an eye 6 371 km from it, in float32:
+   each vertex lands on a half-metre step, and WHICH step depends on the last bit of a matrix that is
+   rebuilt every frame (the shell does not turn with the ground, so in the Earth-fixed axes the scene
+   is drawn in, its matrix does). Half a metre on a surface 11 km overhead is a twentieth of a
+   half-resolution pixel of noise, new every frame, in every ray — and a hard threshold turns noise
+   in its argument into flips along its whole outline. Measured on an idle pad with the wind, the
+   sun and the macro ride all held still, so that nothing the weather reads was changing: 884 pixels
+   of 2.7 million flipped A-B-A in ten frames.
+
+   A ray built from gl_FragCoord has no large numbers in it. The mesh now only says which pixels
+   the shell covers; where the ray meets the shell is solved, not interpolated. */
+const RAY_FN = /* glsl */`
+uniform mat4 rayInv;      // the camera's inverse projection
+uniform vec2 rayScale;    // 2 / the size in pixels of the target being drawn into
+vec3 rayDir() {
+  /* the pixel on the NEAR plane: unprojected on the far one, w is 500 - 500 in float32 and the ray is NaN */
+  vec4 v = rayInv * vec4( gl_FragCoord.xy * rayScale - 1.0, -1.0, 1.0 );
+  return normalize( v.xyz / v.w * mat3( viewMatrix ) );          // v M = transpose( M ) v: view to world
+}
+`;
+
 /* The march. Writes ( light, haze, veil, coverage ) — see the header. */
 const MARCH_MAIN = /* glsl */`
 void main() {
 ` + FACE + /* glsl */`
-  vec3 n = normalize( vWorld );
   vec3 o = camAbs;
-  vec3 d = normalize( vWorld - o );
+  /* the point of the surface being drawn (the outer sphere, or the band's floor) on this ray */
+  #ifdef INNER
+    float sR = BAND_IN;
+  #else
+    float sR = SHELL_R;
+  #endif
+  float sDisc = Ae * Ae - ( eye2 - sR * sR );
+  if ( sDisc < 0.0 ) discard;                       // the mesh's facets overhang the sphere by a sliver at the limb
+  gOrigin = o + ( eye2 > sR * sR ? -Ae - sqrt( sDisc ) : -Ae + sqrt( sDisc ) ) * d;
+  vec3 n = normalize( gOrigin );
   float pix = length( fwidth( d ) );        // radians across one pixel of THIS pass
   /* uv from the Earth-fixed direction, not from the mesh's own uv: the shell never turns, so its uv
      is inertial and the planet would slide under the weather at 409 m/s. Same map as the shade. */
@@ -375,7 +408,8 @@ void main() {
       vec3 slow = vec3( m0, mM, m1 ) + F.gain * vec3( cells1( cellAt( o + tA * d ), F ), cells1( cellAt( o + tMid * d ), F ), cells1( cellAt( o + tB * d ), F ) );
       float most = F.gain * ( W2 * mix( MEAN2, TOP2, F.fade.x ) + W3 * ( MEAN3 + ( 1.0 + 0.35 * TURRET ) * F.fade.y * ( TOP3 - MEAN3 ) ) - MEANSUM ) + MEANSUM - THR;
       float t = tA, lastT = tA, hitT = tA, hitD = 0.0, best = -1.0, bestT = tA, d0 = -1.0, d1 = -1.0;
-      bool hit = false, first = false;
+      float loT = tA, loD = -1.0;                     // the last place the ray was known to be outside, and the field there
+      bool hit = false, first = false, crest = false;
       if ( max( slow.x, max( slow.y, slow.z ) ) + most > 0.0 )
       for ( int i = 0; i <= MAX_STEPS; i++ ) {
         float fi = float( i );
@@ -389,45 +423,73 @@ void main() {
         /* the billows are read only where they could decide the answer */
         float tw = F.gain * ( 1.0 + TURRET * hr );
         if ( D + tw * BUMP3 > 0.0 ) D += tw * cells3( uv, F );
-        if ( D > 0.0 ) { hit = true; first = i == 0; hitT = t; hitD = D; break; }
+        if ( D > 0.0 ) { hit = true; first = i == 0; hitT = t; hitD = D; loT = lastT; loD = d1; break; }
         if ( D > best ) { best = D; bestT = t; }
-        /* Three samples in a row with the middle one highest: the field peaked BETWEEN samples,
-           and a parabola through them says where and how high. Without this the silhouette is
-           decided by where the samples happen to fall, and it comes out serrated. */
+        /* Three samples in a row with the middle one highest: the field crested BETWEEN samples, and
+           a parabola through them says where and how high. If that crest may have broken the
+           surface it is looked at NOW, before the walk goes on. It used to be looked at only when
+           the whole ray had missed — so a lobe standing in front of a larger cloud was drawn on the
+           frames a sample happened to land in it and skipped on the others, and as the wind carried
+           it between the samples the pixel went from the lobe's tone to the cloud's and back. */
         float bend = 2.0 * d1 - d0 - D;
         if ( i > 1 && d1 >= d0 && d1 >= D && bend > 1e-5 ) {
           float peak = d1 + ( d0 - D ) * ( d0 - D ) / ( 8.0 * bend );
-          if ( peak > best ) { best = peak; bestT = lastT + 0.5 * ( D - d0 ) / bend * ( t - lastT ); }
+          float off = 0.5 * ( D - d0 ) / bend, tp = lastT + off * ( t - lastT );
+          if ( peak > -NEAR ) {
+            peak = fieldD( o + tp * d, F, 0.0, SLOW( ( tp - tA ) / len ) );
+            if ( peak > 0.0 ) {
+              hit = true; crest = true; hitT = tp; hitD = peak;
+              loT = off > 0.0 ? lastT : 2.0 * lastT - t; loD = off > 0.0 ? d1 : d0;
+              break;
+            }
+          }
+          if ( peak > best ) { best = peak; bestT = tp; }
         }
         d0 = d1; d1 = D;
         lastT = t;
       }
-      if ( !hit && best > -NEAR ) {       // the ray came close, or the parabola says it went through: look
-        best = fieldD( o + bestT * d, F, 0.0, SLOW( ( bestT - tA ) / len ) );
-        if ( best > 0.0 ) { hit = true; hitT = bestT; lastT = bestT; hitD = best; }
-      }
-      /* Bisect between the last sample outside and the first inside. */
-      if ( hit && !first && hitT > lastT ) {
-        float lo = lastT, hi = hitT;
+      float stride = 0.976 * len / steps, hitT0 = hitT, loD0 = loD;
+      /* Between the last sample outside and the first inside: two looks by false position, and the
+         surface is where the chord through the last pair crosses zero — a place that moves smoothly
+         when the field does. The midpoint of a bisection moved in quarter-strides, and the tone
+         band read there moved with it. */
+      if ( hit && !first && hitT > loT ) {
+        float lo = loT, hi = hitT, Dl = min( loD, -1e-5 ), Dh = hitD;
         for ( int k = 0; k < 2; k++ ) {
-          float tm = 0.5 * ( lo + hi );
-          if ( fieldD( o + tm * d, F, 0.0, SLOW( ( tm - tA ) / len ) ) > 0.0 ) hi = tm; else lo = tm;
+          float tm = lo + ( hi - lo ) * clamp( Dl / ( Dl - Dh ), 0.1, 0.9 );
+          float Dm = fieldD( o + tm * d, F, 0.0, SLOW( ( tm - tA ) / len ) );
+          if ( Dm > 0.0 ) { hi = tm; Dh = Dm; } else { lo = tm; Dl = min( Dm, -1e-5 ); }
         }
-        hitT = 0.5 * ( lo + hi );
+        hitT = lo + ( hi - lo ) * Dl / ( Dl - Dh );
       }
       t = hit ? hitT : bestT;
       float edge = max( F.gain * dot( GRAD_KM, F.keep ) * t * cpix, 1e-4 );         // field units across one pixel
-      /* Coverage is a ramp through 0.5 AT the silhouette. A base's outline has the field itself to
-         ramp on. A flank does not — the walk only knows hit or miss — so a miss ramps on how
-         near the ray came, scaled by how fast that nearness changes from one pixel to the next. */
-      /* A hit seen from ABOVE has a ramp of its own: the cloud is a height field whose threshold
-         climbs RISE h^2 from the base, so a ray that struck it h up the layer is over a column whose
-         field stands RISE h^2 clear of the outline. Without it coverage was 1 on one side of every
-         outline and a ramp on the other, and the upsampled edge kept the half-resolution stairs. */
       float hh = clamp( ( length( o + t * d ) - BAND_IN ) / BAND_THICK, 0.0, 1.0 );
-      if ( hit ) cov = first ? clamp( 0.5 + hitD / ( 4.0 * edge ), 0.5, 1.0 )
-                     : ( dot( o, o ) > CU_R * CU_R ? clamp( 0.5 + RISE * hh * hh / ( 4.0 * edge ), 0.5, 1.0 ) : 1.0 );
-      else cov = clamp( 0.5 + best / ( 2.0 * max( fwidth( best ), edge ) ), 0.0, 0.5 );
+      bool above = dot( o, o ) > CU_R * CU_R;
+      /* Coverage is a ramp through 0.5 AT the silhouette, and it has to be ONE ramp, continuous from
+         the miss side to the hit side. The quantity is the highest the field stands over its
+         threshold anywhere along the ray: under zero the ray missed, at zero it grazes.
+         - A hit seen from ABOVE: the threshold climbs RISE h^2 from the base, so a ray that struck
+           the cloud h up the layer is over a column whose field stands RISE h^2 clear of the outline.
+         - A flank from below or from inside the layer used to write 1 on a hit and at most 0.5 on a
+           miss. A pixel on the outline therefore read 0.5 or 1.0 according to which side of zero an
+           estimate fell, and its edge on the screen jumped a pixel each time: measured in the
+           half-resolution target on an idle pad, coverage series such as 255 255 129 129 255 129
+           255. Now a hit that is not clearly inside looks one stride further on: if the field is
+           still climbing the ray is going in, and if it has turned the three values give the
+           crest. A crest found by the walk already is its own answer. */
+      float wide = edge + ( 2.0 * RISE * hh + F.gain * TURRET * BUMP3 * F.fade.y ) * t * pix / BAND_THICK;   // ...and across one pixel of HEIGHT
+      if ( above ) cov = hit ? clamp( 0.5 + RISE * hh * hh / ( 4.0 * edge ), 0.5, 1.0 )
+                                  : clamp( 0.5 + best / ( 2.0 * max( fwidth( best ), edge ) ), 0.0, 0.5 );
+      else {
+        float top = hit ? hitD : best;
+        if ( hit && !crest && hitD < 2.0 * wide && hitT0 + stride < tB ) {
+          float Dn = fieldD( o + ( hitT0 + stride ) * d, F, 0.0, SLOW( ( hitT0 + stride - tA ) / len ) );
+          float bend = 2.0 * hitD - loD0 - Dn;
+          top = Dn >= hitD || first ? max( Dn, hitD ) : hitD + ( loD0 - Dn ) * ( loD0 - Dn ) / ( 8.0 * max( bend, 1e-5 ) );
+        }
+        cov = clamp( 0.5 + top / ( 2.0 * wide ), 0.0, 1.0 );
+      }
       /* The last sliver before the horizon, seen from orbit: the whole 3 km layer is under a pixel
          tall there, edge on, and whatever is drawn in it is a row of half-resolution dashes. It is
          let go — the ray through the ground's own horizon meets the shell at cos 0.059. */
@@ -498,7 +560,10 @@ void main() {
       }
     }
   }
-  gl_FragColor = vec4( light, haze, veil, cov );
+  /* light goes out multiplied by coverage. The composite reads this target bilinearly, and a plain
+     light let the pixels just OUTSIDE an outline — coverage near zero, light whatever the nearest
+     miss happened to read, or the default — vote on the tone of the outline's own pixels. */
+  gl_FragColor = vec4( light * cov, haze, veil, cov );
   #include <logdepthbuf_fragment>
 }
 `;
@@ -525,6 +590,7 @@ uniform vec3 cloudHaze;
 varying vec3 vWorld;
 varying vec2 vUvC;
 
+` + RAY_FN + /* glsl */`
 /* A step with an edge one screen pixel wide, whatever the slope of the thing being stepped. */
 float cut( float at, float v ) {
   float w = clamp( fwidth( v ), 0.004, 0.25 );
@@ -534,6 +600,7 @@ float cut( float at, float v ) {
 void main() {
 ` + FACE + /* glsl */`
   vec4 c = texture2D( skyMap, gl_FragCoord.xy / skyScreen );
+  c.r /= max( c.a, 0.02 );                  // light was written times coverage: see the march
   float a = cut( 0.5, c.a );
   float sd = dot( normalize( vWorld ), sunWorld );
   float day = smoothstep( -0.10, 0.14, sd );
@@ -571,11 +638,9 @@ uniform vec3 eyeFixed;
 #define RELIEF ${f4(RELIEF)}
 uniform vec2 driftV;
 
-varying vec3 vWorld;
-varying vec2 vUvC;
-
-#define uvOrigin vWorld
-` + FIELD_FN + SEGMENT_FN + MARCH_MAIN;
+vec3 gOrigin;
+#define uvOrigin gOrigin
+` + RAY_FN + FIELD_FN + SEGMENT_FN + MARCH_MAIN;
 
 /* Ground shade: is there cloud on the sun ray from this point? Two looks — where the ray crosses
    the base, which is the cloud's own outline, and half way up, which is where a low sun's ray
@@ -630,6 +695,7 @@ export function makeWeather() {
     shadeStrength: { value: SHADE },
     sunWorld: { value: new THREE.Vector3(0, 1, 0) },     // in the Earth-fixed frame, like everything here
     fixRot: { value: new THREE.Matrix3() }, eyeFixed: { value: new THREE.Vector3(0, 7000, 0) },
+    rayInv: { value: new THREE.Matrix4() }, rayScale: { value: new THREE.Vector2(1, 1) },
   };
 }
 
@@ -643,7 +709,7 @@ export function makeCloudShell(U) {
   });
   /* The lookup: what the main camera draws. fog: false — a planet-scale body, and FogExp2 measured
      from the camera would erase it in the system view 20 000 km out. */
-  const inkU = { skyMap: sky.skyMap, skyScreen: sky.skyScreen, fixRot: U.fixRot, eyeFixed: U.eyeFixed };
+  const inkU = { skyMap: sky.skyMap, skyScreen: sky.skyScreen, fixRot: U.fixRot, eyeFixed: U.eyeFixed, rayInv: U.rayInv, rayScale: U.rayScale };
   for (const k of ['sunWorld', 'cloudLit', 'cloudMid', 'cloudShade', 'cloudDusk', 'cloudNight', 'cloudHaze']) inkU[k] = U[k];
   const lookup = (defs) => new THREE.ShaderMaterial({
     uniforms: inkU, defines: defs, vertexShader: SHELL_VERT, fragmentShader: LOOKUP_FRAG,
@@ -661,6 +727,16 @@ export function makeCloudShell(U) {
     m.castShadow = false;         // a 7 km sheet at a low sun drags its silhouette hundreds of km
     mesh.add(m);
   }
+  /* What rayDir() needs, for the camera and the target of the pass each mesh is about to be drawn
+     in: the march goes into the half-resolution target, the lookup onto the screen. */
+  const size = new THREE.Vector2();
+  const aim = (renderer, scene, camera) => {
+    U.rayInv.value.copy(camera.projectionMatrixInverse);
+    const rt = renderer.getRenderTarget();
+    if (rt) size.set(rt.width, rt.height); else renderer.getDrawingBufferSize(size);
+    U.rayScale.value.set(2 / size.x, 2 / size.y);
+  };
+  mesh.traverse((o) => { o.onBeforeRender = aim; });
   return mesh;
 }
 
