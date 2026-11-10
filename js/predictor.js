@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { RE, RM, MU_E, MU_M, SOI_M, VS, moonPos, moonVel } from './constants.js';
-import { S, getSimTime, getEngineOn, getThrottle, gravityAt, surfaceAlt, tailStation, getChute } from './physics.js';
+import { S, getSimTime, getEngineOn, getThrottle, gravityAt, surfaceAlt, tailStation, getChute, getLandedOnMoon } from './physics.js';
 import { ribbon } from './ribbon.js';
 
 /* Where the vehicle is going: the trajectory ribbon ahead of the ship and its apsis markers.
@@ -141,7 +141,7 @@ export function predict() {
      contact shell at once, which used to publish "IMPACT PREDICTED: EARTH IN 0 min" over a rocket
      waiting for ignition. Nothing about a pad sit has anything to predict. */
   const reach = -tailStation() * VS;      // contact is the tail meeting the ground (js/physics.js surfaceAlt), flown upright
-  if (surfaceAlt() <= 0.002) { clearPredictor(); return; }
+  if (getLandedOnMoon() || surfaceAlt() <= 0.002) { clearPredictor(); return; }
 
   path.n = 0; path.impact = null; path.closed = false; path.ap = path.pe = -1; path.exact = false;
   path.frame = rM0 < SOI_M ? 'moon' : 'earth';

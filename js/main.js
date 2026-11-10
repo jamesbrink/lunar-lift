@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import { RE, RM, WARPS, DTPHYS, PAD_POS, SPECS, moonPos } from './constants.js';
 import { initWorld, syncTime, updateSky, updateSunShadow, setWeatherVisible, getSpin, groundHeight, fineGroundHeight, moonGroundHeight } from './world.js';
 import { stages, lesGroup } from './saturn.js';
-import { initVehicle, spawnParticle, addDebris, detachStage, setVisible, updateParticles, updateDebris, updateBurnVisuals, clearDebris, resetStages, syncParkedCsm, plumeLive } from './vehicle.js';
+import { initVehicle, spawnParticle, addDebris, detachStage, parkStage, setVisible, updateParticles, updateDebris, updateBurnVisuals, clearDebris, resetStages, syncParkedCsm, plumeLive } from './vehicle.js';
 import { S, keys, initPhysics, getState, getSimTime, setSimTime, getEngineOn, getThrottle, getWarpIndex, setWarpIndex, setTargetThrottle, getTargetThrottle, getSasOn, setSas, cycleWarp, warpHorizon, toggleSas, toggleSasRetro, activeEngine, isBurning, accelAt, physStep, toggleIgnite, separateStage, separateLES, addDistFlown, resetSim, markTeleported, airDensity, groundVel, navVel, padIdle, moonIdle, parkCsm, omega, getControlAuthority, toggleRcsAssist, toggleHold, deployChute, getArmSwing, guardWarp, setCutoffGuard, aeroState, getAeroLoad, stability } from './physics.js';
 import { camera, initCamera, cycleCamera, updateCamera, resetCameraView, setCamMode, setCamDist, setCamView, resizeCamera, setMap, isMap, cycleMapFocus } from './camera.js';
 import { initMapView, updateMapView } from './mapview.js';
@@ -101,7 +101,7 @@ initPhysics({
   hooks: { addLog, showEndOverlay: endOverlay },
   relief: { earth: fineGroundHeight, moon: moonGroundHeight },   // the functions the drawn patches are built from
   audio: { engine: audioEngine, thud: audioThud, explosion: audioExplosion, win: audioWin },
-  vehicleOps: { spawnParticle, addDebris, detachStage, setVisible, les: lesGroup },
+  vehicleOps: { spawnParticle, addDebris, detachStage, parkStage, setVisible, les: lesGroup },
 });
 initPredictor({ scene, groundE: groundHeight, groundM: moonGroundHeight, setWarn });
 setCutoffGuard(cutoffNow);

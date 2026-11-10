@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import { airDensity, airVel, aeroForce, aeroState, ATMO_TOP, CN_BODY, CN_FIN, machDrag, soundSpeed } from './aero.js';
 import { padHit, ARM_TIME } from './colliders.js';
 import { U_M, TAIL_Z, GEAR_Z, CM_TAIL_Z, NOSE_Z, LES_TIP_Z, R_STACK, R_CSM_AERO, R_CM_BASE, GEOM, CAPSULE_GEOM, FIN_AREA, FIN_Z, LM_FOOT_Z, LM_ASC_TAIL_Z, LM_TOP_Z, R_LM } from './stations.js';
-import { G0, RE, MU_E, RM, MU_M, SOI_M, PAD_UP, PAD_POS, PAD_ANGULAR, VS, CD_AREA, WARPS, WARP_ONE, LAND_SAFE, SAFE_EARTH, SPECS, CAPSULE_MASS, EARTH_SPIN, SPIN_AXIS, PAD_EAST, MOON_DIST, TURN, moonPos, moonVel, csmParkPos, csmParkVel } from './constants.js';
+import { G0, RE, MU_E, RM, MU_M, SOI_M, PAD_UP, PAD_POS, PAD_ANGULAR, VS, CD_AREA, WARPS, WARP_ONE, LAND_SAFE, SAFE_EARTH, SPECS, CAPSULE_MASS, EARTH_SPIN, MOON_RATE, SPIN_AXIS, PAD_EAST, MOON_DIST, TURN, moonPos, moonVel, csmParkPos, csmParkVel } from './constants.js';
 
 /* ---------------- injected dependencies (see initPhysics) ----------------
    hooks:      addLog(msg, cls), showEndOverlay(title, body, btn)
@@ -543,7 +543,14 @@ export function physStep(dt) {
        any warp, and no repeated impact judgment under the feet. Attitude is frozen as it is on the
        pad; opening the throttle lights the ascent engine and the first burning step lets go. */
     if (!burning) {
+      /* Rock-fixed, like the pad's hold above it: the drawn Moon turns under its regolith
+         (syncTime: rotation.y = MOON_RATE·t), so an offset frozen in the game frame slid the
+         standing LM over terrain at the Moon's 4.6 m/s surface rate — into mountains and out of
+         them, and off its own parked descent stage. Turning the offset with the Moon keeps the
+         perch, the terrain under its feet, and the parked stage one thing. */
+      _spinQ.setFromAxisAngle(SPIN_AXIS, MOON_RATE * dt);
       moonPos(simTime, _moon); moonVel(simTime, _mv);
+      moonPerch.applyQuaternion(_spinQ);
       S.pos.copy(_moon).add(moonPerch);
       S.v.copy(_mv);
       omega.set(0, 0, 0);
@@ -777,7 +784,7 @@ function impact(onMoon) {
     audio.win();
     if (!stages[3].separated) {
       stages[3].separated = true; stages[3].fuel = 0;
-      vehicleOps.detachStage(stages[3].meshes, S.pos, S.q);
+      vehicleOps.parkStage(stages[3].meshes, S.pos, S.q);
       hooks.addLog('LM DESCENT STAGE JETSONED — ASCENT ENGINE ONLY', 'good');
     }
     return;

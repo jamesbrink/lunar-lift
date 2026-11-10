@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { VS, RE, RM, EARTH_SPIN, DTPHYS, moonPos, moonVel, csmParkPos, csmParkVel } from './constants.js';
+import { VS, RE, RM, EARTH_SPIN, DTPHYS, MOON_RATE, moonPos, moonVel, csmParkPos, csmParkVel } from './constants.js';
 import { rocketGroup, stages, lesGroup, bellMetal } from './saturn.js';
 import { S, airDensity, getSimTime, getState, landing, getCsmParked } from './physics.js';
 import { ATMO_TOP } from './aero.js';
@@ -160,6 +160,23 @@ export function detachStage(mesh, pos, quat) {
   scene.add(mesh);
 }
 
+/* The descent stage left standing at the landing site. The Moon moves through the game frame at
+   ~1 km/s and turns under its regolith, so what stood there is not a debris record — debris is
+   inertial, and the Moon walks away from it (it read as the LM vanishing and reappearing as a
+   gold can, the descent stage sunk through terrain a kilometre a minute). A parked stage is
+   anchored in the Moon-fixed frame exactly like js/physics.js's moonPerch and recomposed each
+   frame from the same two numbers the picture uses: moonPos and the syncTime spin. */
+export function parkStage(mesh, pos, quat) {
+  rocketGroup.remove(mesh);
+  mesh.scale.setScalar(VS);
+  const q = _parkQ.setFromAxisAngle(_parkY, MOON_RATE * getSimTime());
+  const rock = pos.clone().sub(moonPos(getSimTime(), _parkV)).applyQuaternion(q.clone().invert());
+  moonParked.push({ mesh, rock, qo: quat.clone().premultiply(q.clone().invert()) });
+  scene.add(mesh);
+}
+const moonParked = [];
+const _parkY = new THREE.Vector3(0, 1, 0), _parkQ = new THREE.Quaternion(), _parkM = new THREE.Vector3();
+
 export function addDebris(entry) {
   debris.push(entry);
   entry.ref = S.pos.clone(); entry.t0 = getSimTime();     // see updateDebris: the piece is re-seated on the drawn vehicle
@@ -192,6 +209,14 @@ export function addDebris(entry) {
    chain"). A fed trail — one small parcel every ~11 m of fall — merges into a column the same way
    the plume does, and it dies with the debris rather than the burst. */
 export function updateDebris(simDt, accelAt) {
+  /* The left-behind descent stage rides the Moon, not the sky: recomposed from moonPos and the
+     same MOON_RATE·t spin syncTime gives the drawn Moon, so it stands in the crater it landed in
+     while the Moon moves through the game frame and turns under its regolith. */
+  for (const p of moonParked) {
+    const q = _parkQ.setFromAxisAngle(_parkY, MOON_RATE * getSimTime());
+    p.mesh.position.copy(moonPos(getSimTime(), _parkV)).add(_parkM.copy(p.rock).applyQuaternion(q));
+    p.mesh.quaternion.copy(p.qo).premultiply(q);
+  }
   for (let i = debris.length - 1; i >= 0; i--) {
     const d = debris[i]; d.age += simDt;
     /* A piece leaves at the true state and is first drawn beside a vehicle drawn up to a step
@@ -271,6 +296,7 @@ const _sp = new THREE.Vector3(), _svv = new THREE.Vector3(), _seam = new THREE.V
 
 export function clearDebris() {
   debris.forEach(d => scene.remove(d.mesh)); debris.length = 0;
+  moonParked.forEach(p => scene.remove(p.mesh)); moonParked.length = 0;
 }
 
 /* The parked CSM is not integrated — js/physics.js keeps ONE state and its park orbit is the
