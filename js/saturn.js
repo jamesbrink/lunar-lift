@@ -41,6 +41,8 @@ const white = toon({ color: PALETTE.hull, gradientMap: RAMP_HARD });
 white.emissive = new THREE.Color(0x2c3036);
 const black = toon({ color: PALETTE.dark });
 const shield = toon({ color: 0x6b4a34 });        // ablator brown
+const glass = toon({ color: 0x17304a }); glass.emissive = new THREE.Color(0x0a1c30);   // window glass: deep blue, never quite black
+const frame = toon({ color: 0x2b3038 });        // window and hatch frames, RCS ports
 const silver = toon({ color: PALETTE.silver, gradientMap: RAMP_HARD });
 silver.emissive = new THREE.Color(0x22262b);
 const metal = toon({ color: PALETTE.engine, side: THREE.DoubleSide });
@@ -185,6 +187,47 @@ function decal(r, z0, z1, az, width, map) {
      dropped (X on the last stage) it is what is left flying, and what the parachutes hang from. */
   capsuleGroup.add(cyl(0.36, 1.33, 2.3, 27.45, white, 32, true));   // +26.3 .. +28.6, base sunk in the SM top
   capsuleGroup.add(cyl(1.33, 1.05, 0.34, 26.2, shield, 32, true));  // heat shield, hidden inside the SM until then
+  /* The command module's face. Apollo's had five windows — two forward-looking rendezvous windows,
+     two square side windows and a round one in the crew hatch — the hatch itself, and reaction
+     control ports round the base. Without them the capsule alone was a plain grey cone, and it is
+     the whole vehicle for the trip home. Each piece is a thin plate laid on the cone (half-angle
+     22.9°: r 1.33 at z 26.3 to 0.36 at 28.6), 0.02 u proud so nothing shares a surface. */
+  {
+    const CONE = Math.atan((1.33 - 0.36) / 2.3), cs = Math.cos(CONE), sn = Math.sin(CONE);
+    const u = new THREE.Vector3(), v = new THREE.Vector3(), n = new THREE.Vector3(), basis = new THREE.Matrix4();
+    const lay = (geo, mat, azDeg, z, lift = 0.02) => {
+      const az = THREE.MathUtils.degToRad(azDeg), r = 1.33 - (z - 26.3) * (1.33 - 0.36) / 2.3;
+      n.set(Math.cos(az) * cs, Math.sin(az) * cs, sn);
+      u.set(-Math.sin(az), Math.cos(az), 0); v.crossVectors(n, u);
+      const m = new THREE.Mesh(geo, mat);
+      m.quaternion.setFromRotationMatrix(basis.makeBasis(u, v, n));
+      m.position.set(Math.cos(az) * r, Math.sin(az) * r, z).addScaledVector(n, lift);
+      capsuleGroup.add(m);
+      return m;
+    };
+    const plate = (w, h) => new THREE.PlaneGeometry(w, h);
+    const taper = (w0, w1, h) => {                       // a window narrower at the top, like the cone it sits on
+      const sh = new THREE.Shape();
+      sh.moveTo(-w0 / 2, -h / 2); sh.lineTo(w0 / 2, -h / 2); sh.lineTo(w1 / 2, h / 2); sh.lineTo(-w1 / 2, h / 2); sh.closePath();
+      return new THREE.ShapeGeometry(sh);
+    };
+    // crew hatch: frame, door, round window — on the side that faces the tower's white room (−x)
+    lay(plate(0.74, 0.92), frame, 180, 27.2);
+    lay(plate(0.62, 0.80), white, 180, 27.2, 0.03);
+    lay(new THREE.CircleGeometry(0.15, 20), frame, 180, 27.36, 0.04);
+    lay(new THREE.CircleGeometry(0.11, 20), glass, 180, 27.36, 0.05);
+    lay(plate(0.30, 0.05), frame, 180, 26.95, 0.04);     // hatch handle
+    // two square side windows flanking the hatch
+    for (const az of [128, 232]) { lay(plate(0.40, 0.40), frame, az, 27.3); lay(plate(0.30, 0.30), glass, az, 27.3, 0.03); }
+    // two rendezvous windows, forward-looking, either side of the hatch line
+    for (const az of [156, 204]) { lay(taper(0.24, 0.15, 0.50), frame, az, 28.0); lay(taper(0.16, 0.09, 0.40), glass, az, 28.0, 0.03); }
+    // reaction control ports: pairs of dark nozzles in four quads round the base
+    for (const az of [45, 135, 225, 315]) for (const d of [-7, 7]) lay(new THREE.CircleGeometry(0.07, 12), frame, az + d, 26.72, 0.03);
+    // the black band where the cone meets the heat shield, and the forward cap under the tunnel
+    capsuleGroup.add(cyl(1.345, 1.345, 0.07, 26.36, black, 32));
+    capsuleGroup.add(cyl(0.38, 0.50, 0.30, 28.43, silver, 24, true));
+    capsuleGroup.add(cyl(0.20, 0.26, 0.16, 28.66, black, 16));   // docking tunnel rim (under the escape tower until it leaves)
+  }
   stages[2].tailZ = 6.8;
   stages[2].engines = [[0, 0]];
 }
