@@ -36,10 +36,11 @@ Read from the `keydown` handler in `js/main.js` and the hold-key reads in `js/ph
 | V | Flip SAS between prograde and retrograde |
 | T | RCS stability assist on / off (on by default; off, nothing damps a rotation in vacuum) |
 | ] / [ | Time warp up / down the ladder |
-| C | Camera mode: chase / orbit / system |
+| C | Camera mode: orbit (the default) → chase → system |
 | M | Minimap view: auto / system |
 | R | Reset the mission (ENTER or SPACE on the end overlay) |
 | Mouse drag | Orbit camera |
+| Double-click | Re-centre the view behind the ship |
 | Mouse wheel | Zoom |
 
 Warp ladder (`WARPS` in `js/constants.js`): ×1, 2, 4, 8, 16, 32, 64, 128, 256, 512, 1000. The
@@ -143,10 +144,12 @@ Repo-wide convention (see `docs/reference/README.md`): **km, s, tonnes, kN**.
   track and the launch site on them.
 - `js/navball.js` (498 lines) — the KSP-style attitude ball: an orthographic view of the sky from
   the nose, prograde/retrograde markers, apsis markers, the Moon as a target.
-- `js/camera.js` (300 lines) — chase, orbit and system cameras; drag/zoom input. The chase camera is a
-  crane shot keyed to altitude — low and looking up the stack on the pad, high and looking down past
-  it from the stratosphere, the lens widening from 64° to 76° — and it shakes with thrust and dynamic
-  pressure. Follows the middle of
+- `js/camera.js` (300 lines) — orbit, chase and system cameras; drag/zoom input. Orbit is the default:
+  the camera circles the ship on a heading carried along with it, never taken from the nose or the
+  velocity, so the view moves only when the mouse moves it and nothing eases it "home" on a timer
+  (double-click re-centres). Chase sits behind the flight path — heading from the horizontal
+  velocity, elevation from the climb angle. System shows Earth, Moon and the transfer between them.
+  The frame shakes with thrust and dynamic pressure. Follows the middle of
   the hardware still attached and damps its *offset* from it, so the ship stays centred at any speed
   or warp and re-frames smoothly at staging. Collides with the vehicle, the pad, the Earth and the
   Moon, twice per frame because a chord between two legal points can pass through a body.
