@@ -199,13 +199,15 @@ state differs from the ship's real trajectory by ~100 km, which would make the r
 - **Whole-frame pixel sandwiches lie here.** Temporal drift — clouds, water glint, living parcels —
   measures 0.016–0.06 RMSE between two idle seconds, larger than some real state diffs. Trust
   spatial compare-masks and the eyes, not frame-mean error.
-- **A lunar burn cannot be photographed from inside its own ejecta.** The lunar spray regime
-  (`keep 0.45`, `out 0.75`, ×3 advection and life) lofts parcels on ballistic arcs hundreds of
-  metres high and wide; measured at a 400 kN pulse at 70 m: 120+ spray/moon-hot parcels alive
-  within 500 m of the engine. Any camera closer than ~2 km sits inside the translucent dome and
-  every pixel behind it goes flat grey — a dozen "featureless grey" frames cost a full review round
-  before `parcelAudit()` proved the spray was there and only the camera was wrong. Shoot lunar
-  surface blasts from ≥ 2.8 km, or from behind the spray at horizon distance.
+- **Lunar dust collides with the height field, and the drawn Moon is not at the height field.**
+  `js/terrain.js` draws the lunar near patch with a display-only lift (`+ 0.3` km in `rebuildMoon`), and
+  `js/physics.js` lands on the bare sphere. Measured by raycast at a flat sunlit site: the drawn surface
+  was 270 m above `moonGroundHeight()`. So in play the dust sheet (`js/exhaust-sim.js` collides with
+  `RM + moonGroundHeight`) is under the drawn ground until the camera sinks through the patch, at which
+  point the ground is back-face culled and the ship hangs in black. The lunar exhaust was tuned and
+  photographed with the patch lowered by the measured gap in the harness; it will only be seen in the
+  game once those three surfaces agree. Shoot it from the orbit camera, not the chase one — the chase
+  camera sits below the vehicle near the ground.
 
 - **Camera collision is applied twice per frame** — to `desired` and again to the interpolated
   `camPos`. A lerp between two points outside a sphere is a chord, and chords are inside, so before
@@ -234,10 +236,12 @@ state differs from the ship's real trajectory by ~100 km, which would make the r
   concrete-grey because the patch's vertices are 25 m apart at best. The site is now slabs in
   `js/pad.js` half a metre proud of terrain measured flat to ±0.22 u within 700 u, and the terrain
   under them is grass.
-- **Exhaust parcels are only a plume where air holds them together.** Above ~40 km nothing does, they
-  separate at km/s, and a 1600-slot pool draws them as coloured dots a hundred metres apart. They
-  fade out between 28 and 50 km and are not simulated above 52; the drawn flames, spread by the same
-  thin air, are the exhaust up there. Lunar parcels are exempt.
+- **Exhaust parcels are only a plume where air holds them together.** Above ~40 km nothing does and
+  a 1600-slot pool draws them as dots a hundred metres apart. The smoke trail thins out between 28 and
+  50 km and nothing is emitted Earth-side above 52; the drawn flame, opened wide by the same thin air, is
+  the exhaust up there. And over Earth a NOZZLE parcel only matters while it can reach the ground —
+  sea-level air stops the jet in tens of metres — so they are not born more than ~450 m up; the ascent
+  is the flame plus trail puffs born at rest in the air's frame. Lunar parcels are exempt from all of it.
 - **Two surfaces on one plane flicker, and a vehicle standing in a slab is two.** The pad deck was a
   solid box with a dark box inset, both tops at z 3.0, and the stack (skirt at z 1.4, bells to −1)
   stood sunk through them: crawling stripes at the foot of the rocket. `js/pad.js` now has a real
@@ -272,14 +276,32 @@ state differs from the ship's real trajectory by ~100 km, which would make the r
   absolute Float32 at lunar distance is a 31 m grid.
 - **Pad exhaust is a shape problem before it is a physics problem.** Parcels leave the F-1s at
   ~2.9 km/s, and if the tangential component of the trench hit survives whole, the deflectate paints a
-  200 m field of discrete glowing domes around the pad — measured at 264 live parcels with sprites up to
-  72 m, which is what "rocket exhaust needs tons of work" was about. Three things fixed it, and none of
-  them is the shader: bleed the tangential to 0.12 on Earth (0.8 on the Moon, where nothing bleeds it and
-  Apollo's ejecta really did run far), floor a deflected parcel to the smoke band after 0.04 s so the
-  young sheet climbing out of the trench keeps its fire while the far field goes grey, and buy density
-  from parcel count (900/s on the S-IC, entrainment ceiling 16 m) instead of from sprite size. Frame cost
-  after the change, full throttle on the pad with 1 498 live parcels over 120 rAF deltas: median 16.7 ms,
-  p90 17.7, p99 18.3.
+  200 m field of discrete domes around the pad. The trench hit bleeds the tangential to 0.12 on Earth,
+  and a share of the deflected parcels (`BILLOW` in `js/exhaust-sim.js`) become long-lived buoyant
+  billows — without them the pad cloud was only ever the last second of exhaust.
+- **Smoke is drawn opaque, with depth, and that is the whole look.** `js/exhaust-draw.js` draws each
+  parcel as a clump of four analytic spheres in three flat sun-shaded tones, with `NoBlending`,
+  `depthWrite` and a `gl_FragDepth` that bulges by the clump's own height. Neighbours then cut into one
+  another along real intersection arcs — a cauliflower with a scalloped edge — and draw order stops
+  mattering, so nothing is sorted. The same parcels as soft alpha sprites were beige fog. A puff ends
+  by shrinking; anything translucent (sparks, the staging flash, vacuum gas) is a second, additive
+  draw call. Hard tone edges at half resolution show a stair-step at deviceScaleFactor 1.
+- **The flame is a mesh drawn twice.** `js/flame.js` paints it at full resolution in the main pass
+  under the half-resolution layer (renderOrder 1 < the composite's 2), and draws the same vertices
+  again into the FX target as an eraser (`ZeroFactor / OneMinusSrcAlphaFactor`, depth-tested against
+  the puffs' own depth). Smoke behind the flame is cut away, smoke in front of it stays. The first
+  attempt blended the punch `One / OneMinusSrcAlpha` with black: that RAISES the target's alpha, and
+  the flame rendered as a black shape with an orange rim.
+- **A raw ShaderMaterial's colours are not encoded on the way out.** No `colorspace_fragment` (and the
+  linter only admits the log-depth chunks), so a `THREE.Color(hex)` uniform — linear — reaches the
+  canvas dark and over-saturated: the flame's soot band was near black. Hand such a shader the bytes it
+  should show: `new THREE.Color().setHex(hex, THREE.LinearSRGBColorSpace)`, or plain `hex/255` triples.
+- **A GLSL comment with a backtick did it again**, in `js/exhaust-draw.js`, and the symptom this time
+  was `tools/shader-lint.mjs` reporting a brace mismatch in a shader whose braces were fine. If the
+  linter and your eyes disagree about braces, look for a backtick first.
+- **Do not save a file while a browser measurement is running.** The dev server hot-reloads every
+  open page, so the run silently continues on a fresh pad: a perf table came back with its rows
+  shifted by one station and zero live parcels at full throttle.
 - **A non-finite value in a vertex colour attribute renders as a black band, and nothing else you do
   will remove it.** A NaN in `attributes.color` propagates through the toon lighting into a NaN fragment,
   so the pixel goes black and ignores material swaps, `castShadow`/`receiveShadow`, `normalScale`,
@@ -379,10 +401,13 @@ await tab.evaluate(`(async () => {
 
 ## Structure
 
-One concern per file; no god files. Current sizes: `toonmap.js` 1778, `vehicle.js` 1374, `world.js` 687, `terrain.js` 549, `navball.js` 498, `physics.js` 472, `clouds.js` 443, `hud.js` 437, `camera.js` 300, `predictor.js` 275, `textures.js` 232, `saturn.js` 231, `ribbon.js` 213, `pad.js` 202, `main.js` 172, `toon.js` 138, `constants.js` 119, `targeting.js` 108, `halfres.js` 103, `audio.js` 62, `haze.js` 62.
-`vehicle.js` is now the exhaust and debris alone — the hardware it used
-to build is `saturn.js`, the launch complex left `world.js` for `pad.js`. It is still the largest
-behavioural module; if the particle field grows, split its renderer from its integrator.
+One concern per file; no god files. Current sizes: `toonmap.js` 1778, `world.js` 687, `terrain.js` 549, `navball.js` 498, `exhaust-sim.js` 491, `physics.js` 472, `clouds.js` 443, `hud.js` 437, `exhaust-emit.js` 312, `camera.js` 300, `predictor.js` 275, `exhaust-draw.js` 254, `textures.js` 232, `saturn.js` 214, `flame.js` 214, `ribbon.js` 213, `vehicle.js` 210, `pad.js` 202, `main.js` 172, `exhaust-pool.js` 148, `constants.js` 119, `toon.js` 117, `targeting.js` 108, `halfres.js` 103, `haze.js` 62, `audio.js` 62.
+`vehicle.js` is the conductor: the pose, staging (`initVehicle`, `detachStage`, `setVisible`,
+`resetStages`), the debris (`updateDebris`, `addDebris`, `clearDebris`) and `updateBurnVisuals`, which
+turns "this stage is burning" into calls on the five exhaust modules — `flame.js` (the drawn flames),
+`exhaust-pool.js` (the parcel pool and `spawnParticle`), `exhaust-emit.js` (where parcels are born),
+`exhaust-sim.js` (how they move) and `exhaust-draw.js` (how they are drawn). The integrator is still
+the largest of them; its lunar and Earth branches are the next split if it grows.
 `physics.js` stays display-free: `tools/mission-sim.mjs` imports it headless, and `saturn.js` with
 it for the stage records (so anything there that needs a canvas must tolerate having none).
 

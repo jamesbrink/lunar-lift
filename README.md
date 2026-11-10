@@ -90,14 +90,19 @@ Repo-wide convention (see `docs/reference/README.md`): **km, s, tonnes, kN**.
   desert, tundra, boreal, ice — plus the relief fields, the authored Merritt Island shore lines and the
   cloud sheets. No photographic pixel reaches the screen. Look and its limits:
   `docs/reference/painted-planets.md` and `docs/reference/cartoon-art-direction.md`.
-- `js/toon.js` (138 lines) — the cel shading itself: `toon()` materials on a quantising ramp
+- `js/toon.js` (117 lines) — the cel shading itself: `toon()` materials on a quantising ramp
   (`RAMP_EARTH` is four texels with the top two equal, so its steps sit at N·L = −0.5, 0, +0.5 — out by
   the terminator; three samples the ramp at `dotNL · 0.5 + 0.5`, see `agents.md`), `PALETTE`, and
   `outline()` for the single dark edge on hardware.
-- `js/saturn.js` (231 lines) — the Saturn V as drawn hardware: three stage groups in the real paint
-  scheme, engine fairings and fins, contoured bells, the launch escape system, and one flame per engine.
-- `js/vehicle.js` (1374 lines) — what the hardware does: the pose each frame, the flames' size and
-  spread with air density, the exhaust particle field and its ground interaction, staging debris.
+- `js/saturn.js` (214 lines) — the Saturn V as drawn hardware: three stage groups in the real paint
+  scheme, engine fairings and fins, contoured bells, the launch escape system.
+- `js/vehicle.js` (210 lines) — what the hardware does: the pose each frame, staging and debris, and
+  the call that turns a burning stage into fire and smoke.
+- `js/flame.js` (214 lines) — the drawn flames: one shader-shaped mesh per stage with hard tone bands,
+  shock diamonds in thick air, a wide translucent bell in thin air, an engine-by-engine start-up.
+- `js/exhaust-pool.js`, `exhaust-emit.js`, `exhaust-sim.js`, `exhaust-draw.js` (148, 312, 491, 254 lines) —
+  the particle field: the pool, where parcels are born (nozzles, smoke trail, ignition steam, lunar
+  dust), how they move (drag, the trench, the hull), and how they are drawn (opaque shaded puffs).
 - `js/pad.js` (202 lines) — Launch Complex 39: mobile launcher with a real flame opening, the red
   umbilical tower with swing arms and crane, propellant farm, floodlights, and the site it stands on —
   hardstand, flame trench, crawlerway, perimeter road, water tower. Static geometry is merged
