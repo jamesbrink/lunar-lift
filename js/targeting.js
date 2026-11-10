@@ -15,7 +15,7 @@ import { S, getState, getSimTime, getEngineOn, getThrottle, gravityAt, orbitalEl
    2.6-4.9 m/s; 110 km and 91 km ran the tank dry. The low edge is a cliff, not a slope. It is a
    landing-safety band for that autopilot, not a promise about where you land. */
 
-export const CORRIDOR = { lo: 120, hi: 745 };   // 120: the 123 km flight lands, and targeting reads it as 122.0 km
+export const CORRIDOR = { lo: 120, hi: 745 };   // 120: the 123 km flight lands, and targeting reads it as 121.3 km
 
 export const aim = { status: 'na', altKm: NaN, tMet: NaN, corridor: false, steps: 0, trim: 0 };
 

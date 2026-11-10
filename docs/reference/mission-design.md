@@ -203,56 +203,50 @@ anyone has measured. Two consequences for the game:
   until the geometry works. Small along-track correction burns would work too, and the tool has
   machinery for them, but it is gated on `fuel > 60 t` and the shipped CSM has 44.7 t left after
   TLI, so for this vehicle the encounter is decided at injection and cannot be repaired later.
-- **This entry and the section after it describe the aim module as it was** — a replay of the
-  game's own 0.1 s steps, a fixed budget per frame. `js/targeting.js` has since been rewritten: a
-  velocity-Verlet integration from the velocity advanced half a game step, run four times a second,
-  with a trim hint and an SAS injection cutoff. Its header holds the current measurements; the
-  figures below are the old module's and have not been re-run against the new one.
-- **Aim is visible.** `js/targeting.js` propagates the live state forward through the same gravity
-  the integrator uses and the orbit panel shows it as `<km> km in <hh:mm:ss>`. From the shipped
-  coast-start state the module's values are 345.7 km and MET 295,660.3 s, which the HUD's own
-  formatting renders as `346 km in 80:50:12` (run headless; the string on screen has not been
-  read in a browser at this window). It is painted green inside `CORRIDOR = { lo: 120, hi: 745 }`
-  km — the table above: every flight inside it landed, the lowest being the 123 km one, which the
-  module reads as 122.0 km; the floor sits between that and the 110 km flight that was lost (the
-  floor itself is not a flown point). Above 745 km nothing has been
-  flown, so red there means "unmeasured", not "you will crash". Below 420 km the prediction now
-  includes nose-on drag (`coastDrag`), so an aim read while still in a low parking orbit is no
-  longer blind to the air; from the shipped coast start (888 km up) it changes nothing, and the
-  numbers below were re-run to confirm that.
-  The module runs incrementally — a fixed step budget per frame, 865 `updateAim()` calls from coast
-  start to `done` — and it re-seeds only when the engine has pushed the vehicle or the predicted
-  encounter has passed, because a coast does not change the answer. (A 20 s timed re-seed used to
-  sit there too; it looped the readout through "best so far" ranges and under ~43 fps never let a
-  scan finish — recorded in `js/targeting.js`.) Its per-frame cost (previously 3.5 ms worst, 0.0005 ms idle, in a browser) has not been
-  re-timed; `gravityAt` gained one term.
+- **Aim is visible, and live through the burn.** `js/targeting.js` predicts the closest lunar
+  approach from the present state four times a second (`lunarPass`, 1.6 ms a call, timed headless in
+  Node on the development machine) and the orbit panel shows it as `<km> km in <hh:mm:ss>`. With the
+  engine lit the figure is the pass you would get by cutting now. It is painted green inside
+  `CORRIDOR = { lo: 120, hi: 745 }` km — the table above: every flight inside it landed, the lowest
+  being the 123 km one, which the module reads as 121.3 km; the floor sits between that and the
+  110 km flight that was lost (the floor itself is not a flown point). Above 745 km nothing has
+  been flown, so red there means "unmeasured", not "you will crash". Below 420 km the prediction
+  includes nose-on drag (`coastDrag`). Outside the corridor `aim.trim` is the prograde (+) or
+  retrograde (−) m/s that would centre the pass, from a ±1 m/s finite difference, clamped to 60.
+- **SAS cuts the injection burn.** At full CSM thrust the pass crosses the whole corridor in about
+  a tenth of a second of burn, so with SAS on (prograde) `cutoffNow()` shuts the engine down when
+  the pass is inside the corridor with 60 km in hand. Flown headless on three successive
+  opportunities it left passes of 568, 349 and 369 km with 44.5–44.6 t aboard. With SAS off the cut
+  is the pilot's and the trim hint is how it is repaired.
 
 ### The readout predicts the game, not the textbook
 
-Verified against the certified flights, from the recorded coast-start state (`ev.tliDone`, which is
-the same for every phase — only the Moon moves): for the −3e-3, −1e-3, shipped, +1e-3, +1.75e-3 and
-+2e-3 rad flights the module says **744.2 / 476.5 / 345.7 / 217.0 / 122.0 / 90.7 km** where the
-simulation reports **745 / 477 / 346 / 218 / 123 / 91 km**. The tool prints whole kilometres from the
-unrounded state and the module was seeded with the state as printed (1 m, 1 mm/s, 1 ms), so "within
-about 1 km" is all that comparison can claim. The sharper check is against the integrator itself: a
-real `physStep` coast from that same printed state reaches **345.66 km**, and so does the module.
-Run headless in Node with the shipped modules; nothing here was read off a browser HUD. It does that
-by reproducing the game's own discretisation: `simTime += dt`, gravity at the advanced time,
-`v += a·dt`, `p += v·dt`, at `DTPHYS = 0.1 s`.
+The game's step (`simTime += dt`, gravity at the advanced time, `v += a·dt`, `p += v·dt`, at
+`DTPHYS = 0.1 s`) is leapfrog with its velocity written half a step late. The state it holds
+therefore evolves, to second order, like a true trajectory started from the same position with
+velocity `v + a·dt/2`, and `lunarPass` is a velocity-Verlet integration from that state with a step
+of 1/1000 of the local radius (0.5–300 s). Measured from the recorded coast-start state
+(`ev.tliDone`, the same for every phase — only the Moon moves), against the game's own scheme
+stepped at 0.1 s all the way to the Moon, headless in Node with the shipped modules:
 
-That choice was measured, not assumed. From the shipped coast-start state:
+| launch phase offset, rad | game scheme at 0.1 s | `lunarPass` | flight (whole km) |
+| --- | --- | --- | --- |
+| −3e-3 | 744.24 km | 743.39 km | 745 |
+| −1e-3 | 476.51 km | 475.70 km | 477 |
+| 0 (shipped) | 345.66 km | 344.87 km | 346 |
+| +1e-3 | 217.00 km | 216.23 km | 218 |
+| +1.75e-3 | 122.03 km | 121.28 km | 123 |
+| +2e-3 | 90.68 km | 89.93 km | 91 |
 
-| propagation | predicted closest approach |
-| --- | --- |
-| the game's `physStep` at 0.1 s (ground truth) | 345.66 km |
-| this module (game scheme at 0.1 s) | 345.66 km |
-| velocity Verlet at 0.1 s (444.1 km at 1 s — converged) | 443.6 km |
-| the game scheme at 1 s | −474.5 km (an impact) |
+The predictor reads 0.75–0.85 km low on all six. The state was seeded as the tool prints it (1 m,
+1 mm/s, 1 ms), so the last column agrees only to about a kilometre by construction.
 
-A converged integrator is *more* faithful to two-body mechanics and *less* faithful to this game, by
-~98 km: the game samples the Moon 0.05 s off the state on every step, a coherent perturbation, and
-a lunar flyby amplifies it. A readout that disagreed with the player's own trajectory by 98 km
-would be worse than no readout at all.
+The half-step term is the whole of it. The same Verlet integration from the raw `(p, v)` says
+442.74 km at the shipped window — 97 km from the ship's real trajectory, which is the "a converged
+integrator disagrees with the game" of earlier revisions of this page. And the game scheme itself
+at 1 s instead of 0.1 s says −474.5 km, an impact (that figure is from the previous revision's run
+and was not repeated here). The module this replaced replayed the 0.1 s steps a budget at a time:
+exact, but 6–14 s to an answer and blank whenever the engine burned.
 
 ### Why the coast step is not a free parameter
 
