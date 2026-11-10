@@ -13,13 +13,14 @@ import { S, getState, getSimTime, getEngineOn, getThrottle, gravityAt, orbitalEl
    It deliberately reproduces the GAME's discretisation rather than the true two-body solution,
    because "what will happen" in this game is its own 0.1 s integration. physStep advances simTime,
    evaluates gravity at the advanced time, then v += a·dt, then p += v·dt; that is what the loop
-   below does, at DTPHYS, and it tracks a real physStep coast to about 0.2 km. Two alternatives were
-   measured and rejected:
-     - converged integration (velocity Verlet, dt -> 0): 1,170.2 km where the game flies 1,069.8 km
-       from the same state. The Moon's position is sampled 0.05 s off the state on every step, which
-       is a coherent perturbation, and a lunar flyby amplifies that into ~100 km.
-     - a coarser coast step, which is what the mission tool used to take: dt=1 s from that same state
-       predicts 201.6 km. Forty times cheaper, fifty times wrong.
+   below does, at DTPHYS, and from the shipped coast-start state it and a real physStep coast both
+   arrive at 204.43 km (run headless in Node). Two alternatives were measured from that same state
+   and rejected:
+     - converged integration (velocity Verlet: 299.9 km at dt 0.1 s, 300.4 km at 1 s) where the game
+       flies 204.4 km. The Moon's position is sampled 0.05 s off the state on every step, which is a
+       coherent perturbation, and a lunar flyby amplifies that into ~95 km.
+     - a coarser coast step, which is what the mission tool used to take: the game's scheme at
+       dt=1 s predicts an impact 590 km under the surface. Ten times cheaper, 794 km wrong.
    Running the game's own scheme is also what keeps this affordable: 1 + 1 gravityAt per step.
 
    The propagation is incremental because a 3.4-day coast is 2.9 million steps and will not fit in a

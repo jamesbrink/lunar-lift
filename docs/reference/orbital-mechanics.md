@@ -10,19 +10,26 @@ from a body's centre (km), `v` inertial velocity (km/s), `t` mission-elapsed tim
 | `MU / r^2` | km/s² (MU in km³/s²) |
 | `thrust(kN) / mass(t)` | m/s² → divided by 1000 in the code |
 | `thrust / (isp · 9.81)` | t/s of propellant |
-| `½ · rho(kg/m³) · A(m²) · v(km/s)² / mass(t)` | km/s² of drag deceleration |
+| `½ · rho(kg/m³) · A(m²) · v(km/s)² / mass(t)` | km/s² of aerodynamic acceleration (`A` is a coefficient × an area; [atmosphere.md](atmosphere.md)) |
 
-The code uses `9.81` where the standard is `9.80665` (`js/physics.js:186`). That is a
+The code uses `9.81` where the standard is `9.80665` (the mass-flow line in `physStep`). That is a
 0.034 % error in exhaust velocity — 3.5 m/s over a 10 km/s mission. Left alone deliberately:
 it is inside every other approximation here.
 
 ## Gravity
 
 ```js
-gravityAt(p, out, t)  =  -MU_E·p/|p|³  −  MU_M·(p − moonPos(t))/|p − moonPos(t)|³
+gravityAt(p, out, t)  =  -MU_E·p/|p|³  −  MU_M·(p − m)/|p − m|³  −  MU_M·m/|m|³        m = moonPos(t)
 ```
 
-Both point masses, always, every step. No patched conics in the *forces*: the Moon's pull is
+The first two terms are both point masses, always, every step. The third is the **indirect
+term** of the three-body problem. The frame is Earth-centred, and the Earth is itself falling
+toward the Moon at `MU_M/d²` = 3.3 × 10⁻⁵ m/s²; a frame that accelerates owes everything in it
+the opposite of that acceleration. Without the term the Earth is nailed to the origin and only
+the ship feels the Moon. It is the same size everywhere and small, but it acts through the
+whole 80 h coast: adding it (together with the flight model, in the same commit, so the two
+effects were not separated) moved the solved launch window by 0.036 rad — see
+[mission-design.md](mission-design.md). No patched conics in the *forces*: the Moon's pull is
 summed in from the pad, where it is 2 × 10⁻⁴ of Earth's. `SOI_M = 66 200 km` is used only to
 decide which body the guidance and HUD talk about (`moon-relative` state), never to switch
 forces — so nothing discontinuous happens at the boundary, and a trajectory can be integrated
@@ -42,7 +49,7 @@ Not modelled, with the error each omission carries:
 Symplectic (semi-implicit) Euler, one place in the code:
 
 ```js
-const a = accelAt(S.pos, S.v, mass, thrustAcc);
+const a = accelAt(S.pos, S.v, mass, thrustAcc, simTime, nose);   // gravity + aero + thrust
 S.v.addScaledVector(a, dt);
 S.pos.addScaledVector(S.v, dt);      // position uses the NEW velocity
 ```
@@ -58,8 +65,8 @@ Symplectic integrators keep the *secular* energy error bounded (it oscillates wi
 anomaly instead of drifting), so a 5-day coast neither leaks energy nor gains it. The
 per-step displacement at 185 km periapsis is 0.78 km against r = 6,556 km — 0.012 % of the
 radius, and the two-body force is smooth on that scale. The one place h matters is the
-atmospheric phase: at 800 m/s and h = 0.1 s, drag changes velocity by ≤ 0.09 m/s per step,
-so drag integration is not the limiting error either.
+atmospheric phase: at the measured peak drag deceleration of 0.45 m/s² and h = 0.1 s, drag
+changes velocity by 0.045 m/s per step, so drag integration is not the limiting error either.
 
 ## Orbit elements from the state (what the HUD and predictor show)
 
@@ -151,7 +158,7 @@ t·cos θ = g − v²/r     →     θ_max = acos( clamp( (g − v²/r) / t, 0, 
 `js/constants.js` exposes the steering program as `TURN = { t0: 55, ramp: 190, max: 1.15 }`:
 hold vertical for 55 s, then sweep the nose toward `PAD_EAST` over 190 s by up to 1.15 rad,
 with the clamp above deciding how much of that the vehicle can actually hold. At the pad,
-`g − v²/r = 9.82` and `t = 46 000/3 780 = 12.17 m/s²` → `θ_max = acos(0.807) = 36°` — the
+`g − v²/r = 9.82` and `t = 46 000/3 433 = 13.40 m/s²` → `θ_max = acos(0.733) = 43°` — the
 program asks for less, which is right early on; later, when `v²/r` approaches `g`, the clamp
 prevents the classic "pull up into the sky" failure and the vehicle naturally flattens into
 the gravity turn.
@@ -187,17 +194,22 @@ staging:  m -= fuel_remaining + dry_mass                ← not just the dry mas
 That last line was a bug worth naming: dropping a stage while only subtracting its dry mass
 leaves phantom propellant in the vehicle, and every downstream Δv number is then optimistic.
 `totalMass()` sums `CAPSULE_MASS` plus each unseparated stage's `dry + fuel`, and the same
-mass feeds thrust acceleration, drag, and the inertia tensor — one number, three users.
+mass feeds thrust acceleration, the aerodynamic acceleration and side load, and the inertia
+tensor — one number, three users. The inertia's `GEOM` table is also the aerodynamic shape
+(reference area, planform, centre of pressure), so mass distribution and stability come from
+the same stations.
 
 ## Landing and failure conditions
 
 | Condition | Code | Outcome |
 | --- | --- | --- |
-| Moon contact, speed ≤ 32 m/s | `impact(true)` with `speed ≤ LAND_SAFE` | **win** |
+| Moon contact, speed ≤ 32 m/s, within 60° of vertical | `impact(true)` with `speed ≤ LAND_SAFE` and `fwd·up > 0.5` | **win** |
+| Moon contact, speed ≤ 32 m/s, tipped further | same | lost — `TIPPED OVER` |
 | Moon contact, faster | same | lost |
 | Earth contact, speed ≤ 120 m/s | `impact(false)` with `speed ≤ SAFE_EARTH` | "splashdown", lost (the Moon was the target) |
 | Earth contact, faster | same | lost |
-| Contact test | `|r − moonPos| ≤ RM + RHALF`, `|r| ≤ RE + RHALF` | `RHALF ≈ 52 m` is the vehicle's half-height, so the test is a surface contact, not a point hit |
+| Lateral aerodynamic load > 0.5 g (6 g for the bare CSM) | `breakup()` from `physStep` | lost — `AERODYNAMIC BREAKUP` ([atmosphere.md](atmosphere.md)) |
+| Contact test | `surfaceAlt() ≤ 0` | the lowest attached point — the bell of the stage still bolted on, or the nose if inverted — against the terrain underneath (the drawn relief in the browser, the datum sphere headless). It used to be `S.pos` within `RHALF ≈ 52 m`, which is right for the full stack and left a lone CSM "landed" 61 m up |
 
 The Moon-encounter gate (`rM < SOI_M` → switch guidance to Moon-relative) must run **before**
 `checkImpact`, otherwise a fast arrival at the surface is reported as impact instead of a

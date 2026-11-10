@@ -13,21 +13,26 @@ node server.js 8078      # serves ES modules with no-store + SSE hot reload at /
 
 Open `http://localhost:8078/index.html`. `window.game` is the debug handle:
 `state() ignite stage jettisonLES setSas(on, retro) warp(n) camera(n) ff(seconds) setThrottle(v) nudge(ω)
-teleport(pos, vel, simTime) reset()`, plus `_cam`, `_pred`, `setCam(d)`.
+teleport(pos, vel, simTime) reset()`, plus `_cam`, `_pred`, `setCam(d)`. `state().aero` is
+`{ q, mach, aoa, load, margin }` — Pa, –, rad, lateral g, static margin in m.
 
 ## Verify with these, and only these
 
 ```sh
 npm i --no-save three@0.187.0             # tool only; the game has no dependencies
 node tools/mission-sim.mjs                 # solves the launch window then flies it: ~50 s
-node tools/mission-sim.mjs game --phase=4.9561012   # the shipped window: ~2 s
+node tools/mission-sim.mjs game --phase=4.9198031   # the shipped window: ~2 s
 python3 tools/mission-math.py              # must exit 0; recomputes the derived numbers in docs/
 node tools/shader-lint.mjs                 # must print ok; every ShaderMaterial must compile
 ```
 
-Shipped flight right now: `RESULT WON`, periselene 169 km, LOI 875 m/s at 183 km, touchdown
-**20.1 m/s** (`LAND_SAFE` is 32 m/s), 7.6 t spare, 16,226 m/s spent, 3.404 days. `retro` (the previous
-stack) is LOST at 5,577 m/s with a dry tank. If you change physics, specs, constants or the launch
+Shipped flight right now: `RESULT WON`, periselene 205 km, LOI 865 m/s at 218 km, touchdown
+**4.2 m/s** (`LAND_SAFE` is 32 m/s), 7.4 t spare, 16,245 m/s spent, 3.461 days. `retro` (the previous
+stack) is LOST at 1,264 m/s with a dry tank. The window is a cliff on one side: −1e-3 rad of phase
+(periselene 334 km) lands at 3.4 m/s with 7.2 t, −3e-3 rad (597 km) still lands at 2.6 m/s, but
++0.75e-3 rad (110 km) and +1e-3 rad (79 km) are **LOST** at 81 and 72 m/s with the tank run down.
+Nominal ascent under SAS: max-Q 25.4 kPa at T+65 s, peak side load 0.024 g at T+85 s (limit 0.5 g),
+static margin +4.4 m on the pad. If you change physics, specs, constants or the launch
 window, re-run and fix every number that moved **in the same commit** — `README.md` and
 `docs/reference/*.md` quote measured output, and a doc that no run backs is a bug.
 
@@ -66,16 +71,50 @@ zero; Ap/Pe mixed a Moon-centred position with inertial velocity and printed `ES
 most 600). Warp multiplies the **number** of substeps, never the step size, so the trajectory is
 identical at ×1 and ×1000. That makes 0.1 s the only step the game can produce, and the translunar
 encounter is sensitive enough to notice: stepping the coast at 1 s instead of 0.1 s moves the
-periselene by ~870 km, six times the whole launch-window tolerance. `tools/mission-sim.mjs` now
+periselene by ~790 km (204 km becomes an impact 590 km under the surface, measured from the shipped
+coast-start state), nearly twice the width of the whole 140–600 km corridor. `tools/mission-sim.mjs` now
 steps at `H` always and says so in its source; anything that certifies a mission must use the same
-step. Related: the mission is sensitive to ~135 km of periselene per 1e-3 rad of launch phase, and
-`MOON_PHASE0 = 4.9561012` is solved for the current `TURN` table — change the pitch program or the
-step and the window constant is wrong.
+step. Related: the mission is sensitive to ~130 km of periselene per 1e-3 rad of launch phase, and
+`MOON_PHASE0 = 4.9198031` is solved for the current `TURN` table **and the current forces** — change
+the pitch program, the step, the drag model or `gravityAt` and the window constant is wrong. The
+flight-model commit moved it by 0.036 rad (it was 4.9561012), more than 70 times the 0.5e-3 rad
+between the window and the last late flight that lands.
 
 A corollary for anything that *predicts* the game: reproduce its discretisation. `simTime += dt`,
-gravity at the advanced time, `v += a·dt`, `p += v·dt`. `js/targeting.js` does exactly that and
-matches the certified flights to under 0.5 km; a converged velocity-Verlet integration of the same
-state differs from the ship's real trajectory by ~100 km, which would make the readout lie.
+gravity at the advanced time, `v += a·dt`, `p += v·dt`. `js/targeting.js` does exactly that: from the
+shipped coast-start state it and a real `physStep` coast both arrive at 204.43 km (run headless), and
+it is within ~1 km of the tool's whole-km periselene on all three certified flights. A converged
+velocity-Verlet integration of the same state says 299.9 km — 95 km from the ship's real trajectory,
+which would make the readout lie.
+
+## Rule: one aerodynamic evaluation feeds both the trajectory and the attitude
+
+`accelAt(p, v, mass, thrustAcc, t, axis)` calls `aeroForce()` in `js/aero.js` once per step. The
+force goes into the acceleration; the same call leaves its dynamic pressure, Mach number, angle of
+attack and normal-force split in `aeroState`, and `physStep` builds the torque, the pitch damping
+and the side-load check from that record. Do not compute a second "aero for rotation" from
+`surfaceVel()` or a normalised q — that is what the old weathervane constants were, and a torque
+that disagrees with the force it came from flies a vehicle whose nose and path answer to different
+air. Corollaries, each read off the code or measured:
+
+- Pass `axis` only for the vehicle. Debris and anything else without an attitude passes `null` and
+  gets plain `CD_AREA` drag; it must not overwrite `aeroState`, and with `axis = null` it does not.
+- `GEOM` in `js/physics.js` is the single table for mass distribution *and* aerodynamic shape, in
+  build units (1 u = 1.4 m) at the stations `js/saturn.js` draws. Move a drawn stage and the centre
+  of mass, the planform centroid and the fin arm all move with it; `stability()` returns the result
+  as a static margin in metres. Measured: +4.4 m on the pad, +17.9 m at T+100 s as the S-1 drains,
+  −7.2 m just after staging (no fins; q is 2.2 kPa by then and the side load stays under 0.004 g).
+- The breakup limits (`LOAD_LIMIT_STACK = 0.5` g, `LOAD_LIMIT_CSM = 6` g) are set against the
+  measured SAS ascent, whose peak is 0.024 g, **and against what the vehicle can generate at all**.
+  The stack limit was 1.2 g for one commit and almost nothing reached it: full pitch held with SAS
+  off through max-Q peaked at 0.93 g and flew on, because broadside at 25 kPa this airframe makes
+  about 1 g and no more. At 0.5 g the same input from any time between T+40 s and T+90 s breaks up
+  5–8 s later (38–57° off the airflow); from T+100 s it peaks at 0.41 g and survives. A limit is
+  only a rule if a measured manoeuvre crosses it — change `CD_CROSS`, `GEOM` or the stage masses and
+  re-measure both ends.
+- The flat rate damping is a control system now (`rcsAssist`, key T, reset to on by `resetSim()`).
+  A test that wants free rotation in vacuum must call `toggleRcsAssist()`; a test that assumes rates
+  die on their own is testing the assist.
 
 ## Harness gotchas (`tools/mission-sim.mjs`)
 
@@ -89,13 +128,23 @@ state differs from the ship's real trajectory by ~100 km, which would make the r
   while stage 0 is attached and lit), so `engineOn` stays true after a `toggleIgnite()` on the pad.
   To reach a genuine no-thrust state for a test, call `separateStage()`: it clears `engineOn`,
   `targetThrottle` and `throttle`.
-- Mid-course correction burns are gated on `fuel > 60 t`. The shipped CSM holds 44.5 t after TLI, so
+- Mid-course correction burns are gated on `fuel > 60 t`. The shipped CSM holds 44.7 t after TLI, so
   for this vehicle the encounter is decided at injection and cannot be repaired afterwards.
 - The descent guidance law (`a_cmd = (v_des − v)/τ + dv_des/dt − g_abs + g_moon`, τ = 2.5 s, with the
   altitude-bounded velocity envelope) was tuned by measurement. Simplify it and you get 41 m/s, 62
   m/s or 220 m/s impacts, all of which have been observed. Attitude must be commanded through the
   body-rate in the game's SAS convention; writing `S.q` directly gives `align −0.93` and a crater.
-- `airDensity(alt)` returns exactly 0 above 420 km, so coast trajectories are drag-free.
+- Contact is `surfaceAlt() <= 0`: the lowest attached point (the active stage's bell, or the nose if
+  inverted) over the terrain. Headless there is no terrain — `initPhysics` gets no `relief`, so the
+  tool lands on the datum sphere, and its touchdown speed says nothing about a hillside. The descent
+  guidance reads the same `P.surfaceAlt(true)`; when it read the altitude of `S.pos` instead it met
+  the ground believing it had 52 m left, and the shipped touchdown was 20.4 m/s where it is now 4.2.
+- The launch-phase solve only looks at the first periselene, so it is blind to anything that happens
+  after it. A change to contact, descent guidance or `LAND_SAFE` does not move `MOON_PHASE0`, but it
+  can move the corridor's edge onto the window: re-fly the neighbours (`--phase=` ±0.25e-3 … ±3e-3),
+  not just the shipped phase.
+- `airDensity(alt)` (now in `js/aero.js`, re-exported by `physics.js`) returns exactly 0 above
+  `ATMO_TOP = 420` km, so coast trajectories are drag-free.
 
 ## Renderer rules — each of these was found by measurement, not by reading
 
@@ -332,8 +381,8 @@ await tab.evaluate(`(async () => {
 
 - Read HUD text only after `await new Promise(r => setTimeout(r, 700))`. A hidden tab throttles
   `requestAnimationFrame`, so counting frames or awaiting rAF gives stale text like `0 m/s ground`,
-  and long `ff()`-free propagations finish ~10× slower than the 649 frames they take when you drive
-  `updateAim()` directly.
+  and long `ff()`-free propagations finish ~10× slower than the 865 calls they take (counted
+  headless, from the shipped coast start) when you drive `updateAim()` directly.
 - `ff(seconds)` steps the shipped `physStep` at 0.1 s without rendering; it is how a multi-day coast
   is crossed in a test.
 - Turn the engine off before teleporting if you are checking an impact speed, or thrust adds to it.
@@ -379,12 +428,12 @@ await tab.evaluate(`(async () => {
 
 ## Structure
 
-One concern per file; no god files. Current sizes: `toonmap.js` 1778, `vehicle.js` 1374, `world.js` 687, `terrain.js` 549, `navball.js` 498, `physics.js` 472, `clouds.js` 443, `hud.js` 437, `camera.js` 300, `predictor.js` 275, `textures.js` 232, `saturn.js` 231, `ribbon.js` 213, `pad.js` 202, `main.js` 172, `toon.js` 138, `constants.js` 119, `targeting.js` 108, `halfres.js` 103, `audio.js` 62, `haze.js` 62.
+One concern per file; no god files. Current sizes: `toonmap.js` 1778, `vehicle.js` 1374, `world.js` 687, `terrain.js` 549, `navball.js` 498, `physics.js` 569, `clouds.js` 443, `hud.js` 437, `camera.js` 300, `predictor.js` 275, `textures.js` 232, `saturn.js` 231, `ribbon.js` 213, `pad.js` 202, `main.js` 175, `toon.js` 138, `constants.js` 120, `targeting.js` 108, `halfres.js` 103, `aero.js` 81, `audio.js` 62, `haze.js` 62.
 `vehicle.js` is now the exhaust and debris alone — the hardware it used
 to build is `saturn.js`, the launch complex left `world.js` for `pad.js`. It is still the largest
 behavioural module; if the particle field grows, split its renderer from its integrator.
-`physics.js` stays display-free: `tools/mission-sim.mjs` imports it headless, and `saturn.js` with
-it for the stage records (so anything there that needs a canvas must tolerate having none).
+`physics.js` and `aero.js` stay display-free: `tools/mission-sim.mjs` imports them headless, and
+`saturn.js` with them for the stage records (so anything there that needs a canvas must tolerate having none).
 
 `js/constants.js` holds every physical constant and the vehicle `SPECS`, each with the measurement
 that justifies it in a comment. `docs/reference/` holds the source-cited external data and the

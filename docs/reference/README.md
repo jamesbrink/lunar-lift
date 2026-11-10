@@ -13,7 +13,7 @@ All data was retrieved on **2026-11-08**.
 | [earth.md](earth.md) | Earth GM, radii, mass, gravity, rotation, J2, atmosphere summary |
 | [moon.md](moon.md) | Moon GM, radii, orbit elements, inclination geometry, sphere of influence |
 | [sun.md](sun.md) | Sun GM, size, luminosity, Earth distance — light and the third gravity well |
-| [atmosphere.md](atmosphere.md) | U.S. Standard Atmosphere 1976 layers, density table, drag, max-q, the game's exponential model and its error |
+| [atmosphere.md](atmosphere.md) | U.S. Standard Atmosphere 1976 layers, density table, drag, max-q, the game's exponential model and its error, and the flight model in `js/aero.js`: drag rise, angle-of-attack forces, static margin, side-load breakup |
 | [launch-site.md](launch-site.md) | LC-39A coordinates, geodetic vs geocentric latitude, rotation credit, launch azimuth, launch window |
 | [spacecraft.md](spacecraft.md) | Saturn V stage masses, F-1/J-2/DPS/SPS engines, propellants, Apollo 11 spacecraft stack |
 | [apollo-11-profile.md](apollo-11-profile.md) | Apollo 11 flight tables: every event, altitude, velocity, Δv — the acceptance target for the game |

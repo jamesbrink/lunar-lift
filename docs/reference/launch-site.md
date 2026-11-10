@@ -109,6 +109,6 @@ ignition is what determines whether intercept is cheap or impossible.
 | --- | --- | --- |
 | vehicle visual scale `VS` | 0.0014 km per build unit | 75 units → 105 m tall |
 | Saturn V + LES actual height | 110.6 m | published figure, ~5 % taller than the game's stack |
-| `RHALF` | 37 × VS ≈ 51.8 m | contact offset from the vehicle centre |
+| `RHALF` | 37 × VS ≈ 51.8 m | height of the vehicle centre above the pad surface (places `PAD_POS`); contact itself is `surfaceAlt()`, see [orbital-mechanics.md](orbital-mechanics.md) |
 | pad stand height | 4 × VS ≈ 5.6 m | the crawler/pedestal, not the 136 m LUT — the vehicle is welded at its own scale |
 | pad tangential speed | `SPIN_AXIS × PAD_POS · EARTH_SPIN` | `PAD_ANGULAR` |

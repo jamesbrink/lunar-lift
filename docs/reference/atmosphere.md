@@ -1,8 +1,9 @@
 # Atmosphere
 
-Two models are described here: the **U.S. Standard Atmosphere 1976** (what reality does,
-to 86 km) with the **MSISE-90** mean-solar-activity extension above it, and the game's
-current single exponential — including how far off it is.
+Three things are described here: the **U.S. Standard Atmosphere 1976** (what reality does,
+to 86 km) with the **MSISE-90** mean-solar-activity extension above it; the game's
+single-exponential density — including how far off it is; and the **flight model** in
+`js/aero.js` that turns that density into force and torque on the vehicle.
 
 Definitions: geopotential altitude `h`, temperature `T`, pressure `p`, density `ρ`.
 `g₀ = 9.80665 m/s²`, `R = 287.0528731 J/(kg·K)` (dry air), `M = 28.9644 kg/kmol` to 86 km.
@@ -78,32 +79,131 @@ F_d = ½ ρ v² C_d A          a_d = F_d / m          q = ½ ρ v²
 ```
 
 `v` is speed **relative to the air**, which rotates with the planet — `js/physics.js` uses
-the ground-relative velocity for drag and the inertial velocity for everything else, which
-is correct. Units in the repo: `a (km/s²) = ½·ρ(kg/m³)·A_cd(m²)·v(km/s)² / mass(t)`.
+the ground-relative velocity for the aerodynamic force and the inertial velocity for
+everything else, which is correct. Units in the repo:
+`a (km/s²) = ½·ρ(kg/m³)·A_cd(m²)·v(km/s)² / mass(t)`. That is the nose-on, subsonic case of
+what the game now computes; the full model is the next section.
 
 Apollo 11's max-q is tabulated as **735.17 psf = 35.20 kPa**. At `ρ(13.57 km) = 0.243 kg/m³`
 that implies `v = 539 m/s`. (The ascent table's own velocity entry for that event cannot be
 reconciled with this `q` and altitude, so the game docs quote `q` only; see
-[apollo-11-profile.md](apollo-11-profile.md).)
+[apollo-11-profile.md](apollo-11-profile.md).) The game's SAS ascent, measured: max-q
+**25.4 kPa** at T+65 s, 10.9 km, Mach 1.3; Mach 1 at T+56 s and 7.65 km, where Apollo 11
+passed it at 7.84 km.
 
-Drag area of the stack: S-IC base diameter 6.6 m → `A = 34 m²`, but a slender rocket's
-`C_d` is base-dominated, ≈ 0.35–0.45 → **C_d·A ≈ 12–15 m²**. The game uses `CD_AREA = 28 m²`,
-about twice that, which is a deliberate handle: it makes the gravity turn's early losses
-visible on the HUD instead of invisible. Bound on what it can cost (from
+Drag area of the stack. The game's `CD_AREA = 28 m²` is the full stack nose-on below Mach 0.8.
+On the vehicle `js/physics.js` describes (`GEOM`: 10.0 m across, reference area
+π·5.0² = 78.5 m²) that is an axial coefficient of **0.357**. This section used to call 28 m²
+"about twice Apollo's" by taking a 6.6 m base → 34 m² → C_d·A ≈ 12–15 m²; 6.6 m is the
+S-IVB's diameter, not the S-IC's ([spacecraft.md](spacecraft.md) has both at Ø10.0 m for the
+lower stages), so that comparison was wrong and 28 m² is the ordinary number for a 10 m body
+with C_d ≈ 0.36. The 0.35–0.45 range for a slender launcher's subsonic C_d is a textbook
+figure with no source fetched here. Bound on what axial drag can cost (from
 `tools/mission-math.py` §8, USSA density, `v < 550 m/s` below 20 km, `m > 2000 t`):
 
 | C_d·A | peak drag deceleration | max drag loss in the dense air |
 | --- | --- | --- |
-| 12 m² | 0.39 m/s² | ≤ 47 m/s |
+| 12 m² (the old, mistaken Apollo figure) | 0.39 m/s² | ≤ 47 m/s |
 | 28 m² | 0.91 m/s² | ≤ 109 m/s |
+| 28 m² × the 1.6 transonic peak, held throughout | 1.45 m/s² | ≤ 174 m/s |
 
-Either way drag is a rounding error next to gravity loss (~1.0–1.5 km/s); it matters for
-*feeling*, not for the Δv budget.
+Measured on the shipped SAS ascent, summing `q · CD_AREA · machDrag(M) · cos²α / m` over every
+0.1 s step until S-2 burnout (a headless script on the shipped modules, not a tool in
+`tools/`): **23.8 m/s** of drag loss, peak deceleration 0.45 m/s². The same path at a constant
+`CD_AREA` would have lost 18.8 m/s, so the Mach rise and the angle of attack together are
+worth 5 m/s. Either way drag is a rounding error next to gravity loss (~1.0–1.5 km/s); it
+matters for *feeling* — and, since the flight model, for which way the nose wants to point.
 
-## The game's model, and its error
+## The flight model (`js/aero.js`)
+
+`js/aero.js`'s header is the source of truth; this is the same content with the numbers
+filled in. One call, `aeroForce(out, vrel, alt, axis, shape)`, returns the whole aerodynamic
+force for a body with nose vector `axis` at angle of attack `α` to the airflow. `accelAt` in
+`js/physics.js` puts that force into the trajectory, and `physStep` builds the torque from the
+record the same call leaves in `aeroState` — one evaluation, so path and attitude cannot
+disagree about the air.
+
+| Term | Form | Coefficient | Acts at |
+| --- | --- | --- | --- |
+| axial drag | `q · CA·A_ref · f(M) · cos α·|cos α|` along the body axis | `CA·A_ref = CD_AREA = 28 m²` for the stack (`CA` = 0.357 on 78.5 m²); `CA = 1.1` for the capsule alone, a blunt body | — (through the axis) |
+| drag rise | multiplier `f(M)` on the axial term | 1 below Mach 0.8, smooth to **1.6 at Mach 1.1**, relaxing to 0.9 by Mach 5 and beyond | — |
+| body lift | `q · CN_BODY · A_ref · sin α·|cos α|`, normal to the axis | `CN_BODY = 2` per radian (slender-body theory's value) | planform centroid |
+| cross-flow drag | `q · CD_CROSS · A_plan · sin² α`, normal to the axis | `CD_CROSS = 1.2`, a cylinder broadside; `A_plan` = 853 m² for the full stack | planform centroid |
+| fins | `q · CN_FIN · A_fin · sin α·|cos α|`, normal to the axis | `CN_FIN = 3` per radian on `FIN_AREA = 20 m²`; gone with the S-1 | station −38 u, 5.6 m ahead of the tail |
+| pitch damping | rate decays at `q · CN_BODY · J / (V · I)` per second | `J` is the planform's second moment about the centre of mass, `I` the pitch inertia, `V = max(30, 300·M)` m/s | — |
+
+"Lift" is not a separate term: it is the component of the normal force perpendicular to the
+airflow. Speed of sound is 340 m/s at sea level falling linearly to 295 m/s at 11 km and held
+there. Debris and anything else without an attitude gets plain `CD_AREA · f(M)` drag.
+
+**Torque and stability.** The normal force's moment is taken about the *live* centre of mass,
+from the same `GEOM` table (segment lengths, radii and stations, as `js/saturn.js` draws them)
+that the moment of inertia comes from, so stability moves as the tanks drain. `stability()`
+returns the small-angle static margin — how far the centre of pressure sits behind the centre
+of mass. Measured along the SAS ascent:
+
+| MET s | altitude km | q kPa | Mach | α | side load g | static margin m |
+| --- | --- | --- | --- | --- | --- | --- |
+| 0 (pad) | 0.1 | 0 | 0 | — | 0 | **+4.4** |
+| 20 | 0.9 | 4.0 | 0.25 | 0.2° | 0.000 | +6.1 |
+| 40 | 3.7 | 15.5 | 0.61 | 0.3° | 0.001 | +8.0 |
+| 60 | 9.0 | 25.0 | 1.13 | 1.5° | 0.007 | +10.5 |
+| 80 | 17.7 | 21.6 | 1.80 | 4.6° | 0.024 | +13.7 |
+| 100 | 30.6 | 10.3 | 2.64 | 5.8° | 0.018 | +17.9 |
+| 120 (S-1 gone at 117) | 48.9 | 2.2 | 3.59 | 7.2° | 0.004 | **−7.2** |
+| 140 | 69.4 | 0.2 | 3.70 | 9.5° | 0.001 | −7.0 |
+
+The stack with its fins is stable and gets more so as the S-1 empties from the tail; with SAS
+switched off at T+60 s and no input, the angle of attack falls from 1.5° to 0.1° in 20 s on
+its own. Without the S-1 the margin is negative, but only where q is already a tenth of its
+peak and falling by a factor of ten every 20 s. Peak side load on the whole ascent: **0.024 g**
+at T+85.4 s, 20.6 km, Mach 2.0, 5.0° off the airflow, q 18.9 kPa.
+
+**Breakup.** The normal force is carried by the airframe as a side load,
+`(N_body + N_fin) / m` in g. Above `LOAD_LIMIT_STACK = 0.5` g the stack is lost
+(`AERODYNAMIC BREAKUP`); the CSM flying alone takes `LOAD_LIMIT_CSM = 6` g. Both limits are
+gameplay values, not structural data: the stack's is set between the measured 0.024 g of the
+nominal ascent and what the vehicle can generate when it is flown badly. Measured by switching
+SAS off and holding full pitch from a given moment:
+
+| pitch held from | at the 0.5 g limit (shipped) | peak load with the limit at 1.2 g |
+| --- | --- | --- |
+| T+40 s | **breakup** at T+48 s, Mach 0.7, 57° | 1.21 g at T+83 s — breakup, after a tumble back into dense air |
+| T+50 s | **breakup** at T+56 s, Mach 1.0, 43° | 1.17 g, survives |
+| T+60 s (through max-q) | **breakup** at T+65 s, Mach 1.3, 38° | 0.93 g, survives |
+| T+70 s | **breakup** at T+74 s, Mach 1.6, 38° | 0.80 g, survives |
+| T+80 s | **breakup** at T+84 s, Mach 1.9, 42° | 0.72 g, survives |
+| T+90 s | **breakup** at T+95 s, Mach 2.3, 53° | 0.58 g, survives |
+| T+100 s | survives, peak 0.41 g | 0.41 g, survives |
+
+The right-hand column is why the limit is 0.5 g. For one commit it was 1.2 g, and a vehicle
+pitched broadside through max-q flew on: fully broadside at 25 kPa the cross-flow term is
+1.2 × 853 m² × 25 kPa = 25.6 MN on the 2,430 t the stack weighs by then, about 1.07 g
+(computed from the coefficients, not a run) — the airframe could barely reach its own limit.
+The angular acceleration the moment can produce is clamped at ±2 rad/s², and the torque and
+damping are skipped below q = 0.5 Pa.
+
+**Vacuum.** Above `ATMO_TOP = 420 km` density is exactly zero and none of this runs. The only
+rate damping left is the **RCS stability assist** (key T, on by default: 0.6 /s on pitch and
+yaw rates, 0.25 /s on roll). With it off a rotation persists until something cancels it.
+
+**What is deliberately not modelled**, from the module's own header:
+
+- Slender-body theory puts a body's lift on the *nose*, well ahead of the planform centroid.
+  That is why the real Saturn V was statically unstable through max-q and flew on engine
+  gimbal. Lumping the lift at the centroid makes this vehicle **more stable than Apollo's** —
+  it weathervanes where the real one would have diverged.
+- No heating, no ablation, and no compressibility beyond the drag rise: Mach number changes
+  axial drag only, never the normal-force coefficients or the centre of pressure.
+- The coefficients are textbook orders of magnitude, not wind-tunnel data, and the fin area is
+  an effective planform chosen for the model, not a measurement of the drawn fins.
+- No wind, no gusts, no axial or max-q structural limit, no roll aerodynamics.
+
+## The game's density model, and its error
 
 ```js
-export function airDensity(alt) { return alt > 420 ? 0 : RHO0 * Math.exp(-Math.max(0, alt) / ATMO_H); }
+export const ATMO_TOP = 420;
+export function airDensity(alt) { return alt > ATMO_TOP ? 0 : RHO0 * Math.exp(-Math.max(0, alt) / ATMO_H); }
 ```
 
 `RHO0 = 1.225`, `ATMO_H = 8.5` km — a single scale height (the fact sheet's own summary
@@ -154,8 +254,10 @@ const UPPER = [[86, 5.704e-6], [100, 5.08e-7], [120, 1.80e-8], [150, 1.73e-9],
                [200, 2.41e-10], [300, 1.87e-11], [400, 2.62e-12], [600, 9.89e-14]];
 ```
 
-Re-measure the ascent drag loss after the swap (expect the loss to drop by a few tens of
-m/s) and leave `CD_AREA` as the gameplay knob. The visual weather in `js/clouds.js` stays
+Re-measure the ascent after the swap — drag loss (23.8 m/s now, so there are not tens of m/s
+left to drop), max-q, the side-load table above, and the launch window, which is solved for
+the forces as they are — and leave `CD_AREA` as the gameplay knob. `soundSpeed()` in
+`js/aero.js` should move to the layer temperatures at the same time. The visual weather in `js/clouds.js` stays
 cosmetic; weather is not simulated.
 
 ## Constants for the game, restated
@@ -164,6 +266,7 @@ cosmetic; weather is not simulated.
 | --- | --- | --- |
 | sea-level density | 1.225 kg/m³ | USSA-1976 (fact sheet says 1.217 for the real atmosphere's mean) |
 | sea-level pressure | 101 325 Pa | USSA-1976 (fact sheet: 1014 mb) |
-| `C_d·A` | 28 m² (game), 12–15 m² (Apollo) | gameplay choice, documented above |
+| `C_d·A`, nose-on, subsonic | 28 m² (game) = 0.357 × 78.5 m² | game value; no Apollo figure fetched |
+| side-load limit | 0.5 g stack, 6 g bare CSM | gameplay choice; nominal ascent peaks at 0.024 g |
 | Kármán line | 100 km | convention only; no physical discontinuity |
-| max-q to design against | 35 kPa | Apollo 11 |
+| max-q | 35.2 kPa (Apollo 11), 25.4 kPa (game, measured) | SP-4029; SAS ascent |

@@ -105,8 +105,8 @@ extends into the interstage skirt. Ratios O/F match the engine specs (2.27 / 4.5
 
 | stack | ignition mass | stage Δv (m/s) | TWR | burn times | ideal total | vs 15,142 m/s requirement | flown |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| **shipped `SPECS`** | 3,433 t | 2,215 / 6,518 / 8,357 | 1.37 / 1.09 / 0.19 | 117 / 305 / 1,905 s | **17,090 m/s** | 1.13× | **WON**, 20.1 m/s, 7.6 t spare |
-| previous (`retro`) | 3,780 t | 2,599 / 2,737 / 10,967 | 1.24 / 0.98 / 0.71 | 135 / 194 / 549 s | 16,303 m/s | 1.08× | LOST — 5,577 m/s impact, tank dry |
+| **shipped `SPECS`** | 3,433 t | 2,215 / 6,518 / 8,357 | 1.37 / 1.09 / 0.19 | 117 / 305 / 1,905 s | **17,090 m/s** | 1.13× | **WON**, 4.2 m/s, 7.4 t spare |
+| previous (`retro`) | 3,780 t | 2,599 / 2,737 / 10,967 | 1.24 / 0.98 / 0.71 | 135 / 194 / 549 s | 16,303 m/s | 1.08× | LOST — 1,264 m/s impact, tank dry |
 | NOVA candidate | 5,475 t | 2,569 / 4,304 / 13,734 | 1.30 / 0.96 / 0.83 | 139 / 288 / 526 s | 20,608 m/s | 1.36× | not flown |
 
 NOVA candidate = `S-1 130/3000/70000/330`, `S-2 110/1500/22000/430`, `CSM 25/700/6000/460`.
@@ -123,7 +123,7 @@ Honest caveats about this mapping, to keep the docs from overselling realism:
   made orbit. The change to 304 s is not what rescued the mission; the propellant loads and stage 2
   (12,000 → 16,000 kN, 340 → 415 s) were.
 - **Upper-stage TWR is not a failure condition in vacuum**, but stage 3 now spans both regimes:
-  0.19 g on Earth, 4.2 g_moon at the 59 t LOI mass, 6.9 g_moon at the 36 t landing mass, and
+  0.19 g on Earth, 4.2 g_moon at the 59 t LOI mass, 7.0 g_moon at the 35 t landing mass, and
   1,905 s of full-throttle burn available. Hovering the lander takes 15% throttle. See
   [mission-design.md](mission-design.md) for why that is survivable.
 - **Stage 2's `dry: 90` t is 2.5× the real S-II** and `fuel: 1,200` t is 2.7× — the game's stack is
@@ -131,7 +131,13 @@ Honest caveats about this mapping, to keep the docs from overselling realism:
   gets to orbit with 2,938 t; the game needs its extra mass because the descent has to be paid for
   out of the same three stages, and because the autopilot is not as good at steering as the Apollo
   guidance computer.
-- `CD_AREA = 28 m²` is roughly twice Apollo's — see [atmosphere.md](atmosphere.md).
+- `CD_AREA = 28 m²` is the stack's nose-on drag area below Mach 0.8 — an axial coefficient of 0.357
+  on the 10 m body. The rest of the airframe's behaviour in air (drag rise, lift, fins, static margin,
+  the 0.5 g side-load limit) is in [atmosphere.md](atmosphere.md). The model is statically stable with
+  its fins; **the real Saturn V was not**, and flew on engine gimbal.
+- The mass and aerodynamic geometry (`GEOM` in `js/physics.js`) is the drawn vehicle's: S-1 42 m long
+  and 10 m across, S-2 26 m, CSM body and adapter 22 m at 6.2 m across, command module 8.4 m — 99 m
+  from tail to apex, in build units of 1.4 m. These are the game's proportions, not Apollo's.
 
 ## Sources
 

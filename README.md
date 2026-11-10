@@ -34,6 +34,7 @@ Read from the `keydown` handler in `js/main.js` and the hold-key reads in `js/ph
 | X | Separate the spent stage |
 | P | SAS autopilot on / off (holds the pitch program off the pad, then the velocity vector) |
 | V | Flip SAS between prograde and retrograde |
+| T | RCS stability assist on / off (on by default; off, nothing damps a rotation in vacuum) |
 | ] / [ | Time warp up / down the ladder |
 | C | Camera mode: chase / orbit / system |
 | M | Minimap view: auto / system |
@@ -49,9 +50,24 @@ size.** `js/main.js` takes `simDt = frame time × warp` and splits it into subst
 clock.
 
 Flight controls are inertial: the keys apply torque against the vehicle's live moment of inertia, so
-the fueled stack turns slowly and the HUD's `authority` readout climbs as propellant burns off; tail
-fins damp the rate and weathervane the nose into the airflow, and the burning engine gimbal swings
-the plume opposite each turn.
+the fueled stack turns slowly and the HUD's `authority` readout climbs as propellant burns off, and
+the burning engine gimbal swings the plume opposite each turn. Nothing else turns the vehicle for
+free:
+
+- **In air** the airframe flies. `js/aero.js` gives a body at an angle of attack a normal force
+  (slender-body lift, cross-flow drag, the S-1's fins) as well as Mach-dependent axial drag, and
+  `js/physics.js` takes that force's moment about the live centre of mass — so the nose weathervanes
+  into the airflow while the centre of pressure is behind the centre of mass (measured static margin
+  +4.4 m on the pad, growing as the S-1 drains) and the rate is damped in proportion to dynamic
+  pressure. After the S-1 and its fins are gone the measured margin is negative (−7.2 m at
+  staging), by which point the air is nearly gone too.
+- **Side load breaks the vehicle.** More than 0.5 g of lateral aerodynamic load folds the stack
+  (6 g for the bare CSM): `AERODYNAMIC BREAKUP`, mission lost. The SAS ascent peaks at 0.024 g
+  (measured, T+85 s, Mach 2, 5° off the airflow). Measured the other way: SAS off and full pitch
+  held from any moment between T+40 s and T+90 s breaks the stack 5–8 s later, 38–57° off the
+  airflow; from T+100 s the air is too thin (0.41 g peak) and it survives.
+- **In vacuum** the only rate damping is the RCS stability assist (`T`, on by default). Switch it
+  off and the vehicle keeps whatever spin it was given until you cancel it.
 
 ## Units and scale
 
@@ -61,20 +77,30 @@ Repo-wide convention (see `docs/reference/README.md`): **km, s, tonnes, kN**.
   km gives **km/s²**.
 - State vectors are km/s internally; the HUD reads m/s.
 - `simTime` is real mission seconds — no time-scaling fudge anywhere. The measured mission clocks
-  3.404 days, as a real one does.
+  3.461 days, as a real one does.
 - Visuals ride at real planetary scale; the vehicle mesh is scaled by `VS` (≈105 m, Saturn-V sized).
 
 ## Architecture
 
-- `js/physics.js` (472 lines) — the integrator and the reference-frame helpers. Two-body
-  inverse-square gravity for Earth and Moon, exponential drag, mass burn, staging, attitude
-  dynamics, SAS, the trajectory predictor, and `impact()`. Its frame rule matters: `navVel()` is
+- `js/physics.js` (569 lines) — the integrator and the reference-frame helpers. Inverse-square
+  gravity from Earth and Moon plus the indirect term an Earth-centred frame owes (the Earth falls
+  toward the Moon too), the aerodynamic force and its torque from `js/aero.js`, mass burn, staging,
+  attitude dynamics, SAS, the RCS stability assist, side-load breakup, and `impact()`. Contact is the
+  lowest attached point (`surfaceAlt()`: the engine bell of whatever stage is still bolted on, or
+  the nose if it is upside down) meeting the terrain, and a slow touchdown more than 60° from
+  vertical is `TIPPED OVER`, a loss. It also holds
+  `GEOM`, the one table of segment lengths, radii and stations that both the moment of inertia and
+  the aerodynamic shape are built from. Its frame rule matters: `navVel()` is
   Moon-relative inside the lunar SOI and inertial outside (it drives SAS and the navball),
   `groundVel()` is velocity relative to the surface of whichever body is underneath (it drives
   `impact()` and the HUD speed readout), and `bodyUp()` is the attitude to hold when the velocity
   vector has no direction worth steering by. The Moon moves at ~1 023 m/s through the game frame, so
   anything judged against a surface must not use the raw state vector `S.v`. Also owns `LES_ALT`
   (90 km) and the launch-escape-tower jettison, which is visual only and sheds no mass.
+- `js/aero.js` (81 lines) — the atmospheric flight model, display-free: exponential density, speed of
+  sound, the transonic drag rise, and `aeroForce()` — axial drag plus the angle-of-attack normal
+  force. One evaluation per step feeds both the trajectory and the torque. What it models and what
+  it deliberately does not: `docs/reference/atmosphere.md`.
 - `js/world.js` (687 lines) — Earth, Moon, sky gradient, starfield, the sun whose
   shadow camera follows the vehicle, and the launch pad welded to the rotating planet. Mounts the
   weather shell from `js/clouds.js` and composes the ground materials' injections (cloud shade, haze,
@@ -124,14 +150,16 @@ Repo-wide convention (see `docs/reference/README.md`): **km, s, tonnes, kN**.
   the hardware still attached and damps its *offset* from it, so the ship stays centred at any speed
   or warp and re-frames smoothly at staging. Collides with the vehicle, the pad, the Earth and the
   Moon, twice per frame because a chord between two legal points can pass through a body.
-- `js/main.js` (172 lines) — renderer bootstrap, keyboard input, the render loop (warp → substeps),
+- `js/main.js` (175 lines) — renderer bootstrap, keyboard input, the render loop (warp → substeps),
   camera cycling, and the `window.game` debug handle.
 - `js/targeting.js` (108 lines) — the predicted lunar aim: propagates the live state forward through
   `gravityAt` at the game's own 0.1 s step and publishes the closest lunar approach, incrementally
   (a fixed step budget per frame) and only re-seeding after thrust, past the predicted encounter, or
-  when the result goes stale. It reproduces the certified flights' periselene to under 0.5 km,
-  which means it predicts what this game will do rather than the converged two-body answer.
-- `js/constants.js` (119 lines) — every physical constant: `RE`/`MU_E`, `RM`/`MU_M`/`SOI_M`,
+  when the result goes stale. Run headless from the recorded coast-start state it reproduces the
+  certified flights' periselene to about 1 km (332.9 / 204.4 / 78.3 km against the tool's
+  334 / 205 / 79), which means it predicts what this game will do rather than the converged two-body
+  answer.
+- `js/constants.js` (120 lines) — every physical constant: `RE`/`MU_E`, `RM`/`MU_M`/`SOI_M`,
   `MOON_DIST`, Earth spin, LC-39 position, the exponential-atmosphere parameters, `SPECS` (stage
   dry/fuel/thrust/Isp), `LAND_SAFE` (0.032 km/s), `WARPS`, `DTPHYS`, the SAS pitch program `TURN`,
   and `MOON_PHASE0` — the solved launch window (the Moon's angle along its orbit at MET 0 for which
@@ -150,9 +178,10 @@ Repo-wide convention (see `docs/reference/README.md`): **km, s, tonnes, kN**.
 - `js/audio.js` (62 lines) — engine and impact audio, gated on first keypress as browsers require.
 
 `window.game` is the debugging/test handle wired in `js/main.js`: `state()` returns a full readback
-(altitude over each body, radial velocity, speed, fuel, engine/SAS/warp state), and
+(altitude over each body, radial velocity, speed, fuel, engine/SAS/warp state, and `aero`: dynamic
+pressure, Mach, angle of attack, side load in g, static margin in m), and
 `ignite()`, `stage()`, `setSas(on, retro)`, `setThrottle(v)`, `warp(m)`, `camera(n)`,
-`ff(seconds)`, `nudge(ω)`, `teleport(pos, vel)` and `reset()` drive the game exactly as a player
+`ff(seconds)`, `nudge(ω)`, `teleport(pos, vel, simTime)` and `reset()` drive the game exactly as a player
 would, except `teleport`. `ff()` steps the shipped `physStep()` at 0.1 s without rendering, which is
 how the multi-day translunar coast is crossed in a test.
 
@@ -172,17 +201,17 @@ Measured (full breakdown in `docs/reference/mission-design.md`):
 
 | | |
 | --- | --- |
-| Parking orbit | 150 × 784 km at 7.3572 km/s |
-| TLI | to 10.4005 km/s inertial at coast start; apogee 384 202 km at the cutoff |
-| Lunar SOI entry | MET 232 147 s |
-| Periselene | 169 km at 2.4585 km/s Moon-relative |
-| LOI | 875 m/s to a lunar orbit with a = 1 957 km |
-| Deorbit | 51 m/s |
-| Powered descent | 2 003 m/s |
-| Touchdown | **20.1 m/s** against the 32 m/s `LAND_SAFE` limit |
-| Propellant spare | 7.6 t of CSM propellant unused |
-| Mission clock | 3.404 days |
-| Δv spent | 16 226 m/s vs an ideal staged budget of 17 090 m/s and a derived one-way requirement of 15 142 m/s |
+| Parking orbit | 151 × 760 km at 7.3706 km/s |
+| TLI | to 10.3938 km/s inertial at coast start; apogee 383 242 km at the cutoff command |
+| Lunar SOI entry | MET 236 191 s |
+| Periselene | 205 km at 2.4327 km/s Moon-relative |
+| LOI | 865 m/s at 218 km to a lunar orbit with a = 1 993 km |
+| Deorbit | 58 m/s |
+| Powered descent | 2 035 m/s |
+| Touchdown | **4.2 m/s** against the 32 m/s `LAND_SAFE` limit |
+| Propellant spare | 7.4 t of CSM propellant unused |
+| Mission clock | 3.461 days |
+| Δv spent | 16 245 m/s vs an ideal staged budget of 17 090 m/s and a derived one-way requirement of 15 142 m/s |
 
 `python3 tools/mission-math.py` recomputes the derived numbers (derived requirement, budgets, the
 atmosphere comparison) from the primary constants in `docs/reference/`; it exits 0 when script and
@@ -191,19 +220,30 @@ docs agree.
 None of this means the mission is easy. The vehicle has ~5 % margin between spent and ideal, the
 descent is only survivable because its guidance flies an altitude-bounded velocity envelope rather
 than trying to hover, and an earlier, slightly smaller stack reached the Moon and then hit the
-surface at 5 577 m/s with a dry tank. Margin on paper is not margin; the descent has to be flown.
+surface at 1 264 m/s with a dry tank. Nor is the window forgiving on both sides: 0.75e-3 rad of launch
+phase late arrives at a 110 km periselene and the same autopilot runs the tank down and hits at
+81 m/s. Margin on paper is not margin; the descent has to be flown.
 
 ## Known gaps
 
 - **The aim readout gives the closest approach, not the landing site.** `js/targeting.js` propagates
   the live state at the game's own 0.1 s step and the orbit panel prints the predicted periselene —
-  169 km on the shipped window, against the simulation's 169 km — but it answers "how hard will the
-  encounter be", not "where will I touch down", and it takes ~11 s of frames to settle after each
-  manoeuvre. Nothing marks the launch window itself; the player finds it by waiting and warping.
+  204 km on the shipped window, against the simulation's 205 km — but it answers "how hard will the
+  encounter be", not "where will I touch down", and it needs 865 frames of its step budget to finish
+  after each manoeuvre (counted headless; about 14 s at 60 fps, not re-timed in a browser). It is
+  green between 140 and 600 km, the band the tool's autopilot has landed from; the low edge is a
+  cliff (142 km lands at 4.8 m/s, 110 km is lost). Nothing marks the launch window itself; the
+  player finds it by waiting and warping.
 - **The Moon is a parametric circular orbit**, not an ephemeris: fixed 384 400 km radius, sidereal
   rate `MOON_RATE`, fixed 28.5° inclination, no eccentricity, no node regression.
-- **Drag is an exponential model** (8.5 km scale height), not USSA-1976/MSISE-90;
-  `docs/reference/atmosphere.md` quantifies the error. No structural loads are modelled either.
+- **The air is an exponential density model** (8.5 km scale height), not USSA-1976/MSISE-90;
+  `docs/reference/atmosphere.md` quantifies the error. The flight model on top of it is deliberately
+  coarse: textbook-order coefficients rather than wind-tunnel data, body lift lumped at the planform
+  centroid — which makes this vehicle statically stable where the real Saturn V was not and flew on
+  engine gimbal — and no heating. The one structural load is the lateral aerodynamic limit.
+- **The headless tool lands on the datum sphere.** In the browser contact is against the drawn
+  relief (`groundHeight` / `moonGroundHeight`); `tools/mission-sim.mjs` injects no terrain, so its
+  touchdown speed is for a Moon with no hills.
 - **No return leg.** The mission ends at touchdown: there is no lunar ascent stage and no TEI in the
   game, and `docs/reference/mission-design.md` lists the return to Earth as not modelled.
 
