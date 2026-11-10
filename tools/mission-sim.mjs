@@ -5,7 +5,7 @@
    the controls a player has: SAS prograde/retrograde, throttle, staging, manual attitude through
    the body-rate channel, and warp-equivalent stepping. Nothing in this file runs in the game.
 
-     node tools/mission-sim.mjs [game|landed|nova|retro] [--phase=<rad>] [--turn=verified|old] [--trace]
+     node tools/mission-sim.mjs [game|landed|nova|retro] [--phase=<rad>] [--turn=steep] [--trace]
 
    Default stack is 'game': the specs as js/constants.js ships them, so a plain run verifies the
    vehicle people will actually fly. --phase pins the Moon's angle at MET 0 instead of solving it.
@@ -84,7 +84,7 @@ const STACKS = {
          { dry: 110, fuel: 1500, thrust: 22000, isp: 430 },
          { dry: 25, fuel: 700, thrust: 6000, isp: 460 }],
   /* What shipped before the verified stack: 2,400 + 700 + 400 t. Reaches the Moon and lunar orbit,
-     then runs the tank dry on the descent — HARD IMPACT ON THE MOON AT 1233 m/s. */
+     then runs the tank dry on the descent — HARD IMPACT ON THE MOON AT 1264 m/s. */
   retro: [{ dry: 130, fuel: 2400, thrust: 46000, isp: 263 },
           { dry: 120, fuel: 700, thrust: 12000, isp: 340 },
           { dry: 20, fuel: 400, thrust: 3000, isp: 420 }],
