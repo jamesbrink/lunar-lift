@@ -175,6 +175,7 @@ export function initWorld(target) {
   atmo = new THREE.Mesh(new THREE.SphereGeometry(RE * ATMO_SHELL, 512, 256), new THREE.ShaderMaterial({
     uniforms: {
       uOrigin,
+      nightFloor: { value: 0.14 },
       glow: { value: new THREE.Color(0x63b7ff) },
       shellR: { value: RE * ATMO_SHELL },
       sunDir: { value: SUN_DIR.clone() }
@@ -193,7 +194,7 @@ export function initWorld(target) {
     fragmentShader: `
       uniform vec3 uOrigin;
       #define camAbs ( cameraPosition + uOrigin )
-      uniform vec3 glow; uniform float shellR; uniform vec3 sunDir;
+      uniform vec3 glow; uniform float shellR; uniform vec3 sunDir; uniform float nightFloor;
       varying vec3 vP; varying vec3 vN;
       #include <logdepthbuf_pars_fragment>
       void main() {
@@ -213,7 +214,10 @@ export function initWorld(target) {
            terminator with nothing above it — the band switched off across an angle the eye reads
            as a rendering error. Three degrees of smoothstep is still cel: the night side keeps a
            cold floor rather than going dark, so the limb reads as air on both sides. */
-        float day = 0.14 + 0.86 * smoothstep(-0.06, 0.20, dot(n, sunDir));
+        /* nightFloor: 0.14 seen from space (the limb reads as air on both sides), near zero from
+           inside the air at night — standing on the pad at midnight the floor alone, through a
+           horizon-long path, painted the whole sky slate grey and hid the stars. */
+        float day = nightFloor + ( 1.0 - nightFloor ) * smoothstep(-0.06, 0.20, dot(n, sunDir));
         float rim = pow(grazing, 3.4) * depth;
         /* Continuous. The earlier six-band quantisation (floor(rim·6)/6 mixed in near grazing)
            is what read as four broad horizontal steps in the 20 km sky — the pad view crosses
@@ -423,6 +427,7 @@ function updateShadowBox(pos) {
 /* The launch complex's local-to-world matrix (build units, z up, the vehicle's axis on the origin),
    for anything that has to reason in the pad's own frame — the camera's colliders do. It rides the
    planet's spin, which a frame built from the constant PAD_UP does not. */
+const _eyeUp = new THREE.Vector3();
 const _padAbs = new THREE.Matrix4();
 export function padMatrix() { return pad ? absolute(pad.matrixWorld, _padAbs) : null; }   // planet-centred: see js/origin.js
 
@@ -614,7 +619,13 @@ export function updateSky(pos, camPos) {
      dies far faster than the horizon glow (which the shell draws independently, from grazing
      rays). On the quadratic alone the 68 km sky measured (77,91,100) — a flat slate poster with
      the stars suppressed; on the quartic it goes deep indigo by 40 km and black by 100. */
-  const skyVis = vis * vis;
+  /* And the sky needs a sun. The air only glows where sunlight reaches it: with the sun under the
+     eye's horizon the dome, the background and the fog all go to night, through a short twilight
+     (the sun from 5 deg up to 8 deg down). Without this the ground went dark at midnight under a
+     noon-blue sky. */
+  const sunUp = _eyeUp.copy(pos).normalize().dot(SUN_DIR);
+  const day = THREE.MathUtils.smoothstep(sunUp, -0.14, 0.09);
+  const skyVis = vis * vis * day;
   if (sky) {
     sky.position.copy(pos);
     sky.material.uniforms.atmoMix.value = skyVis;
@@ -628,6 +639,7 @@ export function updateSky(pos, camPos) {
      applied to a 400 km sight line from a camera 100 km up it washed the whole planet to 60 % sky
      (measured: the coastlines vanished). Vertical optical depth dies with height far faster than a
      slant path length grows, so the clock reads camera altitude, not the vehicle's. */
+  if (atmo) atmo.material.uniforms.nightFloor.value = THREE.MathUtils.lerp(0.012, 0.14, THREE.MathUtils.smoothstep(Math.max(0, (camPos || pos).length() - RE), 30, 150));
   if (hazeU) {
     const camAlt = Math.max(0, (camPos || pos).length() - RE);
     const kMix = Math.exp(-camAlt / SKY_SCALE);
