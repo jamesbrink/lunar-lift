@@ -236,7 +236,7 @@ function stepParcel(i, h) {
              step as the drag below, so warp cannot blow it up). No gravity acts on them while
              there is air to float in — see the gate under this block. */
           const rhoN = Math.min(1, rho / RHO_SEA * 4);
-          const f = 1 / (1 + (pSmoke[i] === SM_STEAM ? 1.6 : 2.5) * rhoN * h);
+          const f = 1 / (1 + (pSmoke[i] === SM_STEAM ? 0.7 : 2.5) * rhoN * h);   // steam keeps its throw longer: it must roll out, not park
           const rise = (pSmoke[i] === SM_STEAM ? 0.009 : 0.0025) * (1 - f) / r;
           rx = rx * f + px * rise; ry = ry * f + py * rise; rz = rz * f + pz * rise;
           vx = rx - ax; vy = ry; vz = rz - az;

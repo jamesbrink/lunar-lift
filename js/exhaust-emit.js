@@ -133,7 +133,9 @@ const TRAIL_COLOUR = [0.80, 0.78, 0.74];
    ways along the trench (the pad's own y axis — js/pad.js runs it north-south through the launcher).
    Visual only: js/physics.js lights the stage at full thrust on the same step. */
 const STEAM_FOR = 2.6;
-const STEAM_COLOUR = [0.97, 0.97, 0.98];
+/* Near the smoke's own tone: at pure white the steam read as two foreign cotton balls parked in the
+   beige pad cloud. */
+const STEAM_COLOUR = [0.95, 0.94, 0.91];
 function spawnSteam(pos, since, simDt) {
   const m = WORLD.padMatrix();
   if (!m) return;
@@ -146,12 +148,15 @@ function spawnSteam(pos, since, simDt) {
   const wx = EARTH_SPIN * pos.z, wz = -EARTH_SPIN * pos.x;
   for (let c = 0; c < n; c++) {
     const side = Math.random() < 0.5 ? -1 : 1;
-    const out = (14 + 10 * Math.random()) * VS, v = 0.035 + 0.05 * Math.random();
+    /* Born all along each half of the trench and thrown at a spread of speeds, so it leaves as a
+       sheet that keeps travelling. Born at one spot at one speed it stopped as one clump per
+       trench mouth and sat there for its whole life — the 'two static clouds' after liftoff. */
+    const out = (9 + 34 * Math.random()) * VS, v = 0.03 + 0.11 * Math.random();
     _sp.copy(_up).multiplyScalar(RE + 0.003 + 0.004 * Math.random()).addScaledVector(_ty, side * out);
-    _ax.crossVectors(_ty, _up).multiplyScalar((Math.random() - .5) * 0.02);
+    _ax.crossVectors(_ty, _up).multiplyScalar((Math.random() - .5) * 0.045);
     _sp.addScaledVector(_ax, 0.5);
     _svv.set(wx, 0, wz).addScaledVector(_ty, side * v).add(_ax).addScaledVector(_up, 0.004 + 0.01 * Math.random());
-    spawnParticle(_sp, _svv, 4.5 + 3.5 * Math.random(), STEAM_COLOUR, 2.5 + 4 * Math.random(), SM_STEAM);
+    spawnParticle(_sp, _svv, 2.6 + 2.6 * Math.random(), STEAM_COLOUR, 2.5 + 4 * Math.random(), SM_STEAM);
   }
 }
 
