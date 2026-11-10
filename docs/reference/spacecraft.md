@@ -135,7 +135,7 @@ Honest caveats about this mapping, to keep the docs from overselling realism:
   on the 10 m body. The rest of the airframe's behaviour in air (drag rise, lift, fins, static margin,
   the 0.5 g side-load limit and its strain rule) is in [atmosphere.md](atmosphere.md). The model is statically stable with
   its fins; **the real Saturn V was not**, and flew on engine gimbal.
-- The mass and aerodynamic geometry (`GEOM` in `js/physics.js`) is the drawn vehicle's: S-1 42 m long
+- The mass and aerodynamic geometry (`GEOM` in `js/stations.js`) is the drawn vehicle's: S-1 42 m long
   and 10 m across, S-2 26 m, CSM body and adapter 22 m at 6.2 m across, command module 8.4 m — 99 m
   from tail to apex, in build units of 1.4 m. These are the game's proportions, not Apollo's.
 

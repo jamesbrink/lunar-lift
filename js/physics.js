@@ -75,7 +75,7 @@ export function warpCap() {
   if (altE < 70) return 4;                                   // in the air
   if (altM < 15) return 4; if (altM < 150) return 32;        // low over the Moon
   if (altE < 140) return 16;
-  return 1000;                                               // flight tops out here: 0.1 s substeps, 600 a frame
+  return 1000;                                               // flight tops out here: 0.1 s steps, at most 600 a frame
 }
 /* Called every frame: time drops back when the place demands it, and at the Moon's doorstep. */
 let wasNearMoon = false;

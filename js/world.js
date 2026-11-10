@@ -607,8 +607,8 @@ export function updateSky(pos, camPos) {
      that is what turned orbit into a grey poster: at 163 km the old linear mix left the whole
      sky measured-flat (69,82,90). The dome's alpha and the background therefore fall on the
      SQUARE of the physical mix: the pad keeps its full sky, the mesosphere goes dark fast, and
-     above ~150 km there is nothing between the eye and the stars. The fog keeps the un-squared
-     clock — near-field haze is optical depth, not mood. */
+     above ~150 km there is nothing between the eye and the stars. The fog's density stays on
+     this square (below) — near-field haze is optical depth, not mood. */
   const vis = _skyMix * _skyMix;
   /* ...and the dome + background fall on the QUARTIC. Apollo 8's "the sky is black even at
      30 000 feet" is the calibration: zenith optical depth is exp(−alt/8 km), so the sky OVERHEAD

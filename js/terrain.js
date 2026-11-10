@@ -26,7 +26,7 @@ import { surfaceInject, anchorPatch, setHole } from './surface.js';
      to win a depth fight against. Only the outer ring, past the hole, is lifted clear of the globe's
      chords.
    - Every value written to an attribute is finite; nonFinite() counts them and the harness asserts
-     zero (agents.md: one NaN in a vertex attribute is a black band no material can remove). */
+     zero (AGENTS.md: one NaN in a vertex attribute is a black band no material can remove). */
 
 const HALF = 220;                     // km to the rim
 const SEG = 320;                      // Earth: 321×321 vertices, ~12 m centre, ~1.4 km rim
@@ -205,7 +205,7 @@ function gridNormals(p) {
 }
 
 /* For the harness: non-finite floats per attribute, and the worst angle (degrees) between a normal
-   and the local vertical — a plain's normals must cluster at the vertical (agents.md). */
+   and the local vertical — a plain's normals must cluster at the vertical (AGENTS.md). */
 export function patchAudit(p) {
   const at = p.mesh.geometry.attributes, out = { nonFinite: {}, maxTiltDeg: 0 };
   for (const name of ['position', 'normal', 'sfUv']) {

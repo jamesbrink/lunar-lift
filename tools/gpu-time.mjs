@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /* GPU time per frame, by EXT_disjoint_timer_query_webgl2 around the whole rAF callback — the only
-   honest frame cost here (rAF deltas are vsync; see agents.md). Retina-sized buffer by default.
+   honest frame cost here (rAF deltas are vsync; see AGENTS.md). Retina-sized buffer by default.
 
      node tools/gpu-time.mjs [port=8078] [query-string]      e.g.  node tools/gpu-time.mjs 8078 '?scale=1'
 

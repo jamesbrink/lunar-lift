@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 /* Screenshot + console harness: flies the first eleven minutes through window.game and photographs
    the stations a reviewer looks at. Prints every console error AND warning (a dead ShaderMaterial
-   logs exactly one console.error, see agents.md) and rAF frame times (vsync-bound: a regression
+   logs exactly one console.error, see AGENTS.md) and rAF frame times (vsync-bound: a regression
    detector, not a GPU cost).
 
      npm i --no-save three@0.187.0 playwright

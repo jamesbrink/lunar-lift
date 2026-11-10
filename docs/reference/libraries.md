@@ -4,8 +4,11 @@ Two separate questions came up while building the physics:
 
 1. Should a JavaScript **orbital-mechanics / astrodynamics** library replace
    `js/physics.js`? **No.**
-2. Should an **ephemeris** library drive the real Moon and Sun? **Yes —
-   `astronomy-engine`, adopted.**
+2. Should an **ephemeris** library drive the real Moon and Sun? **Not so far.**
+   `astronomy-engine` was evaluated and would fit, but it is **not used**: nothing in
+   `index.html`'s importmap or `js/` imports it, the Moon is the parametric circular orbit in
+   `js/constants.js` (`moonPos` / `moonVel`), and the sun is a fixed inertial bearing in
+   `js/world.js`.
 
 ## 1. Orbital-mechanics libraries: none worth adopting
 
@@ -34,11 +37,11 @@ element-from-state conversion for the HUD (`a`, `e`, `i`, ap/pe), the patched-co
 for the transfer and capture budgets, and the SOI criterion `r = a(m/M)^0.4`, which
 reproduces the game's hand-set `SOI_M = 66 200` km as **66 184 km**.
 
-## 2. `astronomy-engine`: adopt, for real Moon and Sun
+## 2. `astronomy-engine`: evaluated, not adopted
 
 `astronomy-engine` (MIT, v2.1.19, no dependencies, Don Cross) covers exactly the piece the
 game cannot compute for itself: where the Moon and Sun actually are, and how the Earth has
-turned.
+turned. What follows is the evaluation and a plan. None of it is in the game.
 
 | Fact | Value |
 | --- | --- |
@@ -48,9 +51,9 @@ turned.
 | ESM entry | `./esm/astronomy.js` (412 KB uncompressed) |
 | browser build | `astronomy.browser.min.js` |
 | typings | `astronomy.d.ts` |
-| delivery | works from a CDN in the existing `importmap`; no npm install, keeping the game's zero-build-run setup |
+| delivery | would come from a CDN through the existing `importmap`, as three.js does; no npm install, keeping the game's zero-build-run setup |
 
-API verified in `/tmp/lltest/ephem.mjs` (run `cd /tmp/lltest && node ephem.mjs`):
+API verified on 2026-11-08 with a one-off script, `/tmp/lltest/ephem.mjs`, which is not in the repo:
 
 | Call | What it gives | Verified against |
 | --- | --- | --- |
@@ -65,7 +68,7 @@ Derived from the same samples: best-fit lunar plane normal over 30 days
 18.28–28.58° envelope and within 1° of the game's fixed 28.5°; out-of-plane scatter 656 km
 over a month. Details in [moon.md](moon.md).
 
-### Integration plan
+### Integration plan (not carried out)
 
 1. `import { GeoVector, Body, SiderealTime } from 'astronomy-engine'` via the importmap in
    `index.html`.
@@ -84,7 +87,7 @@ over a month. Details in [moon.md](moon.md).
    window is what makes the mission *teachable*. A toggle in `js/constants.js`
    (`EPHEMERIS = true|false`) is the clean cut-over, not a rewrite.
 
-### The risk this introduces, stated up front
+### The risk it would introduce
 
 The real Moon is eccentric (356,400–406,700 km) and its inclination to the equator is on a
 27.6° cycle here, so **some start dates are Δv-infeasible**: a launch into a 28.45° orbit can

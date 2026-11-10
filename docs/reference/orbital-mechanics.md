@@ -54,13 +54,15 @@ S.v.addScaledVector(a, dt);
 S.pos.addScaledVector(S.v, dt);      // position uses the NEW velocity
 ```
 
-`js/main.js` drives it: `simDt = dtReal · WARP`, split into
-`max(1, min(600, ceil(simDt / 0.1)))` substeps of `min(0.1, simDt / steps)`, so **h ≤ 0.1 s
-always** — a frame slow enough to want more than 600 substeps runs behind the warp instead of
-stepping coarser — and warp multiplies
-the number of physical steps rather than the size of one. Warp is therefore not a time
-dilation — the mission clock is real seconds at every warp setting, and ×1000 costs 167
-integration steps per frame instead of lying about the physics.
+`js/main.js` drives it with an accumulator: each frame banks `dtReal · WARP` and spends it in
+whole steps, so **h = `DTPHYS` = 0.1 s exactly** in flight — at most 600 steps a frame, and a frame
+slow enough to want more runs behind the warp instead of stepping coarser. Warp multiplies the
+number of physical steps rather than the size of one: the mission clock is real seconds at every
+warp setting, and ×1000 costs 167 integration steps per frame instead of lying about the physics.
+What is drawn between two steps is interpolated. The one exception is a cold vehicle held down on
+the pad, where the step is an exact rotation with the planet and the frame is a single step of any
+size. (Until commit 55f18fa the step was `min(0.1, simDt / steps)`, i.e. the frame time itself
+below ×6, and the trajectory depended on the display's refresh rate.)
 
 Why this is accurate enough: the orbit period is ~5,300 s, so one orbit is ~53,000 steps.
 Symplectic integrators keep the *secular* energy error bounded (it oscillates with the true

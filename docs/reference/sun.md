@@ -49,10 +49,11 @@ It is therefore excluded from the dynamics and used only for the sky and the lig
 
 ## Use in the game
 
-- **Direction.** `GeoVector(Body.Sun, date, true)` from `astronomy-engine` gives the
-  geocentric vector in AU; multiply by 149 597 870.7 km and map J2000 → game with the
-  matrix in [moon.md](moon.md). Until then `js/world.js` places the light from a fixed
-  direction plus the Earth's rotation, which is right for a single day-long mission.
+- **Direction.** The game does not use an ephemeris: `js/world.js` keeps the sun on one fixed
+  inertial bearing (`SUN_DIR`, about 37° above the pad's horizon at MET 0) and the planet turns
+  under it, which is right for a mission of a few days. If a real direction is ever wanted,
+  `GeoVector(Body.Sun, date, true)` from `astronomy-engine` gives the geocentric vector in AU;
+  multiply by 149 597 870.7 km and map J2000 → game with the matrix in [moon.md](moon.md).
 - **Sun angle drives the sky.** At 1 AU the irradiance is 1361 W/m²; the game's day/night
   terminator, specular highlight on the ocean, and the blue-sky colour (`SKY_DAY`) all key
   off `dot(surfaceNormal, sunDir)` — no inverse-square dimming is needed inside 1.4 million km.

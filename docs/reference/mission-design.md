@@ -262,9 +262,11 @@ physics of that date, every coast-derived number moved: SOI entry 234,479 → 23
 
 The mission still wins, and by about the same margin, because the landing physics was always at
 0.1 s; it was the coast geometry that had been drifting. The rule the tool now states in its own
-source: **the step is part of the trajectory.** `js/main.js` splits warp into substeps capped at
-`DTPHYS`, so 0.1 s is the only step the game can produce, and anything that certifies a mission has
-to use it.
+source: **the step is part of the trajectory.** `js/main.js` banks frame time × warp and spends it
+in whole `DTPHYS` steps, so 0.1 s is the only step the game takes in flight, and anything that
+certifies a mission has to use it. (That became true of the game itself only with commit 55f18fa:
+before it the browser stepped at the frame time below ×6, and the tool was certifying a step the
+page did not take at ×1.)
 
 `MOON_PHASE0` is solved for the `TURN` table in the same file. Change the pitch program without
 re-running the tool and TLI mis-aims by tens of thousands of km: `--turn=steep` (the reach-horizontal
@@ -361,7 +363,8 @@ and P, state at S-2 burnout 422.1 s after ignition:
 (The hour-long wait differs in the fourth figure — the Moon has moved 0.55° by then, which is the
 likely cause, not a measured one; the ascent is the same ascent.) Other things the same review fixed, read from the code rather than measured:
 SPACE on a liquid stage now zeroes the throttle as well as cutting the engine, so the next step
-does not relight it; CTRL cannot throttle the solid; and a substep is never longer than `DTPHYS`.
+does not relight it; CTRL cannot throttle the solid; and a step is never longer than `DTPHYS` (since commit 55f18fa it
+is exactly `DTPHYS` in flight).
 
 ## Coming home
 
@@ -464,8 +467,9 @@ calls `BRAKE NOW` when the height in hand falls below 1.15× that.
 - **Entry is ballistic.** The capsule trims at zero angle of attack, so it has no lift to steer
   with; that is why the lunar-return corridor is a degree wide and its survivable end is 14 g.
 - **The Moon is parametric** (`constants.js` `moonPos`/`moonVel`): a circular 384,400 km orbit in
-  the launch plane at the sidereal rate. Real ephemerides would come from `astronomy-engine`; see
-  [libraries.md](libraries.md) for why the integrator stays hand-written and what adopting it buys.
+  the launch plane at the sidereal rate. Real ephemerides would come from `astronomy-engine`, which
+  was evaluated and is not used; see [libraries.md](libraries.md) for why the integrator stays
+  hand-written and what adopting it would buy.
 - **Nothing marks the launch window.** The shipped phase now has 1.75e-3 rad of measured room on
   the late side and at least 3e-3 on the early side, but a player who launches at another time has
   only the aim readout to steer by.

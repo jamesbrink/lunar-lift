@@ -17,7 +17,7 @@ import { MOON_GLSL } from './surface-moon.js';
    Three rules hold the look and the cost together:
 
    - ONE function colours both ground meshes. The globe and the near patch run the same shader on
-     the same body-fixed point, so the two cannot disagree (agents.md: the patch and the globe are
+     the same body-fixed point, so the two cannot disagree (AGENTS.md: the patch and the globe are
      one surface). Where the patch is up, the globe's fragments under it are discarded before any
      of this runs: with a logarithmic depth buffer there is no early-z, and paying twice was most
      of the first measurement.
@@ -160,7 +160,7 @@ const surfaces = new Map();
 /* One per body: the shared textures, and two uniform sets — `globe` (anchor zero, carries the hole
    the patch covers) and `patch` (anchored, local precision). Textures are allocated at their final
    size with a neutral fill and written in place when the paint job lands: a late-bound sampler would
-   need a recompile behind a cache key (agents.md), a late-filled one needs nothing. */
+   need a recompile behind a cache key (AGENTS.md), a late-filled one needs nothing. */
 export function surface(key) {
   let S = surfaces.get(key);
   if (S) return S;

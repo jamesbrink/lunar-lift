@@ -79,8 +79,9 @@ Sampled hourly for 30 days from 2026-11-08 14:00 UTC:
 
 The game's parametric Moon is therefore accurate to a few percent in distance and ~1° in
 inclination for the dates checked, and the phase is a free parameter anyway. See
-[libraries.md](libraries.md) for the plan to swap in `astronomy-engine.GeoVector(Body.Moon, …)`
-for the real thing.
+[libraries.md](libraries.md) for what swapping in `astronomy-engine.GeoVector(Body.Moon, …)` would
+take. That has not been done: nothing in the game imports the library, and the check above was a
+one-off script outside the repo.
 
 ## Frame mapping, J2000 → game
 

@@ -12,7 +12,7 @@
      cartoon draws a bowl: a shadow crescent inside the sunward rim, a lit crescent on the far wall,
      and a floor one step off its plain. The crescents are two offset discs — the offset grows as
      the sun drops — so they are shapes, not gradients.
-   - Tone composes by MAX across craters (agents.md: a product across overlapping bowls goes black). */
+   - Tone composes by MAX across craters (AGENTS.md: a product across overlapping bowls goes black). */
 export const MOON_GLSL = /* glsl */`
 uniform float sfMareCut;
 

@@ -36,7 +36,7 @@ export const MOON_V = new THREE.Vector3().crossVectors(MOON_PLANE_N, MOON_U).nor
    first perigee after insertion arrives at the Moon instead of thousands of km past it. Solved
    numerically by tools/mission-sim.mjs (bisecting the first periselene altitude) at the step the
    game can actually run — see the note in that tool about coast step size: from the shipped
-   coast-start state the game's scheme reaches 346 km at 0.1 s substeps and an impact 475 km under
+   coast-start state the game's scheme reaches 346 km at 0.1 s steps and an impact 475 km under
    the surface at 1 s steps, so this number is only valid for the step it was solved at. The tool
    aims at AIM_PERI = 350 km, the middle of the band its autopilot lands from.
 
