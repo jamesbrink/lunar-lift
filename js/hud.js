@@ -3,6 +3,7 @@ import { G0, RE, RM, MU_E, MU_M, SOI_M, MOON_DIST, WARPS, SPECS, CAPSULE_MASS, L
 import { stages } from './saturn.js';
 import { S, getState, getSimTime, getEngineOn, getThrottle, getWarpIndex, getSasOn, getSasRetro, getDistFlown, getMaxQ, activeStage, orbitalElements, groundVel, bodyUp, navVel, surfaceAlt, aeroState, getAeroLoad, getRcsAssist, getHold, getStrain, getChute, getHeat, getCooking, isCapsule, HEAT_SHIELD, CHUTE, totalMass, landing, LOAD_LIMIT_STACK, LOAD_LIMIT_CSM } from './physics.js';
 import { getCamMode, getMapFocus } from './camera.js';
+import { isMuted } from './audio.js';
 import { initNavball, updateNavball } from './navball.js';
 import { aim, CORRIDOR } from './targeting.js';
 
@@ -269,6 +270,7 @@ export function updateHUD(dt) {
   $('warpInd').textContent = $('vWarp').textContent = wp === 0 ? 'PAUSED' : wp === 1 ? 'REAL TIME' : wp < 1 ? `SLOW ×${wp}` : `×${wp}`;
   $('clock').classList.toggle('paused', wp === 0);
   $('vCam').textContent = getCamMode().toUpperCase();
+  $('vSound').textContent = isMuted() ? 'OFF' : 'ON';
 
   /* Elements must be computed in one frame: near the Moon the position is lunar-relative, so the
      velocity has to be too. Passing inertial S.v with a Moon-centred position made the Ap/Pe

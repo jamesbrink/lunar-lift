@@ -517,6 +517,8 @@ These five are carried as written — rule and history together — because `js/
   integrated coast. In the flight view the ribbon thins and fades with distance from the eye
   (`ribbon.setFade`): at constant width a far leg read as a sharp corner.
 - The cockpit (throttle, navball, modes) and the stage list stay up on the map.
+- Sound is muted with N or the SOUND chip: one master gain in `js/audio.js` that every source
+  connects through, remembered in `localStorage` (the game plays the same without it).
 - Navball markers are KSP's: prograde ring with three spurs, retrograde ring with a cross, normal
   triangles, radial rings; a marker on the far side is pinned inside the rim with a chevron.
 - A dropped stage is stepped at `DTPHYS` like the ship and lives until it lands or is 5,000 km

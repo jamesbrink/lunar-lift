@@ -11,7 +11,7 @@ import { updateGear } from './gear.js';
 import { setOrigin } from './origin.js';
 import { setArmSwing } from './pad.js';
 import { initHUD, addLog, updateHUD, toggleMapView, resetMilestones, endOverlay, setWarn, hideOverlay, clearLog } from './hud.js';
-import { audioInit, audioEngine, audioThud, audioExplosion, audioWin, updateAudio } from './audio.js';
+import { audioInit, audioEngine, audioThud, audioExplosion, audioWin, updateAudio, toggleMute } from './audio.js';
 import { updateAim, resetAim, cutoffNow } from './targeting.js';
 import { initHalfRes, occlude, renderHalfRes } from './halfres.js';
 import { initPredictor, predict, updatePredictor, clearPredictor, predLine } from './predictor.js';
@@ -121,6 +121,7 @@ addEventListener('keydown', e => {
     if (k === 'enter' || k === ' ' || k === 'r') { resetMission(); return; }
     /* the flight is over, the view is not: camera, map, focus and help still answer */
     if (k === 'c') cycleCamera(); else if (k === 'm') setMap(toggleMapView()); else if (k === 'f') cycleMapFocus();
+    else if (k === 'n') addLog(toggleMute() ? 'SOUND OFF — N TO TURN IT BACK ON' : 'SOUND ON');
     else if (k === '?' || k === '/') document.getElementById('helpCard').classList.toggle('on');
     return;
   }
@@ -138,6 +139,7 @@ addEventListener('keydown', e => {
   else if (k === 'c') cycleCamera();
   else if (k === 'm') setMap(toggleMapView());
   else if (k === 'f') cycleMapFocus();
+  else if (k === 'n') addLog(toggleMute() ? 'SOUND OFF — N TO TURN IT BACK ON' : 'SOUND ON');
   else if (k === 'h') toggleHold();
   else if (k === 'g') deployChute();
   else if (k === 'r') resetMission();
