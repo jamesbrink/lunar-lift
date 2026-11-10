@@ -211,7 +211,7 @@ const CYCLONES = 26;
    dots at the limb. The sheet's ALPHA channel only says where the air is combed (the trade fields,
    the cold sectors); js/clouds.js draws the comb itself, analytically, STREET_KM from crest to
    crest, and lets it go where a pixel is too wide to hold it.
-   Features are composed by MAX (see agents.md): a product of overlapping systems goes to mud.
+   Features are composed by MAX (see AGENTS.md): a product of overlapping systems goes to mud.
    ------------------------------------------------------------------------------------------------ */
 export const SYN_Z = 4.5;
 export const STREET_KM = 42, STREET_AMP = 0.09, STREET_DEG = 20;     // spacing; depth, in the sheet's units; bearing off the parallel

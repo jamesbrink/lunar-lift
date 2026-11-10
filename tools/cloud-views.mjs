@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /* Weather harness: fixed cameras over the pad at fixed mission time, a screenshot of each, and the
-   GPU time of its passes from EXT_disjoint_timer_query_webgl2 (rAF deltas are vsync, see agents.md).
+   GPU time of its passes from EXT_disjoint_timer_query_webgl2 (rAF deltas are vsync, see AGENTS.md).
 
      node server.js 8101 &
      node tools/cloud-views.mjs <outdir> [port=8101] [only=pad,orbit,...] [--no-gpu] [--climb] [--flicker]
