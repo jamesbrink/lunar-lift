@@ -19,29 +19,17 @@
      paused, in flight    GATED at exactly 0: a paused frame must be a still.
    A separate static check lists coplanar, overlapping faces between meshes of the vehicle and the
    pad (the cause of z-fighting): GATED at 0 pairs. */
-import { chromium } from 'playwright';
-import { existsSync, readdirSync, mkdirSync, writeFileSync } from 'node:fs';
-import { homedir } from 'node:os';
+import { mkdirSync, writeFileSync } from 'node:fs';
+import { launch, openGame } from './lib/browser.mjs';
 const port = process.argv[2] || 8078, out = process.argv[3] || '';
 if (out) mkdirSync(out, { recursive: true });
-function findChrome() {
-  if (process.env.EXE) return process.env.EXE;
-  const cache = `${homedir()}/Library/Caches/ms-playwright`;
-  if (!existsSync(cache)) return undefined;
-  for (const d of readdirSync(cache).filter(n => /^chromium-\d+$/.test(n)).sort().reverse()) {
-    const p = `${cache}/${d}/chrome-mac-arm64/Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing`;
-    if (existsSync(p)) return p;
-  }
-}
-const browser = await chromium.launch({ headless: true, executablePath: findChrome(),
-  args: ['--headless=new', '--use-angle=metal', '--enable-gpu', '--ignore-gpu-blocklist'] });
+const browser = await launch();
 const differ = await browser.newPage({ viewport: { width: 1440, height: 900 } });
 let fail = 0;
 
 async function view(name, setup, gate) {
   const page = await browser.newPage({ viewport: { width: 1440, height: 900 } });
-  await page.goto(`http://127.0.0.1:${port}/index.html`, { waitUntil: 'networkidle' });
-  await page.waitForFunction(() => window.game, null, { timeout: 20000 });
+  await openGame(page, port);
   await page.waitForTimeout(6000);                          // let boot-time work (texture bakes, patch builds) finish
   await page.evaluate(setup);
   await page.evaluate(() => document.querySelectorAll('.hud,.panel,#views,#helpBtn').forEach(e => e.style.visibility = 'hidden'));
@@ -82,8 +70,7 @@ await view('paused in flight', async () => { game.ignite(); game.setSas(true, fa
 /* Static check: coplanar overlapping faces between different meshes of the vehicle and the pad. */
 {
   const page = await browser.newPage();
-  await page.goto(`http://127.0.0.1:${port}/index.html`, { waitUntil: 'networkidle' });
-  await page.waitForFunction(() => window.game, null, { timeout: 20000 });
+  await openGame(page, port);
   await page.waitForTimeout(4000);
   const pairs = await page.evaluate(async () => {
     const T = await import('three'), SAT = await import('/js/saturn.js'), P = await import('/js/predictor.js');
