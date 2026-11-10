@@ -174,8 +174,8 @@ export function buildPad(glowMap) {
        is the railing a person would stand at, drawn thick enough to hold a pixel at the pad camera,
        and eleven of them are what make the tower read as storeys rather than a lattice. */
     for (const sy of [-1, 1]) {
-      box(TW + 2.08, 0.2, 1.35, steel, TX, sy * (TW / 2 + 0.94), z + 0.58);
-      box(0.2, TW + 1.5, 1.35, steel, TX + sy * (TW / 2 + 0.94), 0, z + 0.58);
+      box(TW + 2.08, 0.2, 1.35, steel, TX, sy * (TW / 2 + 0.94), z + 0.63);   // underside z − 0.045: the crew arm's is at 67.9, and 0.58 put this one on it
+      box(0.2, TW + 1.5, 1.35, steel, TX + sy * (TW / 2 + 0.94), 0, z + 0.63);
     }
     if (z < ZT) {
       const bl = Math.hypot(TW, 8), ba = Math.atan2(TW, 8), zc = z + 4, flip = ((z / 8) & 1) ? 1 : -1;
@@ -216,8 +216,8 @@ export function buildPad(glowMap) {
      from the vehicle's axis at z 96, and the stack flew straight through it (found by
      js/colliders.js the first time the complex was made solid). */
   box(1.8, 34, 2.2, red, TX, 3, ZT + 4.6, true);
-  box(3.2, 5, 3, dark, TX, -12, ZT + 4.2, true);                       // counterweight
-  box(2.6, 3, 2.4, steel, TX + 2.2, 2.5, ZT + 2.4, true);              // operator's cab
+  box(3.2, 5, 3.4, dark, TX, -12, ZT + 4.3, true);                     // counterweight: top 6.0, over the jib's 5.7 (they shared 5.7 and fought)
+  box(2.6, 3, 2.4, steel, TX + 2.2, 2.5, ZT + 2.25, true);             // operator's cab: top 3.45, under the crane base's 3.6
   box(1.7, 2.6, 3.0, whiteMat, TX + 2.68, 0, 40, true);                // the lift car, on the shaft's face toward the stack
   box(0.12, 1.8, 0.9, dark, TX + 3.56, 0, 40.5);                       // its window
   box(0.5, 0.5, ZT - 14, dark, TX + 2.1, 1.75, (ZT + 10) / 2);         // guide rails either side of it

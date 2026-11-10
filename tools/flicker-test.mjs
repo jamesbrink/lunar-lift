@@ -112,7 +112,11 @@ await view('paused in flight', async () => { game.ignite(); game.setSas(true, fa
       const seen = new Set();
       for (const list of buckets.values()) for (let i = 0; i < list.length; i++) for (let j = i + 1; j < list.length; j++) {
         const p = list[i], q = list[j]; if (p.mid === q.mid) continue;
-        let ov = true; for (let k = 0; k < 3; k++) if (p.min[k] > q.max[k] - 0.05 || q.min[k] > p.max[k] - 0.05) ov = false;
+        if (p.n[0] * q.n[0] + p.n[1] * q.n[1] + p.n[2] * q.n[2] < 0) continue;      // back to back (a box standing on a deck): each hides the other, nothing fights
+        /* overlap by 0.05 u on every axis the faces HAVE extent in. A face lying in an axis plane has
+           none along its normal, and asking for 0.05 u of overlap there rejected every axis-aligned
+           pair: the scan read 0 while the crane's jib and counterweight shared a top (user screenshot). */
+        let ov = true; for (let k = 0; k < 3; k++) { const thin = Math.min(p.max[k] - p.min[k], q.max[k] - q.min[k]) < 0.1, m = thin ? -0.02 : 0.05; if (p.min[k] > q.max[k] - m || q.min[k] > p.max[k] - m) ov = false; }
         if (!ov) continue;
         const key = Math.min(p.mid, q.mid) + ':' + Math.max(p.mid, q.mid) + ':' + Math.round(p.d * 10);
         if (seen.has(key)) continue; seen.add(key);

@@ -232,7 +232,7 @@ function decal(r, z0, z1, az, width, map) {
   const finGeo = new THREE.ExtrudeGeometry(fin, { depth: .26, bevelEnabled: false }); finGeo.translate(0, 0, -.13);
   for (let i = 0; i < 4; i++) {
     const a = i * Math.PI / 2 + Math.PI / 4;
-    const f = cyl(0.35, 1.75, 6.6, -36.5, white, 20, true);   // −39.8 .. −33.2
+    const f = cyl(0.35, 1.75, 6.5, -36.45, white, 20, true);  // −39.7 .. −33.2: 0.1 u short of the fin's lower edge, which it shared a plane with
     f.position.x = Math.cos(a) * 2.75; f.position.y = Math.sin(a) * 2.75;
     g.add(f);
     const arm = new THREE.Group(); arm.rotation.z = a;
