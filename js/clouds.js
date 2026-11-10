@@ -256,8 +256,8 @@ void bandSegment( vec3 o, vec3 d, out float tA, out float tB ) {
      FLOOR (the inner sphere) for rays that end on it. Without the floor a camera between 4 and 11 km
      saw clear air beneath it and cloud shadows on the sea with nothing casting them. */
 const FACE = /* glsl */`
-  float eye2 = dot( cameraPosition, cameraPosition );
-  float Ae = dot( cameraPosition, normalize( vWorld - cameraPosition ) );
+  float eye2 = dot( camAbs, camAbs );
+  float Ae = dot( camAbs, normalize( vWorld - camAbs ) );
   bool grounded = Ae < 0.0 && Ae * Ae - ( eye2 - GROUND_R * GROUND_R ) > 0.0;
   #ifdef INNER
     if ( !gl_FrontFacing || eye2 <= BAND_IN * BAND_IN || eye2 >= SHELL_R * SHELL_R || !grounded ) discard;
@@ -269,13 +269,20 @@ const FACE = /* glsl */`
 
 const SHELL_VERT = /* glsl */`
 #include <common>
+/* The weather is computed in the EARTH-FIXED frame. The scene is drawn eye-relative (js/origin.js),
+   so modelMatrix * position is a small exact vector from the eye; fixRot turns it into the planet's
+   own axes and eyeFixed (the eye in that frame, from doubles in JS) puts it on the globe. In the
+   inertial frame the pad moves 409 m/s and the cloud lookup re-quantised every frame: 2.4 m of
+   float32 in uv, half a pixel of cloud edge at half resolution — the flicker on every outline. */
+uniform mat3 fixRot;
+uniform vec3 eyeFixed;
 #include <logdepthbuf_pars_vertex>
 
 varying vec3 vWorld;
 varying vec2 vUvC;
 
 void main() {
-  vWorld = ( modelMatrix * vec4( position, 1.0 ) ).xyz;
+  vWorld = eyeFixed + fixRot * ( modelMatrix * vec4( position, 1.0 ) ).xyz;
   vUvC   = uv;
   gl_Position = projectionMatrix * modelViewMatrix * vec4( position, 1.0 );
   #include <logdepthbuf_vertex>
@@ -287,10 +294,12 @@ const MARCH_MAIN = /* glsl */`
 void main() {
 ` + FACE + /* glsl */`
   vec3 n = normalize( vWorld );
-  vec3 o = cameraPosition;
+  vec3 o = camAbs;
   vec3 d = normalize( vWorld - o );
   float pix = length( fwidth( d ) );        // radians across one pixel of THIS pass
-  setColumn( vUvC, n );
+  /* uv from the Earth-fixed direction, not from the mesh's own uv: the shell never turns, so its uv
+     is inertial and the planet would slide under the weather at 409 m/s. Same map as the shade. */
+  setColumn( vec2( atan( n.z, -n.x ) / PI2, 1.0 - acos( clamp( n.y, -1.0, 1.0 ) ) / PI ), n );
   float tA, tB;
   bandSegment( o, d, tA, tB );
   float len = tB - tA;
@@ -420,7 +429,10 @@ void main() {
         float ls = lodOf( fkm, VEIL_TEX_KM );
         float streak = mix( textureLod( cloudCells, uvc * VEIL_REP + driftV, ls ).r, 0.5, smoothstep( 3.0, 5.0, ls ) );
         float mu = abs( dot( normalize( pc ), d ) );
-        veil = clamp( sheet * ( 0.35 + 0.9 * streak ), 0.0, 1.0 ) * exp( -min( tc, 10.0 / max( mu, 0.02 ) ) / HAZE_KM );
+/* Switched off: seen from above the veil is a fan of pale parallel streaks lying over sea and land
+           that reads as a rendering fault, not as cirrus (user screenshot, ~40 km looking down). The
+           sheet stays computed so turning it back on is this one factor. */
+        veil = 0.0 * clamp( sheet * ( 0.35 + 0.9 * streak ), 0.0, 1.0 ) * exp( -min( tc, 10.0 / max( mu, 0.02 ) ) / HAZE_KM );
       }
     }
   }
@@ -433,6 +445,8 @@ void main() {
    everything opaque. This is where the four numbers become a drawing. */
 const LOOKUP_FRAG = /* glsl */`
 #include <common>
+uniform vec3 eyeFixed;
+#define camAbs eyeFixed
 #include <logdepthbuf_pars_fragment>
 #define SHELL_R ${R_OUT.toFixed(1)}
 #define BAND_IN ${R_IN.toFixed(1)}
@@ -481,6 +495,8 @@ void main() {
 const VEIL_REP = [40, 320];             // the tile stretched 16:1 along longitude: streaks
 const SHELL_FRAG = /* glsl */`
 #include <common>
+uniform vec3 eyeFixed;
+#define camAbs eyeFixed
 #include <logdepthbuf_pars_fragment>
 ` + defines() + /* glsl */`
 #define VEIL_REP vec2( ${VEIL_REP[0]}.0, ${VEIL_REP[1]}.0 )
@@ -547,7 +563,8 @@ export function makeWeather() {
     cloudNight: { value: CLOUD_NIGHT },
     cloudHaze: { value: CLOUD_HAZE },
     shadeStrength: { value: SHADE },
-    sunWorld: { value: new THREE.Vector3(0, 1, 0) },
+    sunWorld: { value: new THREE.Vector3(0, 1, 0) },     // in the Earth-fixed frame, like everything here
+    fixRot: { value: new THREE.Matrix3() }, eyeFixed: { value: new THREE.Vector3(0, 7000, 0) },
   };
 }
 
@@ -561,7 +578,7 @@ export function makeCloudShell(U) {
   });
   /* The lookup: what the main camera draws. fog: false — a planet-scale body, and FogExp2 measured
      from the camera would erase it in the system view 20 000 km out. */
-  const inkU = { skyMap: sky.skyMap, skyScreen: sky.skyScreen };
+  const inkU = { skyMap: sky.skyMap, skyScreen: sky.skyScreen, fixRot: U.fixRot, eyeFixed: U.eyeFixed };
   for (const k of ['sunWorld', 'cloudLit', 'cloudMid', 'cloudShade', 'cloudDusk', 'cloudNight', 'cloudHaze']) inkU[k] = U[k];
   const lookup = (defs) => new THREE.ShaderMaterial({
     uniforms: inkU, defines: defs, vertexShader: SHELL_VERT, fragmentShader: LOOKUP_FRAG,
@@ -591,9 +608,10 @@ export function cloudShadeInject(sh, U) {
   for (const key of ['cloudCells', 'cloudMacro', 'drift1', 'drift2', 'drift3', 'macroRide',
     'shadeStrength', 'sunWorld']) sh.uniforms[key] = U[key];
   sh.vertexShader = sh.vertexShader
-    .replace('#include <common>', '#include <common>\nvarying vec3 vShadeW;')
+    .replace('#include <common>', '#include <common>\nuniform mat3 fixRot;\nuniform vec3 eyeFixed;\nvarying vec3 vShadeW;')
     .replace('#include <project_vertex>',
-      '#include <project_vertex>\n  vShadeW = ( modelMatrix * vec4( transformed, 1.0 ) ).xyz;');
+      '#include <project_vertex>\n  vShadeW = eyeFixed + fixRot * ( modelMatrix * vec4( transformed, 1.0 ) ).xyz;');
+  sh.uniforms.fixRot = U.fixRot; sh.uniforms.eyeFixed = U.eyeFixed;
   sh.fragmentShader = sh.fragmentShader
     .replace('#include <common>', '#include <common>\n' + SHADE_FRAG)
     /* before fog_fragment: the shade darkens the ground, and any haze laid over it afterwards is
@@ -608,12 +626,20 @@ export function cloudShadeInject(sh, U) {
    has nothing left for the metres. */
 export function updateWeather(mesh, simT, spin, sunWorld) {
   const U = mesh.material.uniforms;
-  const ride = spin / (2 * Math.PI), fr = (x) => x - Math.floor(x);
+  /* No spin term: the shaders already work in the planet's frame, so the drift is the wind alone. */
+  const ride = 0, fr = (x) => x - Math.floor(x);
   const wind = (ms, rep) => -(ride + simT * ms / 1000 / KM_PER_U) * rep;      // tile-uv, eastward drift
   U.drift1.value.set(fr(wind(WIND1, REP1)), fr(simT * 1.0e-6));
   U.drift2.value.set(fr(wind(WIND2, REP2)), fr(-simT * 1.0e-5));
   U.drift3.value.set(fr(simT * 2.5e-5), fr(wind(WIND3, REP3)));              // axes swapped: u rides in y
   U.driftV.value.set(fr(wind(30, VEIL_REP[0])), 0);
   U.macroRide.value = fr(-ride - simT * 4 / 1000 / KM_PER_U);
-  U.sunWorld.value.copy(sunWorld).normalize();
+  U.sunWorld.value.copy(sunWorld).normalize().applyAxisAngle(Y_AXIS, -spin);
+  const c = Math.cos(spin), sn = Math.sin(spin);
+  U.fixRot.value.set(c, 0, -sn, 0, 1, 0, sn, 0, c);                          // RotY(−spin): inertial → Earth-fixed
+  lastSpin = spin;
 }
+const Y_AXIS = new THREE.Vector3(0, 1, 0);
+let lastSpin = 0;
+/* Once per frame, with the eye the frame is drawn from (the same one js/origin.js uses). */
+export function setWeatherEye(U, eye) { U.eyeFixed.value.copy(eye).applyAxisAngle(Y_AXIS, -lastSpin); }

@@ -154,6 +154,60 @@ const puffs = new THREE.Points(puffGeo, puffMat), lights = new THREE.Points(ligh
 for (const o of [puffs, lights]) { o.frustumCulled = false; o.castShadow = false; o.layers.set(LAYER_FX); }
 puffs.renderOrder = 3; lights.renderOrder = 5;       // js/flame.js's punch goes between them, at 4
 
+/* The smoke's shadow. Points do cast into three's shadow map, but only objects on the main camera's
+   layer are considered and the puffs live on the half-resolution FX layer — so a second Points on
+   layer 0 shares the puff geometry and exists only for the light: its own material throws every
+   vertex off screen, and its customDepthMaterial draws each puff as a disc into the sun's map at
+   its true size (the shadow camera is orthographic: projectionMatrix[0][0] is NDC per km). Flame
+   'lights' cast nothing. Cost: one extra draw of the live puffs in the shadow pass. */
+const casterMat = new THREE.ShaderMaterial({
+  vertexShader: /* glsl */`
+    #include <common>
+    #include <logdepthbuf_pars_vertex>
+    void main() {
+      gl_Position = vec4(2.0, 2.0, 2.0, 1.0);
+      #include <logdepthbuf_vertex>
+    }`,
+  fragmentShader: /* glsl */`
+    #include <common>
+    #include <logdepthbuf_pars_fragment>
+    void main() {
+      #include <logdepthbuf_fragment>
+      gl_FragColor = vec4(0.0);
+    }`,
+  colorWrite: false, depthWrite: false, depthTest: false,
+});
+const shadowMat = new THREE.ShaderMaterial({
+  uniforms: { uMap: { value: 4096 } },
+  vertexShader: /* glsl */`
+    #include <common>
+    #include <logdepthbuf_pars_vertex>
+    attribute float size;
+    attribute float lit;
+    uniform float uMap;
+    void main() {
+      vec4 mv = modelViewMatrix * vec4(position, 1.0);
+      gl_Position = projectionMatrix * mv;
+      /* 0.8 of the drawn diameter: the lobes do not fill their square. Self-lit parcels (fire)
+         cast nothing. */
+      float px = size * 0.8 * projectionMatrix[0][0] * 0.5 * uMap;
+      gl_PointSize = fract(lit) > 0.5 ? 0.0 : clamp(px, 0.0, 256.0);
+      if (gl_PointSize < 0.75) gl_Position = vec4(2.0, 2.0, 2.0, 1.0);
+      #include <logdepthbuf_vertex>
+    }`,
+  fragmentShader: /* glsl */`
+    #include <common>
+    #include <logdepthbuf_pars_fragment>
+    void main() {
+      vec2 d = gl_PointCoord - 0.5;
+      if (dot(d, d) > 0.25) discard;
+      #include <logdepthbuf_fragment>
+      gl_FragColor = vec4(1.0);     // three 0.187 reads the shadow map's depth attachment; colour is unused
+    }`,
+});
+const casters = new THREE.Points(puffGeo, casterMat);
+casters.frustumCulled = false; casters.castShadow = true; casters.customDepthMaterial = shadowMat; casters.renderOrder = -1;
+
 const _dbSize = new THREE.Vector2(), _up = new THREE.Vector3(), _moon = new THREE.Vector3();
 /* World-space attenuation, so a parcel is its true diameter at any zoom, and the sun as this camera
    sees it. Recomputed on render: this module does not own the camera. */
@@ -164,7 +218,7 @@ puffs.onBeforeRender = (renderer, sc, cam) => {
   puffMat.uniforms.uSun.value.copy(SUN_DIR).transformDirection(cam.matrixWorldInverse);
 };
 
-export function initExhaustDraw(scene) { scene.add(puffs); scene.add(lights); }
+export function initExhaustDraw(scene) { scene.add(puffs); scene.add(lights); scene.add(casters); }
 export function clearExhaustDraw() { puffGeo.setDrawRange(0, 0); lightGeo.setDrawRange(0, 0); }
 
 /* Draw-call anchor for the Float32 mirror. At lunar distance (~384,000 km) one unit in the last place

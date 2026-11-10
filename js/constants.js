@@ -78,7 +78,10 @@ export const PAD_ANGULAR = new THREE.Vector3().crossVectors(SPIN_AXIS, PAD_POS).
 /* atmosphere: exponential density with an 8.5 km scale height. CD_AREA is the full stack's drag
    area nose-on below Mach 0.8; js/aero.js builds the Mach rise, angle of attack and lift on it. */
 export const ATMO_H = 8.5, RHO0 = 1.225, CD_AREA = 28;   // kg/m³, m²
-export const DTPHYS = 0.1, WARPS = [1, 2, 4, 8, 16, 32, 64, 128, 256, 512, 1000];
+/* Time warp steps. 0 is paused and 0.25 is slow motion; WARP_ONE is where a mission starts. Warp
+   multiplies the NUMBER of 0.1 s substeps, never their size; below x1 the substep is shorter. */
+export const DTPHYS = 0.1, WARPS = [0, 0.25, 1, 2, 4, 8, 16, 32, 64, 128, 256, 512, 1000];
+export const WARP_ONE = WARPS.indexOf(1);
 
 /* SAS pitch program. A real launch vehicle does not chase "prograde" off the pad: it
    holds the local vertical, then sweeps the nose toward the launch-plane east direction

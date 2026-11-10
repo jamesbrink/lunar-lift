@@ -85,6 +85,7 @@ const _diff = new THREE.Vector3(), _target = new THREE.Vector3();
 const X_AXIS = new THREE.Vector3(1, 0, 0);
 const _ax0 = new THREE.Vector3(), _ax1 = new THREE.Vector3(), _ax2 = new THREE.Vector3();
 const _moon = new THREE.Vector3(), desired = new THREE.Vector3();
+const _look = new THREE.Matrix4();
 const _inv = new THREE.Matrix4(), _loc = new THREE.Vector3(), _c = new THREE.Vector3(), _gv = new THREE.Vector3();
 const Y_AXIS = new THREE.Vector3(0, 1, 0), Z_AXIS = new THREE.Vector3(0, 0, 1);
 
@@ -421,7 +422,11 @@ export function updateCamera(dt) {
   collide(camPos, mode === 'map');
   camTgt.copy(_target);                                          // the ship is the centre of the frame, exactly
   camUp.lerp(_up, k).normalize();
-  camera.position.copy(camPos); camera.up.copy(camUp); camera.lookAt(camTgt);
+  /* Orientation by hand, not camera.lookAt: the camera is a child of the scene, whose position is the
+     floating origin (js/origin.js), and Object3D.lookAt would aim from the shifted world position
+     at an unshifted target. */
+  camera.position.copy(camPos); camera.up.copy(camUp);
+  camera.quaternion.setFromRotationMatrix(_look.lookAt(camPos, camTgt, camUp));
   if (Math.abs(wantFov - camera.fov) > 0.01) {
     camera.fov += (wantFov - camera.fov) * (placedFov ? 1 - Math.exp(-2 * dt) : 1); placedFov = true;
     camera.updateProjectionMatrix();

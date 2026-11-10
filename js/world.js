@@ -8,9 +8,10 @@ import { applyRelief, sampleGrid, reliefField, coastField, paintedCanvas } from 
 import { fineRelief } from './padsite.js';
 import { surfaceInject, setSun } from './surface.js';
 import { makePatch, attachEarthPatch, updatePatch, makeMoonPatch, attachMoonPatch, updateMoonPatch, hidePatch } from './terrain.js';
-import { makeWeather, makeCloudShell, updateWeather, cloudShadeInject } from './clouds.js';
+import { makeWeather, makeCloudShell, updateWeather, cloudShadeInject, setWeatherEye } from './clouds.js';
 import { makeHaze, hazeInject, updateHaze } from './haze.js';
 import { buildPad } from './pad.js';
+import { uOrigin, absolute } from './origin.js';
 
 /* distances are km, angles rad — everything here lives at real planetary scale */
 const SUN_RANGE = 1500;            // km the directional light sits off the tracked vehicle
@@ -173,6 +174,7 @@ export function initWorld(target) {
      each fragment — long tangential sight lines glow, the thin overhead shell from the ground does not. ---- */
   atmo = new THREE.Mesh(new THREE.SphereGeometry(RE * ATMO_SHELL, 512, 256), new THREE.ShaderMaterial({
     uniforms: {
+      uOrigin,
       glow: { value: new THREE.Color(0x63b7ff) },
       shellR: { value: RE * ATMO_SHELL },
       sunDir: { value: SUN_DIR.clone() }
@@ -180,26 +182,29 @@ export function initWorld(target) {
     vertexShader: `
       varying vec3 vP; varying vec3 vN;
       #include <common>
+      uniform vec3 uOrigin;
       #include <logdepthbuf_pars_vertex>
       void main() {
-        vP = (modelMatrix * vec4(position, 1.0)).xyz;
+        vP = (modelMatrix * vec4(position, 1.0)).xyz + uOrigin;
         vN = normalize((modelMatrix * vec4(normal, 0.0)).xyz);
         gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
         #include <logdepthbuf_vertex>
       }`,
     fragmentShader: `
+      uniform vec3 uOrigin;
+      #define camAbs ( cameraPosition + uOrigin )
       uniform vec3 glow; uniform float shellR; uniform vec3 sunDir;
       varying vec3 vP; varying vec3 vN;
       #include <logdepthbuf_pars_fragment>
       void main() {
         #include <logdepthbuf_fragment>
         vec3 n = normalize(vN);
-        vec3 eye = normalize(cameraPosition - vP);
+        vec3 eye = normalize(camAbs - vP);
         float grazing = 1.0 - abs(dot(n, eye));                 // 0 overhead, 1 at the limb
         // intersect the sight line with the shell and take the segment still ahead of this fragment
-        vec3 d = normalize(vP - cameraPosition);
-        float a = dot(d, cameraPosition);
-        float b = dot(cameraPosition, cameraPosition) - shellR * shellR;
+        vec3 d = normalize(vP - camAbs);
+        float a = dot(d, camAbs);
+        float b = dot(camAbs, camAbs) - shellR * shellR;
         float disc = max(a * a - b, 0.0);
         float t1 = -a - sqrt(disc), t2 = -a + sqrt(disc);
         float path = max(t2 - max(t1, 0.0), 0.0);                // km of air in front of this point
@@ -228,6 +233,7 @@ export function initWorld(target) {
      reference/cartoon-art-direction.md). ShaderMaterial: logdepthbuf chunks are mandatory. ---- */
   sky = new THREE.Mesh(new THREE.SphereGeometry(SKY_R, 32, 16), new THREE.ShaderMaterial({
     uniforms: {
+      uOrigin,
       zenith: { value: new THREE.Color(0x1e5cab) },
       band: { value: new THREE.Color(0x9fc4de) },
       glowC: { value: new THREE.Color(0xfff0cf) },
@@ -237,13 +243,16 @@ export function initWorld(target) {
     vertexShader: `
       varying vec3 vP;
       #include <common>
+      uniform vec3 uOrigin;
       #include <logdepthbuf_pars_vertex>
       void main() {
-        vP = (modelMatrix * vec4(position, 1.0)).xyz;
+        vP = (modelMatrix * vec4(position, 1.0)).xyz + uOrigin;
         gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
         #include <logdepthbuf_vertex>
       }`,
     fragmentShader: `
+      uniform vec3 uOrigin;
+      #define camAbs ( cameraPosition + uOrigin )
       uniform vec3 zenith; uniform vec3 band; uniform vec3 glowC;
       uniform vec3 sunDir; uniform float atmoMix;
       varying vec3 vP;
@@ -254,8 +263,8 @@ export function initWorld(target) {
            'gl_FragDepth' syntax error" in the page console, unnoticed because a missing dome
            looks like space), which is why daytime views had no sky wash. */
         #include <logdepthbuf_fragment>
-        vec3 dir = normalize(vP - cameraPosition);
-        float up = dot(dir, normalize(cameraPosition));      // elevation above the local horizon
+        vec3 dir = normalize(vP - camAbs);
+        float up = dot(dir, normalize(camAbs));      // elevation above the local horizon
         float t = pow(clamp(up, 0.0, 1.0), 0.45);            // pale band hugs the horizon
         vec3 col = mix(band, zenith, t);
         float sd = max(dot(dir, sunDir), 0.0);
@@ -414,7 +423,8 @@ function updateShadowBox(pos) {
 /* The launch complex's local-to-world matrix (build units, z up, the vehicle's axis on the origin),
    for anything that has to reason in the pad's own frame — the camera's colliders do. It rides the
    planet's spin, which a frame built from the constant PAD_UP does not. */
-export function padMatrix() { return pad ? pad.matrixWorld : null; }
+const _padAbs = new THREE.Matrix4();
+export function padMatrix() { return pad ? absolute(pad.matrixWorld, _padAbs) : null; }   // planet-centred: see js/origin.js
 
 /* main.js calls this every frame: the shadow frustum travels with the vehicle, so the same sun
    shades the pad at liftoff and the lander on the moon. The near terrain patch travels with it
@@ -589,6 +599,7 @@ export function setWeatherVisible(on) {
 }
 
 export function updateSky(pos, camPos) {
+  if (weather && camPos) setWeatherEye(weather, camPos);
   const alt = Math.max(0, pos.length() - RE);
   _skyMix = Math.exp(-alt / SKY_SCALE);
   /* One part in eight of pale blue MIXED IN LINEAR SPACE already renders as 30 %-grey sRGB —

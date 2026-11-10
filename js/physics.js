@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { airDensity, aeroForce, aeroState, ATMO_TOP, CN_BODY, machDrag, soundSpeed } from './aero.js';
 import { padHit, ARM_TIME } from './colliders.js';
-import { RE, MU_E, RM, MU_M, SOI_M, PAD_UP, PAD_POS, PAD_ANGULAR, VS, CD_AREA, WARPS, LAND_SAFE, SAFE_EARTH, SPECS, CAPSULE_MASS, EARTH_SPIN, SPIN_AXIS, PAD_EAST, MOON_DIST, TURN, moonPos, moonVel } from './constants.js';
+import { RE, MU_E, RM, MU_M, SOI_M, PAD_UP, PAD_POS, PAD_ANGULAR, VS, CD_AREA, WARPS, WARP_ONE, LAND_SAFE, SAFE_EARTH, SPECS, CAPSULE_MASS, EARTH_SPIN, SPIN_AXIS, PAD_EAST, MOON_DIST, TURN, moonPos, moonVel } from './constants.js';
 
 /* ---------------- injected dependencies (see initPhysics) ----------------
    hooks:      addLog(msg, cls), showEndOverlay(title, body, btn)
@@ -21,7 +21,7 @@ export function initPhysics(deps) {
 /* ---------------- state ---------------- */
 let state = 'pad';               // pad | flying | won | lost
 let engineOn = false, throttle = 0, targetThrottle = 0;
-let sasOn = false, sasRetro = false, simTime = 0, warpIdx = 0;
+let sasOn = false, sasRetro = false, simTime = 0, warpIdx = WARP_ONE;
 let maxQ = 0, loggedStageOut = [false, false, false], flightStarted = false;
 let tliLogged = false, loiLogged = false;
 let turnHintLogged = false, loggedMaxQ = false;
@@ -69,7 +69,7 @@ export const pushTrail = p => { trail.push(p.clone()); if (trail.length > 400) t
 export function cycleWarp(delta) {
   if (delta > 0) warpIdx = Math.min(WARPS.length - 1, warpIdx + 1);
   else warpIdx = Math.max(0, warpIdx - 1);
-  hooks.addLog(`TIME WARP ×${WARPS[warpIdx]}`);
+  hooks.addLog(WARPS[warpIdx] === 0 ? 'PAUSED — ] TO RESUME' : WARPS[warpIdx] < 1 ? `SLOW MOTION ×${WARPS[warpIdx]}` : `TIME WARP ×${WARPS[warpIdx]}`);
 }
 
 /* Attitude hold: stop every rotation and keep the nose where it is. The same rate servo as SAS,
@@ -742,7 +742,7 @@ export function resetSim() {
   lesSeparated = false;
   S.pos.copy(PAD_POS); S.v.copy(PAD_ANGULAR); S.q.setFromUnitVectors(UP_REF, PAD_UP);
   engineOn = false; throttle = targetThrottle = 0;
-  sasOn = false; sasRetro = false; simTime = 0; warpIdx = 0; maxQ = 0;
+  sasOn = false; sasRetro = false; simTime = 0; warpIdx = WARP_ONE; maxQ = 0;
   tliLogged = loiLogged = loggedMaxQ = turnHintLogged = false; distFlown = 0; trail = [];
   flightStarted = false; state = 'pad'; omega.set(0, 0, 0); I0 = null; holdOn = false; armSwing = 0; tRelease = null; aeroState.q = aeroState.mach = aeroState.aoa = aeroState.nBody = aeroState.nFin = 0; gLoad = 0; gOver = 0; chute = 0; chuteOpen = 0; heat = 0; cooking = 0; rcsAssist = true; aeroLoad = 0; strain = 0;
 }

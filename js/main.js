@@ -7,6 +7,7 @@ import { S, keys, initPhysics, getState, getSimTime, setSimTime, getEngineOn, ge
 import { camera, initCamera, cycleCamera, updateCamera, resetCameraView, setCamMode, setCamDist, setCamView, resizeCamera, setMap, isMap, cycleMapFocus } from './camera.js';
 import { initMapView, updateMapView } from './mapview.js';
 import { updateChutes } from './chutes.js';
+import { setOrigin } from './origin.js';
 import { setArmSwing } from './pad.js';
 import { initHUD, addLog, updateHUD, toggleMapView, endOverlay, setWarn, hideOverlay, clearLog } from './hud.js';
 import { audioInit, audioEngine, audioThud, audioExplosion, audioWin, updateAudio } from './audio.js';
@@ -73,6 +74,7 @@ initPhysics({
 });
 initPredictor({ scene, groundE: groundHeight, groundM: moonGroundHeight, setWarn });
 initCamera(canvas, addLog);
+scene.add(camera);                        // so it takes the floating-origin shift with everything else
 initMapView(scene);
 initHUD({ resetMission });
 initHalfRes(scene, plumeLive);
@@ -101,6 +103,7 @@ addEventListener('keydown', e => {
   else if (k === 'h') toggleHold();
   else if (k === 'g') deployChute();
   else if (k === 'r') resetMission();
+  else if (k === 'escape' || k === 'pause') { setWarpIndex(WARPS[getWarpIndex()] === 0 ? WARPS.indexOf(1) : 0); addLog(WARPS[getWarpIndex()] === 0 ? 'PAUSED — ESC TO RESUME' : 'RESUMED'); }
 });
 addEventListener('keyup', e => { keys[e.key.toLowerCase()] = false; });
 addEventListener('blur', () => { for (const k in keys) keys[k] = false; });
@@ -116,7 +119,10 @@ function frame() {
   const dtReal = Math.min(.1, (now - last) / 1000); last = now;
   try {
 
-  if (getState() === 'pad' || getState() === 'flying') {
+  /* Paused (warp 0): nothing advances — not the physics, the planets, the exhaust or the debris —
+     but the camera, the map and the HUD stay live, so a pause is for looking around. */
+  const paused = WARPS[getWarpIndex()] === 0;
+  if (!paused && (getState() === 'pad' || getState() === 'flying')) {
     const simDt = dtReal * WARPS[getWarpIndex()];
     // ceil + max(1, …): a frame shorter than DTPHYS (any display above 100 Hz) used to
     // round to 0 substeps, so at ×1 physics never ran while the visuals kept spinning.
@@ -141,7 +147,7 @@ function frame() {
     predTick += dtReal; if (predTick > .2) { predTick = 0; if (getState() === 'flying') predict(); }
     updateAim();   // predicted lunar aim; spends a fixed step budget per frame and self-throttles
   }
-  updateParticles(Math.min(1, dtReal * WARPS[getWarpIndex()]));
+  if (!paused) updateParticles(Math.min(1, dtReal * WARPS[getWarpIndex()]));
   updateCamera(dtReal);
   if (getState() === 'flying') updatePredictor(camera); else clearPredictor();
   updateHUD(dtReal);
@@ -152,6 +158,7 @@ function frame() {
   updateMapView(isMap(), dtReal);
   updateChutes();
   setArmSwing(getArmSwing());
+  setOrigin(scene, camera.position);        // draw from where the eye is: js/origin.js
   renderHalfRes(renderer, scene, camera);   // weather and exhaust, at a quarter of the pixels
   renderer.render(scene, camera);
   } catch (err) {

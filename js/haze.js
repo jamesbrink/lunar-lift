@@ -1,3 +1,4 @@
+import { uOrigin } from './origin.js';
 import * as THREE from 'three';
 
 /* Aerial perspective: how much air sits between the eye and a point on the ground.
@@ -46,9 +47,10 @@ export function makeHaze() {
 export function hazeInject(sh, U) {
   for (const key of ['hazeCam', 'hazeK', 'hazeColour']) sh.uniforms[key] = U[key];
   sh.vertexShader = sh.vertexShader
-    .replace('#include <common>', '#include <common>\nvarying vec3 vHazeW;')
+    .replace('#include <common>', '#include <common>\nvarying vec3 vHazeW;' + (sh.uniforms.uOrigin ? '' : '\nuniform vec3 uOrigin;'))
     .replace('#include <project_vertex>',
-      '#include <project_vertex>\n  vHazeW = ( modelMatrix * vec4( transformed, 1.0 ) ).xyz;');
+      '#include <project_vertex>\n  vHazeW = ( modelMatrix * vec4( transformed, 1.0 ) ).xyz + uOrigin;');
+  sh.uniforms.uOrigin = uOrigin;
   sh.fragmentShader = sh.fragmentShader
     .replace('#include <common>', '#include <common>\n' + HAZE_FRAG)
     .replace('#include <fog_fragment>', '#include <fog_fragment>\n  airPerspective();');

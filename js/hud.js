@@ -221,7 +221,9 @@ export function updateHUD(dt) {
     : (engineOn ? 'IGNITING…' : 'ENGINE OFF');
   es.classList.toggle('live', live);
   $('met').textContent = fmtMET(getSimTime());
-  $('warpInd').textContent = $('vWarp').textContent = `×${WARPS[getWarpIndex()]}`;
+  const wp = WARPS[getWarpIndex()];
+  $('warpInd').textContent = $('vWarp').textContent = wp === 0 ? 'PAUSED' : `×${wp}`;
+  $('clock').classList.toggle('paused', wp === 0);
   $('vCam').textContent = getCamMode().toUpperCase();
 
   /* Elements must be computed in one frame: near the Moon the position is lunar-relative, so the
