@@ -314,6 +314,23 @@ state differs from the ship's real trajectory by ~100 km, which would make the r
   strongest darkening, lightening and ray per vertex (`1 − 0.42·darkMax + litMax + rayMax`) restored
   mean 0.235. Multiplicative overlays only survive when a vertex meets two or three of them.
 
+- **The ground is drawn per fragment from data fields; the painted canvases are only the map's.**
+  `js/surface.js` thresholds smooth fields with lattice noise on the threshold, the same function on
+  the globe and the near patch. Rules it was built on, each measured: value noise has zero slope
+  across every lattice plane, so anything SHADED BY SLOPE needs the gradient term (straight-edged
+  facets over Italy from 400 km without it); a screen derivative of a per-vertex varying is constant
+  per triangle (sawtooth relief over the Alps from 12 km), so the patch differences its coarse
+  octaves in the vertex stage; a relief octave under ~25 px per cell shades as a stipple; and data
+  textures are allocated at final size and filled in place, so nothing is late-bound.
+- **The near patch is the contact surface: no display lift under the vehicle.** The lunar patch used
+  to stand 300 m (plus rim relief) above `moonGroundHeight`, so anything placed on that function was
+  under the drawn ground looking at stars. The globe's fragments under the patch are discarded in
+  the shader instead (`setHole`), and the patch is exactly `moonGroundHeight` / `fineGroundHeight`
+  under the vehicle (0.07 m / 0.27 m worst over the 625 nearest vertices). A test camera must add the
+  ground height to its altitude or it is underground.
+- **Test a filter against brute force before trusting what was tuned on it.** `boxSignal` returned 11
+  for a constant field of 1 at r 1; the biome classifier and the mare cut ran on it for rounds.
+
 ## Browser recipe
 
 The dev server must be running (`node server.js 8000`). With the harness browser:
@@ -379,7 +396,10 @@ await tab.evaluate(`(async () => {
 
 ## Structure
 
-One concern per file; no god files. Current sizes: `toonmap.js` 1778, `vehicle.js` 1374, `world.js` 687, `terrain.js` 549, `navball.js` 498, `physics.js` 472, `clouds.js` 443, `hud.js` 437, `camera.js` 300, `predictor.js` 275, `textures.js` 232, `saturn.js` 231, `ribbon.js` 213, `pad.js` 202, `main.js` 172, `toon.js` 138, `constants.js` 119, `targeting.js` 108, `halfres.js` 103, `audio.js` 62, `haze.js` 62.
+One concern per file; no god files. Current sizes: `vehicle.js` 1374, `world.js` 622, `navball.js` 498, `physics.js` 472, `clouds.js` 443, `hud.js` 437, `earthpaint.js` 367, `paintkit.js` 314, `camera.js` 300, `surface.js` 288, `moonpaint.js` 276, `predictor.js` 275, `textures.js` 245, `saturn.js` 231, `terrain.js` 215, `ribbon.js` 213, `padsite.js` 203, `pad.js` 202, `surface-earth.js` 181, `main.js` 172, `toonmap.js` 142, `toon.js` 138, `surface-moon.js` 120, `constants.js` 119, `targeting.js` 108, `halfres.js` 103, `audio.js` 62, `haze.js` 62, `palette.js` 35.
+`toonmap.js` is now only the registry of paint products; the painters are `earthpaint.js` and
+`moonpaint.js` on `paintkit.js`, the authored launch site is `padsite.js`, and the ground is drawn by
+`surface.js` + `surface-earth.js` + `surface-moon.js`.
 `vehicle.js` is now the exhaust and debris alone — the hardware it used
 to build is `saturn.js`, the launch complex left `world.js` for `pad.js`. It is still the largest
 behavioural module; if the particle field grows, split its renderer from its integrator.
