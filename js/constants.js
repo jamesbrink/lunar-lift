@@ -80,7 +80,7 @@ export const PAD_ANGULAR = new THREE.Vector3().crossVectors(SPIN_AXIS, PAD_POS).
 export const ATMO_H = 8.5, RHO0 = 1.225, CD_AREA = 28;   // kg/m³, m²
 /* Time warp steps. 0 is paused and 0.25 is slow motion; WARP_ONE is where a mission starts. Warp
    multiplies the NUMBER of 0.1 s substeps, never their size; below x1 the substep is shorter. */
-export const DTPHYS = 0.1, WARPS = [0, 0.25, 1, 2, 4, 8, 16, 32, 64, 128, 256, 512, 1000];
+export const DTPHYS = 0.1, WARPS = [0, 0.25, 1, 2, 4, 8, 16, 32, 64, 128, 256, 512, 1000, 10000];   // x10000 is for the pad only: physics.js warpCap
 export const WARP_ONE = WARPS.indexOf(1);
 
 /* SAS pitch program. A real launch vehicle does not chase "prograde" off the pad: it

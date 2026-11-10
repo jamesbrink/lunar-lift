@@ -142,18 +142,25 @@ function frame() {
     const simDt = dtReal * WARPS[getWarpIndex()];
     // ceil + max(1, …): a frame shorter than DTPHYS (any display above 100 Hz) used to
     // round to 0 substeps, so at ×1 physics never ran while the visuals kept spinning.
-    const steps = Math.max(1, Math.min(600, Math.ceil(simDt / DTPHYS)));
-    const h = Math.min(DTPHYS, simDt / steps);   // never past DTPHYS: a slow frame at x1000 runs behind the warp, not at a coarser step
+    /* On the pad with the engines cold a step is an exact rotation with the planet, whatever its
+       size, so the whole frame is one step and x10000 costs nothing. In flight the step is never
+       more than DTPHYS and there are at most 600 a frame; if that is not enough to keep up (a slow
+       frame at x1000) the clock runs behind the warp rather than the planet running ahead of the
+       ship — everything below is driven by the time actually stepped. */
+    const idle = getState() === 'pad' && !getEngineOn();
+    const steps = idle ? 1 : Math.max(1, Math.min(600, Math.ceil(simDt / DTPHYS)));
+    const h = idle ? simDt : Math.min(DTPHYS, simDt / steps);
     for (let s = 0; s < steps; s++) physStep(h);
+    const stepped = h * steps;
     if (getState() === 'flying') addDistFlown(S.pos.distanceTo(prevPos));
     prevPos.copy(S.pos);
-    spinBodies(simDt);
+    spinBodies(stepped);
 
     if (getState() === 'flying') { trailTick += dtReal; if (trailTick > 0.5) { trailTick = 0; pushTrail(S.pos); } }
 
     // visuals follow physics
     updateBurnVisuals({ pos: S.pos, quat: S.q, vel: S.v, throttle: getThrottle(), activeIdx: activeStage(), burn: isBurning(), fwd, omega });
-    updateDebris(simDt, accelAt);
+    updateDebris(stepped, accelAt);
     {
       const rho = airDensity(Math.max(0, S.pos.length() - RE)) / airDensity(0), sp = groundVel(_gv).length();
       updateAudio({ burning: isBurning(), throttle: getThrottle(), rho, q: Math.min(1, rho * sp * sp / 0.05) });
