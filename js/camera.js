@@ -134,6 +134,11 @@ export function setCamDist(d, snap = true) {
   if (snap) { curDist = d; placed = false; }
 }
 
+/* Scripted view (tools/clip-test.mjs, screenshots): yaw/pitch offsets and zoom, snapped. */
+export function setCamView(yaw, pitch, dist) {
+  wantYaw = curYaw = yaw; wantPitch = curPitch = pitch; wantDist = curDist = dist; placed = false;
+}
+
 export function resetCameraView() {
   camMode = 0; saved.yaw = PAD_YAW; saved.pitch = 0; saved.dist = 0.13; wantYaw = curYaw = PAD_YAW; wantPitch = curPitch = 0; wantDist = curDist = 0.13;
   camUp.copy(PAD_UP).normalize();
@@ -204,20 +209,46 @@ function keepOut(pos, centre, r) {
    so without it a teleport across the planet (reset, warp, `ff()` through the translunar coast) dragged
    the camera 6 019 km through the Earth on its way to a perfectly legal destination. */
 function collide(pos, isSystem) {
-  if (!isSystem) {
-    _ax0.copy(fwd()).normalize();                                // along the vehicle axis
-    _ax1.crossVectors(_ax0, _up);
-    if (!Number.isFinite(_ax1.x) || _ax1.lengthSq() < 1e-9) _ax1.copy(X_AXIS); else _ax1.normalize();
-    _ax2.crossVectors(_ax0, _ax1).normalize();
-    pushOut(_ax1, _ax2, _ax0, SHIP_R, SHIP_R, spanHalf + 6 * VS, _target, pos);   // +6u clears the escape tower
+  /* Three rounds, ground last. One round is not enough: the planet's push-out is radial, and a
+     camera squeezed between the pad and the stack was pushed up out of the ground straight into
+     the hull (tools/clip-test.mjs found it 3 m inside the S-1 at pitch −1.3 on the pad). */
+  for (let round = 0; round < 3; round++) {
+    if (!isSystem) shipOut(pos);
+    const pm = typeof WORLD.padMatrix === 'function' ? WORLD.padMatrix() : null;
+    if (pm && pos.distanceToSquared(_c.setFromMatrixPosition(pm)) < 0.09) {   // within 300 m of the complex
+      _loc.copy(pos).applyMatrix4(_inv.copy(pm).invert());
+      for (const s of PAD_SOLIDS) pushOut(X_AXIS, Y_AXIS, Z_AXIS, s[0], s[1], s[2], _c.set(s[3], s[4], s[5]), _loc);
+      pos.copy(_loc).applyMatrix4(pm);
+    }
+    groundOut(pos);
   }
-  const pm = typeof WORLD.padMatrix === 'function' ? WORLD.padMatrix() : null;
-  if (pm && pos.distanceToSquared(_c.setFromMatrixPosition(pm)) < 0.09) {   // within 300 m of the complex
-    _loc.copy(pos).applyMatrix4(_inv.copy(pm).invert());
-    for (const s of PAD_SOLIDS) pushOut(X_AXIS, Y_AXIS, Z_AXIS, s[0], s[1], s[2], _c.set(s[3], s[4], s[5]), _loc);
-    pos.copy(_loc).applyMatrix4(pm);
+  /* Still inside the vehicle's volume means there is no room between it and the ground along the
+     line that was asked for: leave sideways, level with the ground, which always exists. */
+  if (!isSystem && insideShip(pos)) {
+    _diff.subVectors(pos, _target); _diff.addScaledVector(_up, -_diff.dot(_up));
+    if (_diff.lengthSq() < 1e-12) _diff.copy(_ax1); 
+    _diff.normalize();
+    pos.copy(_target).addScaledVector(_up, pos.clone().sub(_target).dot(_up)).addScaledVector(_diff, SHIP_R + spanHalf);
+    groundOut(pos);
   }
-
+}
+function shipAxes() {
+  _ax0.copy(fwd()).normalize();                                // along the vehicle axis
+  _ax1.crossVectors(_ax0, _up);
+  if (!Number.isFinite(_ax1.x) || _ax1.lengthSq() < 1e-9) _ax1.copy(X_AXIS); else _ax1.normalize();
+  _ax2.crossVectors(_ax0, _ax1).normalize();
+}
+/* The hull is a cylinder and the collider an ellipsoid, which pinches toward its ends; 1.3× the
+   half-span plus 8 u keeps the pinch clear of the nose and the bells (measured: nearest approach
+   to the hull over the whole sweep, see tools/clip-test.mjs). */
+const shipLen = () => spanHalf * 1.3 + 8 * VS;
+function shipOut(pos) { shipAxes(); pushOut(_ax1, _ax2, _ax0, SHIP_R, SHIP_R, shipLen(), _target, pos); }
+function insideShip(pos) {
+  shipAxes(); _diff.subVectors(pos, _target);
+  const x = _diff.dot(_ax1) / SHIP_R, y = _diff.dot(_ax2) / SHIP_R, z = _diff.dot(_ax0) / shipLen();
+  return x * x + y * y + z * z < 0.98;
+}
+function groundOut(pos) {
   _dir.copy(pos).normalize();
   keepOut(pos, ORIGIN, RE + SKIN + groundLift(WORLD.groundHeight, _dir));
   moonPos(getSimTime(), _moon);

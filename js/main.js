@@ -4,7 +4,7 @@ import { initWorld, spinBodies, syncTime, updateSky, updateSunShadow, groundHeig
 import { stages, lesGroup } from './saturn.js';
 import { initVehicle, spawnParticle, addDebris, detachStage, setVisible, updateParticles, updateDebris, updateBurnVisuals, clearDebris, resetStages, plumeLive } from './vehicle.js';
 import { S, keys, initPhysics, getState, getSimTime, setSimTime, getEngineOn, getThrottle, getWarpIndex, setWarpIndex, setTargetThrottle, getSasOn, setSas, cycleWarp, toggleSas, toggleSasRetro, activeStage, fwd, isBurning, accelAt, physStep, toggleIgnite, separateStage, separateLES, addDistFlown, pushTrail, resetSim, markTeleported, airDensity, groundVel, omega, getControlAuthority, toggleRcsAssist, aeroState, getAeroLoad, stability } from './physics.js';
-import { camera, initCamera, cycleCamera, updateCamera, resetCameraView, setCamMode, setCamDist, resizeCamera } from './camera.js';
+import { camera, initCamera, cycleCamera, updateCamera, resetCameraView, setCamMode, setCamDist, setCamView, resizeCamera } from './camera.js';
 import { initHUD, addLog, updateHUD, drawMap, toggleMapView, endOverlay, setWarn, hideOverlay, clearLog } from './hud.js';
 import { audioInit, audioEngine, audioThud, audioExplosion, audioWin, updateAudio } from './audio.js';
 import { updateAim, resetAim } from './targeting.js';
@@ -171,5 +171,5 @@ window.game = {
   nudge(ax, ay, az) { omega.set(ax, ay, az); },
   teleport(pos, vel, t) { markTeleported(); resetAim(); S.pos.set(...pos); S.v.set(...vel); if (t !== undefined) setSimTime(t); syncTime(getSimTime()); prevPos.copy(S.pos); omega.set(0, 0, 0); },
   reset: resetMission,
-  _cam: camera, _pred: predLine, setCam: d => { setCamDist(d); },
+  _cam: camera, _pred: predLine, setCam: d => { setCamDist(d); }, setView: setCamView,
 };
