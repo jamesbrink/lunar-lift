@@ -76,7 +76,7 @@ async function view(name, setup, gate) {
 
 await view('pad, weather off', () => { window.__noWeather = true; }, { unstable: 300, strong: 20, flips: 20 });
 await view('pad close, weather off', () => { window.__noWeather = true; game.setView(1.2, 0.25, 0.06); }, { unstable: 400, strong: 25, flips: 25 });
-await view('pad, weather on', () => {}, { unstable: 6000, strong: 1500, flips: 600 });   // KNOWN: measured 450 flips on cloud outlines; the target is 150
+await view('pad, weather on', () => {}, { unstable: 6000, strong: 1500, flips: 150 });   // measured 353 before the weather's rays were built from the pixel and its coverage made one ramp, 58 after
 await view('paused in flight', async () => { game.ignite(); game.setSas(true, false); game.ff(70); await new Promise(r => setTimeout(r, 5000)); game.warp(0); await new Promise(r => setTimeout(r, 2500)); }, { unstable: 0, strong: 0 });
 
 /* Static check: coplanar overlapping faces between different meshes of the vehicle and the pad. */

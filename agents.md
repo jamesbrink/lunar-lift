@@ -255,6 +255,15 @@ air. Corollaries, each read off the code or measured:
   long and a field read at its width aliases into rows of dashes at the limb; a mask multiplied by
   a latitude gate has the gate's straight edge (add the gate to the noise before the threshold).
   `tools/cloud-views.mjs --climb` is the pop test, `--flicker` the idle-frame diff.
+- **A hard threshold turns noise in its argument into flicker along its whole outline, so nothing
+  noisy may reach one.** Cloud outlines flipped (353 A-B-A pixels in ten idle frames) for three
+  reasons, each found by reading the half-resolution target back frame by frame: the view ray was
+  built from the shell's interpolated surface — 6,382 km minus 6,371 km in float32, half a metre of
+  new rounding every frame — instead of from `gl_FragCoord` and the inverse projection; coverage
+  was 1 on a hit and at most 0.5 on a miss, so an outline pixel jumped between the two; and a crest
+  between samples was only looked at when the whole ray missed. `tools/cloud-views.mjs --flicker
+  --freeze=drift,sun,ride` is the instrument: with every input the weather reads held still, any
+  pixel that still flips is arithmetic, not weather (884 before, 49 after). Do not reach for a blur.
 - **A half-resolution pass can still have a full-resolution edge.** The weather target holds
   coverage as a ramp through 0.5 and light as a scalar, not a colour; the main pass thresholds them
   per screen pixel. Upsampling a colour blurs it, upsampling a ramp and cutting it does not.
@@ -576,7 +585,7 @@ await tab.evaluate(`(async () => {
 
 ## Structure
 
-One concern per file; no god files. Current sizes: `physics.js` 773, `clouds.js` 715, `world.js` 645, `navball.js` 499, `exhaust-sim.js` 491, `camera.js` 437, `cloudfields.js` 405, `earthpaint.js` 367, `hud.js` 344, `exhaust-emit.js` 327, `paintkit.js` 314, `exhaust-draw.js` 308, `surface.js` 295, `predictor.js` 276, `moonpaint.js` 276, `saturn.js` 266, `terrain.js` 225, `pad.js` 225, `flame.js` 214, `ribbon.js` 213, `main.js` 211, `vehicle.js` 210, `padsite.js` 203, `surface-earth.js` 181, `exhaust-pool.js` 148, `toonmap.js` 142, `constants.js` 134, `surface-moon.js` 120, `targeting.js` 119, `toon.js` 117, `mapview.js` 116, `halfres.js` 103, `textures.js` 97, `aero.js` 81, `colliders.js` 72, `chutes.js` 70, `haze.js` 64, `audio.js` 62, `palette.js` 35, `origin.js` 29.
+One concern per file; no god files. Current sizes: `physics.js` 773, `clouds.js` 790, `world.js` 645, `navball.js` 499, `exhaust-sim.js` 491, `camera.js` 437, `cloudfields.js` 405, `earthpaint.js` 367, `hud.js` 344, `exhaust-emit.js` 327, `paintkit.js` 314, `exhaust-draw.js` 308, `surface.js` 295, `predictor.js` 276, `moonpaint.js` 276, `saturn.js` 266, `terrain.js` 225, `pad.js` 225, `flame.js` 214, `ribbon.js` 213, `main.js` 211, `vehicle.js` 210, `padsite.js` 203, `surface-earth.js` 181, `exhaust-pool.js` 148, `toonmap.js` 142, `constants.js` 134, `surface-moon.js` 120, `targeting.js` 119, `toon.js` 117, `mapview.js` 116, `halfres.js` 103, `textures.js` 97, `aero.js` 81, `colliders.js` 72, `chutes.js` 70, `haze.js` 64, `audio.js` 62, `palette.js` 35, `origin.js` 29.
 `toonmap.js` is now only the registry of paint products; the painters are `earthpaint.js` and
 `moonpaint.js` on `paintkit.js`, the authored launch site is `padsite.js`, and the ground is drawn by
 `surface.js` + `surface-earth.js` + `surface-moon.js`.
