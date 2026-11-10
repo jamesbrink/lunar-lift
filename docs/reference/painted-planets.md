@@ -89,8 +89,8 @@ smear, and a cel ramp only quantises the smear into bands of mud. Repainting the
 does not help — that posterises the mud rather than replacing it.
 
 So the imagery is read as **data** and no photographic pixel reaches the screen. `js/toonmap.js`
-decodes it, classifies it, and uploads authored colour; `js/textures.js` generates the weather's macro
-sheets and the glow sprite from seeded noise. The geography stays real because it comes from the real mask.
+decodes it, classifies it, and uploads authored colour; `js/cloudfields.js` generates the weather's
+sheets and `js/textures.js` the glow sprite, from seeded noise. The geography stays real because it comes from the real mask.
 
 ## The land mask
 
@@ -170,68 +170,116 @@ patches become the maria and the bright ones the highlands and ray systems, whic
 Moon is drawn anyway. The Moon material carries **no colour multiplier**: the tones are the palette,
 and a multiplier scales all of them away.
 
-## Weather: one marched shell
+## Weather: one field, drawn as shapes
 
-Weather is one mesh, `js/clouds.js`: a sphere at `RE + 11 km` whose fragment shader marches the view
-ray through a band from 4 km to 11 km and returns `1 − exp(−τ)`. There are no cloud decks and no
-cloud caps any more.
+Weather is one mesh, `js/clouds.js`: a sphere at `RE + 11 km`. A cloud is an opaque **drawn shape** —
+an edge, three flat tones — not a density. There are no cloud decks, no caps and no optical-depth
+integral any more.
 
-Three fields feed the march, all generated:
+### The field (`js/cloudfields.js`)
 
-- **Where** — the macro sheet from `js/textures.js` (`cumulusTex`, 2048 × 1024, 20 km per texel): a
-  six-octave fbm shaped by the real zonal pattern (ITCZ, dry subtropics near ±25°, storm tracks near
-  ±52°). Its alpha moves *coverage* between 7 % (fair weather) and 82 % (inside a system). It does
-  not scale opacity: the first version did, and the planet wore an edgeless white fog.
-- **What shape** — a 512² tileable lattice at 160 km per tile (0.3125 km per texel, 250 repeats
-  round the globe), two independent fields in R and G, stored as **rank** so it is uniform on 0..1.
-  The mean of two uniform fields is triangular, so a coverage `c` becomes the exact threshold
-  `1 − √(c/2)` (or `√((1−c)/2)` above one half) rather than a tuned guess. The two fields drift at
-  17.6 and 56 m/s on top of the planet's spin, so cells grow and dissolve as they slide past each
-  other. The same lattice read at 800 km per tile bunches the cover into fields and gaps.
-- **Cirrus** — `cirrusTex`, a thin veil in the top quarter of the band.
+There is cloud wherever one scalar field exceeds one threshold:
 
-The threshold climbs with height, so every cloud is a dome on a flat base and only the strongest cores
-reach 11 km. The march composites front to back and reports *where* along the ray the eye lands:
-on tops from above, on bases from the pad. Light is then how much cloud stands between that point
-and the sun — two more reads of the field, 0.5 and 1.5 km sunward — pushed through a three-band cel
-tone. A puff gets a bright flank and a dark one; a height-only tone lit every cloud like a plate.
+    F = WM·macro + WV·(variety − ½) + W1·oct1 + W2·oct2 + W3·(1 + TURRET·h)·oct3
+    cloud where F > THR + RISE·h²        h = height in the cumulus layer, 0 at 4 km .. 1 at 7 km
 
-Computed from the macro sheet through the shipped coverage law, with the bunching factor at its mean
-of 1: **29.0 %** global cumulus cover; by latitude 0° 0.52, ±20° 0.23 and 0.14, ±40° 0.32 and 0.24,
-±60° 0.35 and 0.25, ±80° 0.17 and 0.20 (north first). The cover on screen has not been counted.
+So every cloud is a height field on a flat base: a steep wall at its foot, rounding over at the top,
+with the billows counting for more the higher up they are.
 
-Where the lattice is unresolved (more than ~5 of its texels under one pixel) the sampler's mips have
-averaged the rank field to 0.5 and a threshold on it is a coin that always lands the same way —
-measured from 4 000 km as storm belts gone solid white and everything else bare. There the density
-becomes the coverage fraction itself, which is the exact mean of what the threshold would have drawn.
+- **macro** — a 2048 × 1024 planet sheet, 20 km per texel, stored smooth: six-octave domain-warped
+  fbm pushed by the zonal pattern (ITCZ, dry belts near ±25°, storm tracks near ±52°) with 26
+  mid-latitude cyclones stamped in (a logarithmic-spiral arm, a core, a dry slot behind the arm).
+- **variety** — the same sheet's green channel: plain fbm that moves the threshold from region to
+  region, so the repeating tile never draws the same field twice.
+- **oct1..3** — three reads of one 512² tile at 1000, 160 and 32 km per tile (the third with its axes
+  swapped). Two of the tile's channels are rank-uniform fbm; the other two are **domes** — one minus
+  the squared distance to the nearest feature point. The level set of a sum of domes is a union of
+  arcs meeting in cusps, which is how a cloud is drawn with a pen. A third of the dome cells are
+  empty and the points sit anywhere in their cells: held near the centres, the lattice showed from
+  500 km as rows and columns of cloud.
 
-Each pixel starts its samples at a different phase (white noise, which the half-resolution pass's
-tent filter removes; an ordered pattern survived it as a weave). With a fixed
-phase a slanted view cut every cloud at the same heights and drew it as a stack of plates. The price
-is a fine stipple on cloud flanks seen close; it is visible in a still at 8–30 km and is the known
-rough edge of this renderer.
+`THR` and `WM` are not tuned, they are solved: `cellField()` draws 400 000 samples of the cell sum
+from the bytes it uploaded and takes quantiles, so the cover is `COVER_CLEAR` (8 %) where the macro
+sheet reads 0 and `COVER_STORM` (72 %) where it reads 1. The macro term moves *coverage*; it never
+scales opacity (the first marched shell did, and the planet wore an edgeless white fog).
 
-The band has two surfaces. The outer sphere serves an eye above the band (front faces) or below it
-(back faces). An eye *inside* the band looks down through rays that end on the ground and never reach
-the outer sphere, so a second sphere at the cloud base carries the same march for those. A ray that
-dips under the base without hitting the ground is marched straight through to the far side.
+The tile is read in **Mercator**, not equirectangularly. Mercator is conformal, so a cell is as tall
+as it is wide at every latitude and only shrinks toward the poles; read equirectangularly the cells
+kept their height while their width fell with cos(latitude), and everything north of 45° was drawn
+as north–south streaks. Every length the cell field deals in is therefore in equatorial km.
 
-Cost, as GPU time from `EXT_disjoint_timer_query_webgl2` on an Apple M4 Max at a 2160 × 1250 drawing
-buffer (frame-interval numbers are vsync and say nothing): drawn at full resolution with twelve
-samples the shell alone was 6.7 ms of a 13.4 ms idle frame at the pad. It is now drawn in the
-half-resolution pass (`js/halfres.js`) with twenty samples, stops marching once opaque, and skips the
-lattice where it is unresolved; the whole idle frame at the pad is 5.9 ms, of which the march is
-about 0.9. No slower GPU has been measured.
+### Detail follows the eye
+
+Every read of the tile is `textureLod` at the mip whose texel is the pixel's footprint at that
+distance. An octave too fine to resolve averages to its mean and leaves the sum, so from the pad the
+field carries 1 km billows, from 500 km cells and fields, and from the system view only the macro
+sheet's systems. Two corrections make that work:
+
+- a blurred field has less contrast, so a threshold on it covers less sky and far cloud would thin
+  out and vanish. The departure from the mean is scaled back up by what the mips took (`gain`,
+  from each octave's measured sigma and a fitted mip-contrast law), so the fraction covered holds
+  and only the outline simplifies;
+- nothing is ever swapped for a fog. The old shell fell back to "density = coverage" where the
+  lattice was unresolved, which is the grey smear the orbit view had.
+
+### Finding the surface
+
+The half-resolution pass walks each view ray through the 3 km cumulus layer in even strides along
+its *ground* track (3 for an overhead ray, at most 20), then bisects. Three things were learned by
+looking at wrong pictures:
+
+- **The field must be read no finer than twice the stride.** A lobe narrower than the stride is
+  caught by some rays and jumped by their neighbours, and the cloud is drawn as the slices the
+  samples happened to cut: a stack of plates from the pad, a comb on every flank. So a slanted ray
+  draws broad shapes and an overhead one keeps every billow.
+- **Sphere tracing does not pay here.** In clear sky the field sits close under its threshold
+  compared with its slope, so safe steps are short and a grazing ray ran out of its sixteen
+  iterations before it reached the cloud whose shadow was on the sea.
+- **Three samples with the middle one highest mean the field peaked between samples.** A parabola
+  through them says where; without it silhouettes are serrated at the sample spacing.
+
+The slow part of the field (macro sheets, first octave) is read at three points of the ray and
+interpolated; if it is so low all along the ray that the other octaves at their 99.8th percentile
+could not lift it over the threshold, the walk is skipped.
+
+### Ink
+
+The march does not write a colour. It writes four numbers per pixel — light, haze, veil, and
+coverage as a *ramp* through 0.5 at the silhouette — and the shell's own geometry in the main pass
+turns them into ink at full resolution: coverage is cut at 0.5, light into three tones (lit, mid,
+shade). A bilinear-upsampled ramp thresholded per pixel is a clean edge at the screen's resolution,
+the way distance-field type is; an upsampled colour is a blur. That is how a quarter-pixel march
+has a line.
+
+- **Tops and flanks**: the cloud is a height field, so its normal is its slope. One more pair of
+  reads a short way toward the sun gives the slope along the only direction that matters, in units
+  of the field's own rms slope at that footprint — the same drawing at every range.
+- **Bases** seen from below are dark where the cloud above is deep and pale to a lit rim where it
+  thins.
+- The lit tone turns warm toward the terminator; the night side is one dark blue.
+- Distant cloud goes to the colour of the air and thins, so the horizon is not a white wall.
+- **The veil** is one thin sheet at 10 km: the cirrus sheet times a streak read of the tile
+  stretched 16:1 along longitude, cut into two translucent steps.
+
+The band has two surfaces. The outer sphere serves an eye above it (front faces) or below it (back
+faces). An eye *inside* looks down through rays that end on the ground and never reach the outer
+sphere, so a second sphere at the cloud base carries the same march for those.
+
+### Cost
+
+Not yet measured on an idle machine. `tools/cloud-views.mjs` times the three passes that belong to
+the weather (`sky` the march, `ink` the composite, `ground` the planet with its cloud shade) with
+`EXT_disjoint_timer_query_webgl2` at a 2160 × 1250 drawing buffer, drawing each sixteen times
+inside one query because a single light frame reads anywhere from 0.7 to 2.5 ms on this GPU. The
+runs made while this was written shared the GPU with other work and disagreed with each other by
+more than the difference between old and new; no figure from them belongs here.
 
 Row 0 is south in every generated sheet: a `DataTexture` samples row 0 at `v = 0`, and
 `SphereGeometry`'s `v = 0` is the south pole.
 
-Three.js samples `alphaMap` from the **green** channel, which is why nothing here uses it: that trap
-put an opaque white tablecloth on the planet twice. Density that lives in alpha is read as alpha.
-
 ### What the old system was, and the plate
 
-Until this change the weather was two planet-scale decks (cumulus at 2 km, cirrus at 9 km) plus two
+Before the marched shell the weather was two planet-scale decks (cumulus at 2 km, cirrus at 9 km) plus two
 tangent-plane caps that re-centred under the vehicle: a 440 km cloud cap and a 64 km shade cap. A
 planet-wide texture at 20–39 km per texel cannot put a cumulus over the pad, so the caps did that —
 and a cap is a square with an edge.
@@ -357,7 +405,8 @@ Not the weather shell. It spans 4–11 km, so a low sun drags its silhouette hun
 across the surface, and the vehicle-tracking shadow box clips those streaks into hard grey slabs that
 read as architecture.
 
-Cloud shade is **marched** instead: `js/clouds.js` injects the same optical-depth integral into the
-globe and the near patch, aimed up the sun ray from each ground fragment (four samples), so the dark
-shape on the ground is the column of cloud above it at every distance, with no shade mesh and no rim.
+Cloud shade is **looked up** instead: `js/clouds.js` injects the same field into the globe and the
+near patch. From each ground fragment it follows the sun ray to where it crosses the cloud base (the
+cloud's own outline) and to 45 % of the layer's height (where a low sun's ray meets a tower's flank),
+and darkens by one flat tone if either is inside cloud. No shade mesh, no rim, no integral.
 The cel terminator does the rest of the mood work on its own.
