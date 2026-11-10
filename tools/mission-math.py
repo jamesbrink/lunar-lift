@@ -309,6 +309,12 @@ for cda in (12.0, 28.0):
     a_cap = q_cap * cda / (2000.0 * 1000.0)
     print(f"  drag bound in the dense air (h<20 km, v<550 m/s, m>2000 t, CdA={cda:.0f} m^2): "
           f"a <= {a_cap:.2f} m/s^2 -> loss <= {a_cap*120:.0f} m/s over the 120 s spent below 20 km")
+# js/aero.js multiplies the axial coefficient by a transonic drag rise that peaks at 1.6x (Mach 1.1).
+# Holding the peak for the whole 120 s is the bound for the game's flight model; nose-on only.
+MACH_PEAK = 1.6
+a_cap = q_cap * 28.0 * MACH_PEAK / (2000.0 * 1000.0)
+print(f"  same bound with the game's drag rise held at its {MACH_PEAK:.1f}x peak (CdA=28 m^2): "
+      f"a <= {a_cap:.2f} m/s^2 -> loss <= {a_cap*120:.0f} m/s; q cap used = {q_cap/1000:.1f} kPa")
 print(f"  Apollo 11 max-q, SP-4029: 735.17 psf = {735.17*47.88026/1000:.2f} kPa; at rho(13.57 km) = "
       f"{rho_usa(13.57):.3f} kg/m^3 that implies v = {math.sqrt(2*735.17*47.88026/rho_usa(13.57)):.0f} m/s")
 print("  (the ascent table's velocity column cannot be reconciled with that q and altitude, so")

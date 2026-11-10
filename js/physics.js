@@ -1,18 +1,20 @@
 import * as THREE from 'three';
 import { airDensity, aeroForce, aeroState, ATMO_TOP, CN_BODY } from './aero.js';
-import { RE, MU_E, RM, MU_M, SOI_M, PAD_UP, PAD_POS, PAD_ANGULAR, RHALF, CD_AREA, WARPS, LAND_SAFE, SAFE_EARTH, SPECS, CAPSULE_MASS, EARTH_SPIN, SPIN_AXIS, PAD_EAST, MOON_DIST, TURN, moonPos, moonVel } from './constants.js';
+import { RE, MU_E, RM, MU_M, SOI_M, PAD_UP, PAD_POS, PAD_ANGULAR, VS, CD_AREA, WARPS, LAND_SAFE, SAFE_EARTH, SPECS, CAPSULE_MASS, EARTH_SPIN, SPIN_AXIS, PAD_EAST, MOON_DIST, TURN, moonPos, moonVel } from './constants.js';
 
 /* ---------------- injected dependencies (see initPhysics) ----------------
    hooks:      addLog(msg, cls), showEndOverlay(title, body, btn)
    audio:      engine(on), thud(), explosion(), win()
    vehicleOps: spawnParticle(pos, vel, life, color), addDebris(entry), detachStage(mesh, pos, quat), setVisible(visible)
    stages:     the stage records built by vehicle.js (fuel / separated live here, in the sim)
+   relief:     optional terrain height lookups, so contact happens on the ground that is drawn
 */
 let stages = null;
-let hooks = null, audio = null, vehicleOps = null;
+let hooks = null, audio = null, vehicleOps = null, relief = null;
 export function initPhysics(deps) {
   stages = deps.stages;
   hooks = deps.hooks; audio = deps.audio; vehicleOps = deps.vehicleOps;
+  relief = deps.relief || null;      // { earth(dir), moon(dir) } → km of terrain above the datum sphere; none headless
 }
 
 /* ---------------- state ---------------- */
@@ -34,7 +36,7 @@ let sasHoldTime = 0;
 let rcsAssist = true, aeroLoad = 0;
 /* Lateral aerodynamic load the airframe survives, in g. Set against the measured nominal ascent
    (see docs/reference/atmosphere.md): the stack is a pressure-stabilised tank and folds early. */
-export const LOAD_LIMIT_STACK = 1.2, LOAD_LIMIT_CSM = 6;
+export const LOAD_LIMIT_STACK = 0.5, LOAD_LIMIT_CSM = 6;
 export const getAeroLoad = () => aeroLoad;
 export const getRcsAssist = () => rcsAssist;
 export function toggleRcsAssist() { rcsAssist = !rcsAssist; hooks.addLog(`RCS STABILITY ASSIST ${rcsAssist ? 'ON' : 'OFF — ROTATION IS NOW UNDAMPED'}`); }
@@ -110,6 +112,26 @@ export function groundVel(out = new THREE.Vector3()) {
 export function bodyUp(out = new THREE.Vector3()) {
   if (overMoon()) return out.subVectors(S.pos, _moon).normalize();
   return out.copy(S.pos).normalize();
+}
+
+/* ---- contact geometry ----
+   S.pos is the middle of the FULL stack, and stays there after staging, so "the vehicle has reached
+   the ground" cannot be a test on S.pos: it used to be `r <= R + 37 u`, which lands a full stack
+   on its engine bells and leaves a lone CSM — whose tail is 6.8 u ABOVE S.pos — hanging 61 m over
+   the Moon at the moment it is judged to have touched down. Contact is the lowest attached point
+   meeting the terrain underneath. Stations are js/saturn.js's, in build units. */
+const TAIL_Z = [-42, -11.8, 6.8], CM_TAIL_Z = 22.7, NOSE_Z = 28.7;
+const _cu = new THREE.Vector3();
+export function tailStation() { const i = activeStage(); return i >= 0 ? TAIL_Z[i] : CM_TAIL_Z; }
+/* km from the lowest attached point down to the surface of the Moon (onMoon) or the Earth. */
+export function surfaceAlt(onMoon = overMoon()) {
+  if (onMoon) { moonPos(simTime, _moon); _cu.subVectors(S.pos, _moon); } else _cu.copy(S.pos);
+  const r = _cu.length(); _cu.multiplyScalar(1 / r);
+  const c = _fw.copy(UP_REF).applyQuaternion(S.q).dot(_cu);          // cos of the tilt from vertical
+  const low = Math.min(tailStation() * c, NOSE_Z * c) * VS;          // lowest end, km above S.pos (negative = below)
+  const sphere = r - (onMoon ? RM : RE) + low;
+  if (!relief || sphere > 30) return sphere;                         // no relief lookup while it cannot matter
+  return sphere - (onMoon ? relief.moon(_cu) : relief.earth(_cu));
 }
 
 /* ---- mass and aerodynamic geometry of the hardware still attached ----
@@ -445,13 +467,19 @@ export function physStep(dt) {
 function checkImpact() {
   if (state !== 'flying') return;
   moonPos(simTime, _moon);
-  const rM = S.pos.distanceTo(_moon);
-  if (rM <= RM + RHALF) return impact(true, rM);
-  if (S.pos.length() <= RE + RHALF) return impact(false, S.pos.length());
+  if (S.pos.distanceTo(_moon) < RM + 40) { if (surfaceAlt(true) <= 0) impact(true); }
+  else if (S.pos.length() < RE + 40 && surfaceAlt(false) <= 0) impact(false);
 }
-function impact(onMoon, dist) {
+function impact(onMoon) {
   const speed = groundVel(_nv).length();         // km/s, relative to the surface being hit
   const disp = speed * 1000;                    // m/s
+  const upright = fwd().dot(bodyUp(_rad)) > 0.5;           // within 60° of vertical: it stays standing
+  if (onMoon && speed <= LAND_SAFE && !upright) {
+    explode(); state = 'lost';
+    hooks.addLog(`TOUCHDOWN AT ${disp.toFixed(1)} m/s — ON ITS SIDE. MISSION LOST`, 'bad');
+    hooks.showEndOverlay('TIPPED OVER', `Slow enough at ${disp.toFixed(1)} m/s, but the CSM met the Moon ${Math.round(Math.acos(fwd().dot(bodyUp(_rad))) * 57.2958)}° from vertical. Hold retrograde (V + P) all the way down: at touchdown that is straight up.`, 'RETRY');
+    return;
+  }
   if (onMoon && speed <= LAND_SAFE) {
     state = 'won'; vehicleOps.setVisible(true);
     hooks.addLog(`TOUCHDOWN — ${disp.toFixed(1)} m/s. THE MOON IS OURS.`, 'good');

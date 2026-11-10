@@ -145,7 +145,7 @@ export function updateHUD(dt) {
   /* Predicted closest lunar approach, from js/targeting.js. The translunar aim is worth about
      130 km of periselene per 1e-3 rad of launch phase and periselene decides whether the landing is
      soft, so this is the number a human has to steer by. Green inside the corridor the mission has
-     actually been flown to a soft touchdown in (100-320 km); dim while the look-ahead propagation is
+     actually been flown to a soft touchdown in (js/targeting.js CORRIDOR); dim while the look-ahead propagation is
      still running, which it is for most of a frame at high warp. */
   const aimEl = $('oAim');
   if (!isFinite(aim.altKm)) { aimEl.textContent = aim.status === 'na' ? '—' : 'scanning…'; aimEl.className = aim.status === 'na' ? '' : 'run'; }

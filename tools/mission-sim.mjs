@@ -345,7 +345,9 @@ function mission(phase, { trace = false, capture = true, stopAtPeri = false } = 
       const vRel = relV.clone();
       const vTan = vRel.clone().addScaledVector(rHat, -vRel.dot(rHat));
       const vtMag = vTan.length();
-      const hKm = Math.max(0.0005, L.alt);
+      /* Height of the engine bell over the surface — js/physics.js surfaceAlt, the same number contact
+         is judged by. L.alt is the middle of the full stack, 9.5 m BELOW the lone CSM's tail. */
+      const hKm = Math.max(0.0005, P.surfaceAlt(true));
       const gM = C.MU_M / (L.r * L.r);
       const aV = Math.max(0.35 * aMax - gM, 0.4 * gM);
       const aH = Math.max(0.40 * aMax, 0.5 * gM);

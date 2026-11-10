@@ -1,6 +1,6 @@
 import * as THREE from 'three';
-import { RE, RM, SOI_M, RHALF, CD_AREA, SPECS, moonPos } from './constants.js';
-import { S, getSimTime, getEngineOn, getThrottle, activeStage, totalMass, fwd, gravityAt, airDensity } from './physics.js';
+import { RE, RM, SOI_M, VS, CD_AREA, SPECS, moonPos } from './constants.js';
+import { S, getSimTime, getEngineOn, getThrottle, activeStage, totalMass, fwd, gravityAt, airDensity, surfaceAlt, tailStation } from './physics.js';
 import { stages } from './saturn.js';
 import { ribbon } from './ribbon.js';
 
@@ -137,7 +137,8 @@ export function predict() {
   /* Parked or already down: the first step of a vehicle sitting on a body reaches that body's
      contact shell at once, which used to publish "IMPACT PREDICTED: EARTH IN 0 min" over a rocket
      waiting for ignition. Nothing about a pad sit has anything to predict. */
-  const onSurface = S.pos.length() - RE <= RHALF || rM0 - RM <= RHALF;
+  const onSurface = surfaceAlt() <= 0.002;
+  const reach = -tailStation() * VS;      // contact is the tail meeting the ground (js/physics.js surfaceAlt), flown upright
   if (onSurface && !burning) { clearPredictor(); return; }
 
   path.n = 0; path.impact = null; path.closed = false; path.ap = path.pe = -1;
@@ -173,8 +174,8 @@ export function predict() {
          from behind the camera and finishes inside the ship it started from. */
       if (swept > 5.9) { path.closed = true; break; }
     }
-    if (rM <= RM + RHALF) { path.impact = 'moon'; impactT = t - sim; break; }
-    if (p.length() <= RE + RHALF) { path.impact = 'earth'; impactT = t - sim; break; }
+    if (rM <= RM + reach) { path.impact = 'moon'; impactT = t - sim; break; }
+    if (p.length() <= RE + reach) { path.impact = 'earth'; impactT = t - sim; break; }
     if (p.length() > 900000 || rM > 900000) break;
   }
   if (path.impact) { _q.copy(p); lift(_q, t); store(_q, t); }

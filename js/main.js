@@ -63,6 +63,7 @@ initPhysics({
   scene,
   stages,
   hooks: { addLog, showEndOverlay: endOverlay },
+  relief: { earth: groundHeight, moon: moonGroundHeight },
   audio: { engine: audioEngine, thud: audioThud, explosion: audioExplosion, win: audioWin },
   vehicleOps: { spawnParticle, addDebris, detachStage, setVisible, les: lesGroup },
 });

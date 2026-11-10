@@ -1,14 +1,24 @@
 import * as THREE from 'three';
 import * as WORLD from './world.js';
 import { RE, RM, SOI_M, VS, PAD_SCALE, PAD_POS, PAD_UP, moonPos } from './constants.js';
-import { S, fwd, getSimTime, activeStage, isBurning, getThrottle, airDensity, groundVel } from './physics.js';
+import { S, fwd, getSimTime, activeStage, isBurning, getThrottle, airDensity, groundVel, navVel } from './physics.js';
 import { stages } from './saturn.js';
 
 /* distances are km; 1 m near plane so the 105 m rocket resolves, 3 M km far plane
    so the starfield and the lunar approach both render (logarithmic depth buffer) */
 export const camera = new THREE.PerspectiveCamera(58, innerWidth / innerHeight, 0.001, 3000000);
 
-export const camModes = ['chase', 'orbit', 'system'];
+/* orbit   the default. The camera circles the ship on a heading that is carried along with it —
+           parallel-transported over the body, never taken from the nose or the velocity — so the
+           view moves only when the mouse moves it. Pitching the rocket over pitches the rocket,
+           not the world.
+   chase   sits behind the flight path: heading follows the horizontal velocity, elevation follows
+           the climb angle, so "forward" on screen is where the ship is going (not where it points —
+           those differ by 180° in a braking burn, and the old nose-chase spun round with every flip).
+   system  Earth, Moon and the transfer between them.
+   Nothing eases the view "home" on a timer any more: that took the camera out of the user's hand
+   two seconds after every drag. Double-click re-centres. */
+export const camModes = ['orbit', 'chase', 'system'];
 // getCamDist removed with the world-space nav arrows (round 6b); nothing else reads curDist.
 let camMode = 0, dragging = false, lastInput = 0;
 
@@ -37,8 +47,11 @@ const camOff = new THREE.Vector3();
 const NOSE_Z = 28.7;                       // build units: the command module's apex
 let focusZ = null, spanHalf = 37 * VS;
 let wantFov = 64, placedFov = false, shakeT = 0;
-const noseSmooth = new THREE.Vector3(0, 0, 1);
-const CAM_RANGE = { chase: [0.02, 400, 0.13], orbit: [0.01, 1000, 2.5], system: [4000, 900000, 150000] };
+const refH = new THREE.Vector3(1, 0, 0);     // the carried heading, horizontal and unit
+let refOk = false, climb = 0, frame = 1;
+const FULL_SPAN = 0.5 * (NOSE_Z + 42) * VS; // half-length of the whole stack
+const saved = { yaw: PAD_YAW, pitch: 0, dist: 0.13 };
+const CAM_RANGE = { chase: [0.02, 1000, 0.13], orbit: [0.02, 1000, 0.13], system: [4000, 900000, 150000] };
 const SOI_BLEND_HI = SOI_M * 1.4, SOI_BLEND_LO = SOI_M * 0.8;
 
 /* Collision volumes. The camera may come to rest on these and may slide along them; it may not enter.
@@ -81,6 +94,12 @@ export function initCamera(canvas, log) {
     wantPitch = THREE.MathUtils.clamp(wantPitch - e.movementY * 0.005, -1.3, 1.3);
     lastInput = performance.now();
   });
+  canvas.addEventListener('dblclick', () => {
+    if (camModes[camMode] === 'system') { wantYaw = 0; wantPitch = 0.25; return; }
+    let d = (-wantYaw) % (2 * Math.PI);                         // the short way round to "behind"
+    if (d > Math.PI) d -= 2 * Math.PI; else if (d < -Math.PI) d += 2 * Math.PI;
+    wantYaw += d; wantPitch = 0;
+  });
   canvas.addEventListener('wheel', e => {
     e.preventDefault();
     const [lo, hi] = CAM_RANGE[camModes[camMode]];
@@ -89,17 +108,23 @@ export function initCamera(canvas, log) {
 }
 
 export function cycleCamera() {
+  const from = camModes[camMode];
   camMode = (camMode + 1) % camModes.length;
   const mode = camModes[camMode];
-  const [lo, hi] = CAM_RANGE[mode];
-  wantDist = THREE.MathUtils.clamp(CAM_RANGE[mode][2], lo, hi);
-  wantYaw = mode === 'system' ? 0 : 0.3; wantPitch = mode === 'system' ? 0.25 : 0.15;
+  /* orbit <-> chase keep the zoom and are a glide; only the system view is a cut (its pivot is
+     190 000 km away), and coming back from it restores the flight view that was left. */
+  if (mode === 'system') {
+    saved.yaw = wantYaw; saved.pitch = wantPitch; saved.dist = wantDist;
+    wantDist = CAM_RANGE.system[2]; wantYaw = 0; wantPitch = 0.25; placed = false;
+  } else if (from === 'system') {
+    wantYaw = saved.yaw; wantPitch = saved.pitch; wantDist = saved.dist; placed = false;
+  } else { wantYaw = 0; wantPitch = 0; }
   lastInput = performance.now();
-  placed = false;            // a mode change is a cut: the pivots are 190 000 km apart
   addLog(`CAMERA: ${mode.toUpperCase()}`);
 }
+export const getCamMode = () => camModes[camMode];
 
-export function setCamMode(name) { camMode = camModes.indexOf(name); }
+export function setCamMode(name) { const k = camModes.indexOf(name); if (k >= 0 && k !== camMode) { camMode = k; placed = false; } }
 
 /* Snaps by default: setCam(d) is the scripted entry point, and a scripted pose has to be true the same
    frame it is asked for, not one the damping is on its way to. `placed = false` forces a re-place
@@ -110,9 +135,9 @@ export function setCamDist(d, snap = true) {
 }
 
 export function resetCameraView() {
-  camMode = 0; wantYaw = curYaw = PAD_YAW; wantPitch = curPitch = 0; wantDist = curDist = 0.13;
+  camMode = 0; saved.yaw = PAD_YAW; saved.pitch = 0; saved.dist = 0.13; wantYaw = curYaw = PAD_YAW; wantPitch = curPitch = 0; wantDist = curDist = 0.13;
   camUp.copy(PAD_UP).normalize();
-  focusZ = null;
+  focusZ = null; refOk = false; climb = 0; frame = 1;
   placed = false;            // updateCamera places it on the first frame, from the numbers above
 }
 
@@ -238,46 +263,64 @@ export function updateCamera(dt) {
     spanHalf = 0.5 * (NOSE_Z - tail) * VS;
     _target.copy(S.pos).addScaledVector(fwd(), focusZ);          // the thing the camera orbits
     bodyRadial(_up);
-    // horizontal heading the camera trails behind (nose, falling back to velocity, then a fixed axis)
     /* First frame after a placement (boot, reset, setCam): start settled. The heading, the up vector
-       and the lens each used to ease in from their module defaults — up from world +z, the heading
-       from +z — so every mission opened with the horizon rolling level and the view swinging round
-       for a second, with the user's first drag fighting it. */
-    if (!placed) { noseSmooth.copy(fwd()); camUp.copy(_up); placedFov = false; }
-    noseSmooth.lerp(fwd(), 1 - Math.exp(-4 * dt));
-    if (noseSmooth.lengthSq() > 1e-9) noseSmooth.normalize(); else noseSmooth.copy(_up);
-    _h.copy(noseSmooth).addScaledVector(_up, -noseSmooth.dot(_up));
-    if (_h.length() < 0.12) {
-      _h.copy(S.v).addScaledVector(_up, -S.v.dot(_up));
-      if (_h.length() < 0.12) _h.crossVectors(_up, Math.abs(_up.y) < 0.9 ? AXIS : X_AXIS);
+       and the lens each used to ease in from their module defaults, so every mission opened with
+       the horizon rolling level and the view swinging round for a second. */
+    if (!placed) { camUp.copy(_up); placedFov = false; }
+    /* The carried heading: yesterday's, laid back into today's horizontal plane. Seeded from the
+       ground track (east, on the pad), which is what makes yaw 2.33 the south-east apron shot. */
+    if (refOk) {
+      refH.addScaledVector(_up, -refH.dot(_up));
+      if (refH.lengthSq() < 1e-6) refOk = false; else refH.normalize();
     }
-    _h.normalize();
-    /* With no input for two seconds the view eases home. Home is the pad shot on the ground and
-       "behind the nose" in flight, and it travels from one to the other across the first 30 km of
-       climb — a slow arc round the vehicle as it rises. It used to be "behind the nose" always:
-       on the pad that is behind the umbilical tower, and once that was avoided the camera swung
-       130° in the seconds after liftoff. Near the Moon the altitude over EARTH is what is read, so
-       a landing is never dragged round to the pad's angle. */
-    if (mode === 'chase' && performance.now() - lastInput > 2000) {
-      const home = PAD_YAW * (1 - THREE.MathUtils.smoothstep(S.pos.length() - RE, 1, 30));
-      let d = (home - wantYaw) % (2 * Math.PI);
-      if (d > Math.PI) d -= 2 * Math.PI; else if (d < -Math.PI) d += 2 * Math.PI;
-      wantYaw += d * (1 - Math.exp(-1.6 * dt)); wantPitch *= Math.exp(-1.6 * dt);
+    if (!refOk) {
+      refH.copy(S.v).addScaledVector(_up, -S.v.dot(_up));
+      if (refH.length() < 0.12) refH.crossVectors(_up, Math.abs(_up.y) < 0.9 ? AXIS : X_AXIS);
+      refH.normalize(); refOk = true;
     }
-    /* The chase camera is a crane shot written as a function of height. On the ground it sits low
-       and looks UP the stack — a 110 m rocket seen from above its own nose is a pencil. As the
-       vehicle climbs the camera rises over it, until from the stratosphere up it looks down past
-       the ship at the ground falling away, which is the only thing in the frame that says how high
-       this is. Same law over the Moon, so the landing ends looking up at the lander. */
     moonPos(getSimTime(), _moon);
-    const alt = Math.max(0, Math.min(S.pos.length() - RE, S.pos.distanceTo(_moon) - RM));
-    const rise = THREE.MathUtils.smoothstep(alt, 0.1, 2.5), high = THREE.MathUtils.smoothstep(alt, 2.5, 45);
-    wantFov = 64 + 12 * high;                 // and the lens widens with it: depth is what a wide lens draws
-    const basePitch = mode === 'chase' ? -0.20 + 0.42 * rise + 0.30 * high : 0.35;
-    const pitch = THREE.MathUtils.clamp(basePitch + curPitch, -1.3, 1.3);
-    _dir.set(0, 0, 0).addScaledVector(_up, Math.sin(pitch)).addScaledVector(_h, -Math.cos(pitch))
+    const altE = S.pos.length() - RE;
+    const alt = Math.max(0, Math.min(altE, S.pos.distanceTo(_moon) - RM));
+    let pitch;
+    if (mode === 'chase') {
+      /* Behind the flight path. Ground-relative in the air (on the pad the inertial velocity is
+         409 m/s of planet spin), orbital above it. Below 20 m/s there is no path to sit behind and
+         the carried heading stands in; the climb angle is capped so a vertical ascent is seen from
+         below-behind rather than from inside the plume. */
+      const v = altE < 120 ? groundVel(_gv) : navVel(_gv);
+      const sp = v.length(), w = THREE.MathUtils.smoothstep(sp, 0.02, 0.15);
+      let gamma = 0;
+      if (w > 0) {
+        const vUp = v.dot(_up);
+        _h.copy(v).addScaledVector(_up, -vUp);
+        const hl = _h.length();
+        gamma = Math.atan2(vUp, hl);
+        if (hl > 0.004) {
+          _h.multiplyScalar(1 / hl);
+          if (_h.dot(refH) < -0.98) refH.applyAxisAngle(_up, 0.05);     // dead astern: break the tie
+          refH.lerp(_h, w * (1 - Math.exp(-2.5 * dt))).normalize();
+        }
+      }
+      climb += (THREE.MathUtils.clamp(w * gamma, -0.8, 0.8) - climb) * (placed ? 1 - Math.exp(-2.5 * dt) : 1);
+      wantFov = 68;
+      pitch = 0.2 - climb + curPitch;
+    } else {
+      /* The orbit camera is a crane shot written as a function of height. On the ground it sits low
+         and looks UP the stack — a 110 m rocket seen from above its own nose is a pencil. As the
+         vehicle climbs the camera rises over it, until from the stratosphere up it looks down past
+         the ship at the ground falling away, which is the only thing in the frame that says how high
+         this is. Same law over the Moon, so the landing ends looking up at the lander. */
+      const rise = THREE.MathUtils.smoothstep(alt, 0.1, 2.5), high = THREE.MathUtils.smoothstep(alt, 2.5, 45);
+      wantFov = 64 + 12 * high;                 // and the lens widens with it: depth is what a wide lens draws
+      pitch = -0.20 + 0.42 * rise + 0.30 * high + curPitch;
+    }
+    pitch = THREE.MathUtils.clamp(pitch, -1.35, 1.35);
+    _dir.set(0, 0, 0).addScaledVector(_up, Math.sin(pitch)).addScaledVector(refH, -Math.cos(pitch))
       .applyAxisAngle(_up, curYaw);
-    desired.copy(_target).addScaledVector(_dir, curDist);
+    /* The zoom is in ship-lengths: when a stage leaves, the same wheel position frames what is left. */
+    const wantFrame = Math.sqrt(spanHalf / FULL_SPAN);
+    frame = placed ? frame + (wantFrame - frame) * (1 - Math.exp(-1.5 * dt)) : wantFrame;
+    desired.copy(_target).addScaledVector(_dir, curDist * frame);
   }
 
   collide(desired, mode === 'system');

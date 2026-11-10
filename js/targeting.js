@@ -29,12 +29,14 @@ import { S, getState, getSimTime, getEngineOn, getThrottle, gravityAt, orbitalEl
    has gone stale.
 
    CORRIDOR is the band inside which the mission has been flown to a soft touchdown, measured with
-   tools/mission-sim.mjs at three launch phases: 37 km in (16.4 m/s), 169 km at the window
-   (20.1 m/s) and 304 km out (21.2 m/s), against the 32 m/s LAND_SAFE limit, with margin kept at
-   both ends. It is a landing-safety band, not a promise about *where* you land: that also depends
-   on when you brake. */
+   tools/mission-sim.mjs across launch phases (periselene -> result): 597 km 2.6 m/s, 464 km
+   2.8 m/s, 334 km 3.4 m/s, 205 km (the window) 4.2 m/s, 173 km 4.4 m/s, 142 km 4.8 m/s — all WON
+   with 6.8-7.6 t spare — then 110 km and 79 km LOST (tank dry, 81 and 72 m/s). The low edge is a
+   cliff, not a slope, so the band stops at the last flight that landed. It is a landing-safety
+   band for that autopilot, not a promise about *where* you land: that also depends on when you
+   brake. */
 
-export const CORRIDOR = { lo: 30, hi: 320 };
+export const CORRIDOR = { lo: 140, hi: 600 };
 
 export const aim = { status: 'na', altKm: NaN, tMet: NaN, corridor: false, steps: 0 };
 
