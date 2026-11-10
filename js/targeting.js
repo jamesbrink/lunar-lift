@@ -40,7 +40,7 @@ const AIR_R2 = (C.RE + 420) ** 2;
 
 /* Widened to the measured edges after the window was re-centred: a sweep of launch phases landed
    everything from 745 km down to 123 km (2.6-4.9 m/s); 110 km and 91 km ran the tank dry. */
-export const CORRIDOR = { lo: 125, hi: 745 };
+export const CORRIDOR = { lo: 120, hi: 745 };   // 120: the 123 km flight lands, and targeting reads it as 122.0 km
 
 export const aim = { status: 'na', altKm: NaN, tMet: NaN, corridor: false, steps: 0 };
 
