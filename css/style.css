@@ -157,6 +157,8 @@
   @keyframes pulse{50%{background:rgba(96,58,0,.9)}}
   #views{right:14px;bottom:14px;display:flex;gap:5px;z-index:8}
   #views button{min-width:0;background:var(--panel);backdrop-filter:blur(6px)}
+  /* on the map the cockpit is up too and there is a FOCUS chip more: the row would run under it */
+  body.map #views{flex-direction:column;align-items:stretch} body.map #views button{min-width:118px}
   #helpCard b{color:var(--fg)}
   @media (max-width:1100px){ #modes button{min-width:96px} #guide{max-width:calc(100vw - 40px);top:44px} #tel,#orb{width:200px} }
   .rating{margin:0 auto 16px;font-family:var(--mono)}

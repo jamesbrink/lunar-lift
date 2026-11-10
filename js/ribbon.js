@@ -31,6 +31,7 @@ attribute vec3 aColor;
 attribute float aAlpha;
 uniform vec2 uResolution;
 uniform float uWidthPx;
+uniform vec2 uFade;      // view depth, km, where the band starts to thin and where it is gone; x <= 0: off
 uniform vec3 uColor;
 varying float vSide;
 varying vec3 vCol;
@@ -52,7 +53,13 @@ void main() {
   float nl = length( nrm );
   // Looking straight down the path: the projected tangent collapses; any perpendicular will do.
   nrm = nl > 1e-7 ? nrm / nl : vec2( 1.0, 0.0 );
-  clip.xy += nrm * ( uWidthPx / uResolution ) * aSide * clip.w;
+  /* Depth, for a line that has none: a band of constant width and brightness running a thousand
+     kilometres away and back reads as a corner on the screen. With uFade set it thins to 45 % and
+     fades out with distance from the eye, so the far leg is visibly far and then not drawn. */
+  float far = uFade.x > 0.0 ? smoothstep( uFade.x, uFade.y, clip.w ) : 0.0;
+  vAlpha *= 1.0 - far;
+  float wide = uFade.x > 0.0 ? mix( 1.0, 0.45, smoothstep( uFade.x * 0.15, uFade.x, clip.w ) ) : 1.0;
+  clip.xy += nrm * ( uWidthPx * wide / uResolution ) * aSide * clip.w;
   gl_Position = clip;
   #include <logdepthbuf_vertex>
 }
@@ -108,7 +115,7 @@ export function ribbon(
   geom.setIndex(new THREE.BufferAttribute(index, 1));
   geom.setDrawRange(0, 0);
 
-  const uRes = { value: new THREE.Vector2(1, 1) };
+  const uRes = { value: new THREE.Vector2(1, 1) }, uFade = { value: new THREE.Vector2(0, 1) };
   const tint = new THREE.Color(color);
   const tintGlow = new THREE.Color(glowColor ?? color);
   const glowTied = glowColor == null; // glow re-tints with setColor unless it was given its own
@@ -116,7 +123,7 @@ export function ribbon(
   function mkMat(w, blending, alpha, glow) {
     const uOpacity = { value: alpha };
     const m = new THREE.ShaderMaterial({
-      uniforms: { uResolution: uRes, uWidthPx: { value: w }, uColor: { value: glow ? tintGlow : tint }, uOpacity },
+      uniforms: { uResolution: uRes, uFade, uWidthPx: { value: w }, uColor: { value: glow ? tintGlow : tint }, uOpacity },
       vertexShader: VERT,
       fragmentShader: FRAG,
       defines: { ...(glow ? { GLOW: '' } : {}), ...(vertexColors ? { USE_VCOLOR: '' } : {}) },
@@ -137,6 +144,7 @@ export function ribbon(
 
   const group = new THREE.Group();
   group.add(glow, core);
+  group.setFade = (near, far) => { uFade.value.set(near, far); };   // km of view depth; (0, 1) turns it off
   group.object3D = group; // symmetry for code written against a { object3D }-style handle
 
   let count = 0;

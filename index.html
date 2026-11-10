@@ -45,14 +45,14 @@
 </div>
 
 <!-- Bottom left: what is left in the tanks, as propellant and as delta-v. -->
-<div id="stages" class="hud panel flightonly">
+<div id="stages" class="hud panel onmap">
   <h3>Stages <span id="dvTotal"></span></h3>
   <div id="stagePips"></div>
   <div id="stageHint"></div>
 </div>
 
 <!-- Bottom centre: the instrument you fly by. Throttle, attitude ball, and the modes that steer it. -->
-<div id="cockpit" class="hud flightonly">
+<div id="cockpit" class="hud onmap">
   <div id="throttle" class="panel">
     <div id="thrGauge"><i></i></div>
     <div id="thrBig">0<span>%</span></div>
@@ -92,7 +92,7 @@
     <div><kbd>P</kbd>SAS autopilot on / off</div><div><kbd>V</kbd>SAS aims prograde / retrograde</div>
     <div><kbd>H</kbd>hold attitude: stop all rotation</div><div><kbd>←</kbd><kbd>→</kbd><kbd>↑</kbd><kbd>↓</kbd>look around · <kbd>-</kbd><kbd>=</kbd>zoom</div>
     <div><kbd>T</kbd>RCS stability assist</div><div><kbd>C</kbd>camera: orbit / chase</div>
-    <div><kbd>[</kbd><kbd>]</kbd>time: paused · slow · real time → ×1000 · <kbd>ESC</kbd>pause</div><div><kbd>M</kbd>3-D map · <kbd>F</kbd>focus</div>
+    <div><kbd>[</kbd><kbd>]</kbd>time: paused · slow · real time → ×100000 in open space · <kbd>ESC</kbd>pause</div><div><kbd>M</kbd>3-D map · <kbd>F</kbd>focus</div>
     <div><kbd>R</kbd>restart mission · <kbd>?</kbd>this card</div><div>drag · wheel · double-click: look · zoom · re-centre</div>
   </div>
   <p>The <b>S-1 solid booster</b> burns at full thrust once lit and drops itself at burnout; the S-2 and CSM engines throttle. <b>SAS</b> flies the gravity turn for you and then holds the velocity vector — prograde to speed up, retrograde to brake. In thick air keep the nose near the airflow: the <b>side load</b> readout turns red before the stack breaks.</p>

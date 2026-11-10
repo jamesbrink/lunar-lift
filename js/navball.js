@@ -61,6 +61,58 @@ function marker(c, cx, cy, dir, R, colour, r = 5, label = null) {
   return p;
 }
 
+/* The orbital markers, drawn the way Kerbal Space Program draws them, because that is the
+   vocabulary a player arrives with: PROGRADE is a ring with a dot and three spurs (up, left, right),
+   RETROGRADE the same ring with a cross through it and its spurs up and down-left / down-right,
+   NORMAL and ANTI-NORMAL triangles pointing up and down, RADIAL OUT and IN a ring with spurs
+   pointing out or in. To turn round and brake, put the cross under the crosshair.
+   A marker on the far side of the ball cannot be drawn where it is; it is pinned to the rim in the
+   direction to turn, with a chevron pointing outward, so "retrograde is behind me, that way" reads. */
+const KSP = { pro: '#c8f24a', normal: '#c77dff', radial: '#4cd9f0' };
+function glyph(c, cx, cy, dir, R, kind) {
+  const p = proj(dir, R);
+  if (!p) return null;
+  const k = p.front ? 1 : (R - 9) / R;                 // a pinned marker sits wholly inside the rim
+  const x = cx + p.x * k, y = cy + p.y * k;
+  const colour = kind === 'pro' || kind === 'retro' ? KSP.pro : kind === 'normal' || kind === 'anti' ? KSP.normal : KSP.radial;
+  const r = kind === 'pro' || kind === 'retro' ? 6.5 : 4.5;
+  const draw = () => {
+    c.beginPath();
+    if (kind === 'normal' || kind === 'anti') {
+      const s = kind === 'normal' ? -1 : 1;
+      c.moveTo(x, y + s * r * 1.2); c.lineTo(x - r, y - s * r * 0.7); c.lineTo(x + r, y - s * r * 0.7); c.closePath();
+      c.stroke();
+      c.beginPath(); c.arc(x, y, 0.9, 0, 6.283); c.stroke();
+      return;
+    }
+    c.arc(x, y, r, 0, 6.283);
+    const spur = (a, from, to) => { c.moveTo(x + Math.cos(a) * r * from, y + Math.sin(a) * r * from); c.lineTo(x + Math.cos(a) * r * to, y + Math.sin(a) * r * to); };
+    if (kind === 'pro') { spur(-Math.PI / 2, 1, 1.75); spur(0, 1, 1.75); spur(Math.PI, 1, 1.75); }
+    if (kind === 'retro') {
+      spur(-Math.PI / 2, 1, 1.75); spur(Math.PI / 6 * 5, 1, 1.75); spur(Math.PI / 6, 1, 1.75);
+      c.moveTo(x - r * 0.7, y - r * 0.7); c.lineTo(x + r * 0.7, y + r * 0.7); c.moveTo(x + r * 0.7, y - r * 0.7); c.lineTo(x - r * 0.7, y + r * 0.7);
+    }
+    if (kind === 'out') for (let k = 0; k < 4; k++) spur(Math.PI / 4 + k * Math.PI / 2, 1, 1.7);
+    if (kind === 'in') for (let k = 0; k < 4; k++) spur(Math.PI / 4 + k * Math.PI / 2, 0.3, 1);
+    c.stroke();
+    if (kind === 'pro') { c.beginPath(); c.arc(x, y, 1.3, 0, 6.283); c.fill(); }
+  };
+  c.save();
+  c.globalAlpha = p.front ? 1 : 0.75;
+  c.lineCap = 'round';
+  c.strokeStyle = c.fillStyle = 'rgba(6,10,18,.9)'; c.lineWidth = 4; draw();
+  c.strokeStyle = c.fillStyle = colour; c.lineWidth = 1.7; draw();
+  if (!p.front) {                                   // behind: a chevron on the rim, pointing the way to turn
+    const a = Math.atan2(p.y, p.x), ox = cx + Math.cos(a) * (R - 22), oy = cy + Math.sin(a) * (R - 22);
+    c.translate(ox, oy); c.rotate(a);
+    for (const [w, col] of [[4, 'rgba(6,10,18,.9)'], [1.8, colour]]) {
+      c.strokeStyle = col; c.lineWidth = w; c.beginPath(); c.moveTo(-9, -4); c.lineTo(-5, 0); c.lineTo(-9, 4); c.stroke();
+    }
+  }
+  c.restore();
+  return p;
+}
+
 function compass(c, cx, cy, R, dir, label) {
   const b = toBody(dir);
   if (b.z < -0.15) return;
@@ -217,10 +269,16 @@ export function drawNavball() {
   compass(c, cx, cy, R, east, 'E');
   compass(c, cx, cy, R, north.clone().negate(), 'S');
 
-  let offDeg = 0;                                    // consumed by the bottom status slot below
+  let offDeg = 0, retroNear = false;                 // consumed by the bottom status slot below
   if (vel.lengthSq() > 1e-8) {
-    const pp = marker(c, cx, cy, vel, R, '#5ddc9a', 6);
-    marker(c, cx, cy, vel.clone().negate(), R, '#ffb45c', 5);
+    /* normal = r x v (the orbit's own pole), radial out = the part of 'up' square to the velocity */
+    const nrm = rel.clone().cross(vel), out = rel.clone().addScaledVector(vel, -rel.dot(vel) / vel.lengthSq());
+    if (nrm.lengthSq() > 1e-6 && vel.length() > 0.05) {
+      glyph(c, cx, cy, nrm, R, 'normal'); glyph(c, cx, cy, nrm.clone().negate(), R, 'anti');
+      glyph(c, cx, cy, out, R, 'out'); glyph(c, cx, cy, out.clone().negate(), R, 'in');
+    }
+    glyph(c, cx, cy, vel.clone().negate(), R, 'retro');
+    const pp = glyph(c, cx, cy, vel, R, 'pro');
     if (pp) {
       /* The figure a pilot reads is against the air while there is air: over the ground below
          60 km (inertial 'prograde' on the pad is 409 m/s of planet spin, and the label said
@@ -228,8 +286,8 @@ export function drawNavball() {
          is no direction to be off. */
       const gv = !nearMoon && S.pos.length() - RE < 60 ? groundVel(new THREE.Vector3()) : vel;
       offDeg = gv.length() < 0.02 ? 0 : Math.acos(Math.min(1, Math.max(-1, toBody(gv.clone().normalize()).z))) * 57.2958;
-      c.strokeStyle = 'rgba(93,220,154,.4)'; c.lineWidth = 1; c.setLineDash([2, 3]);
-      c.beginPath(); c.moveTo(cx, cy); c.lineTo(cx + pp.x, cy + pp.y); c.stroke(); c.setLineDash([]);
+      /* which of the two the nose is nearer to is what the status line names */
+      retroNear = offDeg > 90;
     }
   }
 
@@ -238,12 +296,10 @@ export function drawNavball() {
   /* eccentricity vector — points at PERIapsis, so the +e marker is perigee/periselene
      and the -e one is apogee/apolune */
   const ecc = new THREE.Vector3().crossVectors(vel, rel.clone().cross(vel)).multiplyScalar(1 / mu).addScaledVector(rel.clone().normalize(), -1);
-  if (isFinite(el.a) && el.a > 0 && el.e < 1 && el.e > 1e-4) {
-    ecc.normalize();
-    marker(c, cx, cy, centre.clone().addScaledVector(ecc, el.a * (1 - el.e)).sub(S.pos), R, '#ff6a5c', 4);
-    marker(c, cx, cy, centre.clone().addScaledVector(ecc, -el.a * (1 + el.e)).sub(S.pos), R, '#8fdcff', 4);
-  }
-  if (rM < 1.2e6) marker(c, cx, cy, moon.clone().sub(S.pos), R, '#c9cbd2', 4);
+  if (isFinite(el.a) && el.a > 0 && el.e < 1 && el.e > 1e-4) ecc.normalize();
+  /* (apoapsis and periapsis are on the orbit plot and the map, not on this ball: two more rings
+     among the velocity markers were two more things to mistake for prograde) */
+  if (rM < 1.2e6 && !nearMoon) marker(c, cx, cy, moon.clone().sub(S.pos), R, '#e58cff', 4, 'MOON');
   /* From lunar space Earth is the destination — give it the same courtesy marker the Moon gets
      from cislunar space, so the return burn can be aimed off the ball. */
   if (nearMoon) marker(c, cx, cy, S.pos.clone().negate(), R, '#7fb2e8', 5, 'EARTH');
@@ -268,15 +324,6 @@ export function drawNavball() {
   c.stroke();
   if (isBurning()) { c.fillStyle = 'rgba(255,122,60,.95)'; c.beginPath(); c.arc(cx, cy, 2.6, 0, 6.283); c.fill(); }
 
-  /* Top legend — 'prograde' names the green ring. Its box (x 57..100, y 0..12 incl. the 'g'
-     descender) is clear of the 0.78R tick band, whose topmost glyph box starts at y ≈ 15.6.
-     It now sits on the same opaque strip the bottom status slot uses — over the flat sky fill
-     the old rgba(150,165,190,.45) glyph composited to 1.30:1; #c9cbd2 on the strip is 10.6:1
-     and the strip is invisible on the black half of the dial. Slot unchanged. */
-  c.fillStyle = 'rgba(8,11,18,.85)'; c.fillRect(cx - 21, 0, 49, 12);
-  c.fillStyle = '#c9cbd2'; c.font = '9px ui-monospace,monospace';
-  c.fillText('prograde', cx - 18, 10);
-
   /* Status slot — the strip y ∈ [137, 149] is the one and only place a string lives at the
      bottom of the ball area, backed by an opaque panel. An earlier layout piled THREE strings onto the
      old shared baseline y = NB−4: 'x° off prograde' at x = 4, 'nose = centre' at x = 49, and
@@ -287,11 +334,13 @@ export function drawNavball() {
      'nose = centre' (12) = 65 px — the panel spans at most x ∈ [23, 127], inside the canvas.
      The orbit status strings (escape/impact) live in the sub-map's own tagged slot — the ball
      slot carries the ball's state only, so the two can never collide. */
-  const statusTxt = offDeg > 4 ? `${offDeg.toFixed(0)}° off prograde` : 'nose = centre';
+  const off = retroNear ? 180 - offDeg : offDeg, name = retroNear ? 'retrograde' : 'prograde';
+  const statusTxt = off > 4 ? `${off.toFixed(0)}° off ${name}` : `on ${name}`;
+  c.font = '9px ui-monospace,monospace';
   const statusW = statusTxt.length * 5.4;
   c.fillStyle = 'rgba(8,11,18,.92)';
   c.fillRect(cx - statusW / 2 - 5, 137, statusW + 10, 12);
-  c.fillStyle = offDeg > 4 ? '#5ddc9a' : 'rgba(150,165,190,.7)';
+  c.fillStyle = off > 4 ? 'rgba(200,210,225,.85)' : KSP.pro;
   c.fillText(statusTxt, cx - statusW / 2, 146);
 
   return { el, up, north, east, nearMoon, vel, centre, ecc };

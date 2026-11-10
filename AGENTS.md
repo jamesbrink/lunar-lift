@@ -135,7 +135,7 @@ zero; Ap/Pe mixed a Moon-centred position with inertial velocity and printed `ES
 
 In flight the game integrates at exactly `DTPHYS = 0.1 s`. `js/main.js` keeps an accumulator
 (`bank`): each frame adds `frame time × warp` to it (frame time is capped at 0.1 s of real time) and
-spends it in whole `physStep(DTPHYS)` calls — at most 600 a frame, so a frame too slow for its warp
+spends it in whole `physStep(DTPHYS)` calls — at most 20,000 a frame (0.41 µs a coasting step, measured), so a frame too slow for its warp
 falls behind the warp rather than take a coarser step. Warp changes how many steps a frame takes
 and nothing else: ×1000 is 167 steps a frame at 60 fps, ×1 is one step every six frames, ×0.25 one
 every twenty-four. The trajectory is therefore the same on a 60 Hz and a 144 Hz display and at
@@ -163,8 +163,11 @@ always and says so in its source; anything that certifies a mission must use the
   **×0.25** is the same 0.1 s steps, fewer per second; the interpolation is what makes it smooth.
 - Warp is capped by place (`warpCap()`, enforced every frame by `guardWarp()`): ×4 below 70 km
   (×16 under fully open mains), ×4 within 15 km of the Moon, ×32 within 50 km, ×128 within 400 km,
-  ×16 below 140 km of the Earth, ×8 while the engine burns, ×1000 otherwise in flight; it drops to
-  ×1 on crossing the Moon's sphere of influence either way. `capWhy` carries the reason to the log.
+  ×16 below 140 km of the Earth, ×8 while the engine burns, ×1000 below 2,000 km of the Earth,
+  ×10000 within 30,000 km of the Earth or 5,000 km of the Moon, ×100000 beyond; it drops to ×1 on
+  crossing the Moon's sphere of influence either way. `warpHorizon()` estimates the mission time to
+  the next place that lowers the cap and `js/main.js` spends at most a quarter of it per frame, so
+  a fast coast arrives eased down instead of a frame (10,000 s at ×100000) past the door. `capWhy` carries the reason to the log.
 
 History, because these notes were wrong about it: before commit 55f18fa the step was
 `min(0.1, simDt / steps)` — the frame time itself below ×6, 1/60 s at ×1 — while this file, the
@@ -508,6 +511,16 @@ These five are carried as written — rule and history together — because `js/
 - Shoot a lunar surface burn from the orbit camera.
 
 ### Camera, map and trajectory ribbon
+
+- A closed orbit is drawn on the map as the whole analytic ellipse (`js/mapview.js`, from the
+  elements `js/predictor.js` exports in `path`), with Ap and Pe markers; a transfer or escape is the
+  integrated coast. In the flight view the ribbon thins and fades with distance from the eye
+  (`ribbon.setFade`): at constant width a far leg read as a sharp corner.
+- The cockpit (throttle, navball, modes) and the stage list stay up on the map.
+- Navball markers are KSP's: prograde ring with three spurs, retrograde ring with a cross, normal
+  triangles, radial rings; a marker on the far side is pinned inside the rim with a chevron.
+- A dropped stage is stepped at `DTPHYS` like the ship and lives until it lands or is 5,000 km
+  away (`tools/debris-orbit.mjs`).
 
 - The trajectory ribbon is the engine-off, drag-free coast from the present state (the orbit the
   ship is ON), and its apsis markers are the conic's own; `tools/orbit-line.mjs` gates that the

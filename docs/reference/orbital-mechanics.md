@@ -55,7 +55,7 @@ S.pos.addScaledVector(S.v, dt);      // position uses the NEW velocity
 ```
 
 `js/main.js` drives it with an accumulator: each frame banks `dtReal · WARP` and spends it in
-whole steps, so **h = `DTPHYS` = 0.1 s exactly** in flight — at most 600 steps a frame, and a frame
+whole steps, so **h = `DTPHYS` = 0.1 s exactly** in flight — at most 20,000 steps a frame, and a frame
 slow enough to want more runs behind the warp instead of stepping coarser. Warp multiplies the
 number of physical steps rather than the size of one: the mission clock is real seconds at every
 warp setting, and ×1000 costs 167 integration steps per frame instead of lying about the physics.

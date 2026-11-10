@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import { RE, RM, MOON_DIST, MOON_U, MOON_V, SOI_M, moonPos } from './constants.js';
 import { S, getSimTime, getState, gravityAt } from './physics.js';
 import { ribbon } from './ribbon.js';
+import { path as orbit, marker } from './predictor.js';
 
 /* What the map adds to the scene. The map IS the scene — the same Earth, Moon and trajectory
    ribbon, seen from the map camera — so all that is missing at 100 000 km is what is too small to
@@ -23,6 +24,7 @@ const CAP = 4096;
 const path = ribbon({ widthPx: 2.4, glowWidthPx: 8, vertexColors: true, capacity: CAP, opacity: 1, glowOpacity: 0.4 });
 const pts = new Float32Array(CAP * 3), cols = new Float32Array(CAP * 3);
 const _p = new THREE.Vector3(), _v = new THREE.Vector3(), _a = new THREE.Vector3(), _mm = new THREE.Vector3(), _prev = new THREE.Vector3();
+const _kept = new THREE.Vector3();
 const meet = { r: Infinity, t: 0, moon: new THREE.Vector3(), pos: new THREE.Vector3() };
 let tick = 1;
 function coast() {
@@ -37,22 +39,45 @@ function coast() {
     pts[n * 3] = _p.x; pts[n * 3 + 1] = _p.y; pts[n * 3 + 2] = _p.z;
     cols[n * 3] = red ? 1 : past ? 1 : 0.36; cols[n * 3 + 1] = red ? 0.3 : past ? 0.78 : 0.95; cols[n * 3 + 2] = red ? 0.25 : past ? 0.35 : 0.62; n++;
   };
-  put(false);
-  for (let k = 0; k < 40000 && n < CAP - 1; k++) {
+  put(false); _kept.copy(_p);
+  for (let k = 0; k < 200000 && n < CAP - 1; k++) {
     moonPos(t, _mm);
     const rE = _p.length(), rM = _p.distanceTo(_mm);
     if (rM < meet.r) { meet.r = rM; meet.t = t; meet.moon.copy(_mm); meet.pos.copy(_p); }
     else if (rM > meet.r * 1.02 && meet.r < SOI_M) past = true;
-    if (rE < RE || rM < RM) { put(true); break; }
+    if (rE < RE || rM < RM) { put(true); _kept.copy(_p); break; }
     const dt = THREE.MathUtils.clamp(0.004 * Math.min(rE, rM) / Math.max(_v.length(), 1e-3), 1, 300);
     _v.addScaledVector(_a, dt / 2); _p.addScaledVector(_v, dt); t += dt;      // velocity Verlet, as js/targeting.js
     gravityAt(_p, _a, t); _v.addScaledVector(_a, dt / 2);
     swept += _prev.angleTo(_p); _prev.copy(_p);
-    put(false);
+    /* A vertex only where the line has moved enough to show: one per step filled the buffer in the
+       first hours of a transfer (1 s steps near the Earth) and the path stopped a third of the way
+       to the Moon, at a hook. */
+    if (_p.distanceToSquared(_kept) > 1.4e-4 * Math.min(rE, rM) ** 2) { put(false); _kept.copy(_p); }
     if (swept > 6.4 && rM > SOI_M) break;                 // one lap of a closed orbit
     if (t - getSimTime() > 8 * 86400 || rE > 1.5e6) break;
   }
+  if (_kept.distanceToSquared(_p) > 0) put(false);          // the end of the line is where it ended
   path.setPoints(pts, n); path.setColors(cols, n);
+}
+
+/* A closed orbit is drawn as what it is: the whole ellipse through the present position and
+   velocity, from the conic's own elements (js/predictor.js works them out for its markers), with
+   its apoapsis and periapsis marked. Points are offsets from the body, in a group that sits on the
+   body, so a lunar orbit rides along with the Moon. The part of an ellipse that is under the
+   ground is hidden by the ground. Anything that is not a closed orbit round one body — a transfer,
+   an escape — is the integrated coast above. */
+const conic = ribbon({ color: 0x5cf29e, widthPx: 2.4, glowWidthPx: 8, capacity: 300, opacity: 1, glowOpacity: 0.4 });
+const conicGroup = new THREE.Group();
+const cpts = new Float32Array(300 * 3);
+let apTag = null, peTag = null;
+function drawConic() {
+  const { a, e, eHat, qHat } = orbit, b = a * Math.sqrt(1 - e * e);
+  for (let k = 0; k <= 256; k++) {
+    const E = k / 256 * Math.PI * 2, x = a * (Math.cos(E) - e), y = b * Math.sin(E);
+    cpts[k * 3] = eHat.x * x + qHat.x * y; cpts[k * 3 + 1] = eHat.y * x + qHat.y * y; cpts[k * 3 + 2] = eHat.z * x + qHat.z * y;
+  }
+  conic.setPoints(cpts, 257);
 }
 
 function tag(text, colour, ring) {
@@ -107,9 +132,13 @@ export function initMapView(scene) {
   meetTag = tag('MOON AT ARRIVAL', '#ffd27a', false); meetTag.scale.set(0.3, 0.075, 1);
   meetRing = ring(RM, 0xffd27a, 0.9, false);
   path.frustumCulled = false;
+  conic.frustumCulled = false; conicGroup.add(conic);
+  apTag = marker('Ap', '#8df0b4', group); peTag = marker('Pe', '#ffd27a', group);
+  apTag.material.depthTest = peTag.material.depthTest = false;      // an apsis behind the planet is still where the orbit turns
+  apTag.renderOrder = peTag.renderOrder = 9;
   moonDot = dot('#d8dde8'); earthDot = dot('#6fa8ff');
   group.add(moonDot, earthDot);
-  group.add(shipMark, earthTag, moonTag, ring(MOON_DIST, 0x6f86a8, 0.55, false), soiRing, path, meetTag, meetRing);
+  group.add(shipMark, earthTag, moonTag, ring(MOON_DIST, 0x6f86a8, 0.55, false), soiRing, path, conicGroup, meetTag, meetRing);
   scene.add(group);
 }
 
@@ -129,4 +158,16 @@ export function updateMapView(on, dt = 0.016) {
   const show = getState() === 'flying' && meet.r < SOI_M * 2 && meet.moon.distanceTo(_m) > SOI_M * 0.5;   // not while it would sit on the Moon's own name
   meetTag.visible = meetRing.visible = show;
   if (show) { meetTag.position.copy(meet.moon); meetRing.position.copy(meet.moon); }
+  /* the orbit and its apsides */
+  const exact = getState() === 'flying' && orbit.n > 1 && orbit.exact;
+  conicGroup.visible = exact; path.visible = !exact;
+  apTag.visible = peTag.visible = false;
+  if (exact) {
+    if (orbit.frame === 'moon') conicGroup.position.copy(_m); else conicGroup.position.set(0, 0, 0);
+    drawConic();
+    apTag.visible = true; apTag.position.copy(conicGroup.position).add(orbit.apPos); apTag.userData.label(orbit.apAlt);
+    if (orbit.peAlt > 0) { peTag.visible = true; peTag.position.copy(conicGroup.position).add(orbit.pePos); peTag.userData.label(orbit.peAlt); }
+  } else if (getState() === 'flying' && meet.r < SOI_M && meet.r > RM && meet.t > getSimTime() + 60) {
+    peTag.visible = true; peTag.position.copy(meet.pos); peTag.userData.label(meet.r - RM);      // the lunar pass the coast is on
+  }
 }

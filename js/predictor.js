@@ -35,7 +35,8 @@ const MINT = [0.36, 0.95, 0.62], RED = [1, 0.22, 0.18];
 
 /* The stored prediction. rel is km from the frame body's centre at time t. */
 const rel = new Float64Array(PRED_MAX * 3), tt = new Float64Array(PRED_MAX);
-export const path = { n: 0, frame: 'earth', impact: null, closed: false, ap: -1, pe: -1, apAlt: 0, peAlt: 0, exact: false, apPos: new THREE.Vector3(), pePos: new THREE.Vector3() };
+export const path = { n: 0, frame: 'earth', impact: null, closed: false, ap: -1, pe: -1, apAlt: 0, peAlt: 0, exact: false, apPos: new THREE.Vector3(), pePos: new THREE.Vector3(),
+  a: 0, e: 0, eHat: new THREE.Vector3(), qHat: new THREE.Vector3() };   // the conic, when exact: semi-major axis, eccentricity, unit vectors to periapsis and 90 deg on
 let cursor = 1;
 
 const line = ribbon({ widthPx: 2.2, glowWidthPx: 9, vertexColors: true, capacity: CAP, opacity: 1, glowOpacity: 0.55 });
@@ -48,7 +49,7 @@ let groundE = null, groundM = null, setWarn = () => {};
 let impactWarn = '';
 
 /* ---- apsis markers: a diamond on the path and its altitude, constant size on screen ---- */
-function marker(tag, colour) {
+export function marker(tag, colour, parent = predLine) {
   const cv = document.createElement('canvas'); cv.width = 256; cv.height = 96;
   const tex = new THREE.CanvasTexture(cv);
   tex.colorSpace = THREE.SRGBColorSpace;
@@ -71,7 +72,7 @@ function marker(tag, colour) {
     g.fillStyle = colour; g.fill(); g.lineWidth = 3; g.strokeStyle = 'rgba(4,8,14,.9)'; g.stroke();
     tex.needsUpdate = true;
   };
-  predLine.add(sp);
+  parent.add(sp);
   return sp;
 }
 let apMark = null, peMark = null;
@@ -197,11 +198,12 @@ export function predict() {
     const r = _r0.length(), v2 = _v0.lengthSq(), a = 1 / (2 / r - v2 / mu);
     _h.crossVectors(_r0, _v0); _e.crossVectors(_v0, _h).multiplyScalar(1 / mu).addScaledVector(_r0, -1 / r);
     const e = _e.length();
-    if (a > 0 && e < 1 && e > 1e-4 && a * (1 + e) < (moon ? SOI_M : 300000)) {
-      _e.multiplyScalar(1 / e);
+    if (a > 0 && e < 1 && a * (1 + e) < (moon ? SOI_M : 300000)) {
+      if (e > 1e-6) _e.multiplyScalar(1 / e); else _e.copy(_r0).normalize();     // a circle has no periapsis: any axis will do
       path.exact = true;
       path.apAlt = a * (1 + e) - R; path.peAlt = a * (1 - e) - R;
       path.apPos.copy(_e).multiplyScalar(-a * (1 + e)); path.pePos.copy(_e).multiplyScalar(a * (1 - e));
+      path.a = a; path.e = e; path.eHat.copy(_e); path.qHat.crossVectors(_h, _e).normalize();
     }
   }
 
@@ -231,6 +233,8 @@ export function updatePredictor(camera) {
 
   if (path.frame === 'moon') moonPos(sim, _base); else _base.set(0, 0, 0);
   predLine.position.copy(S.pos);                // vertices are offsets from the ship: see the header
+  /* the far leg thins and fades: a quarter of the body's radius to four fifths of it from the eye */
+  { const R = path.frame === 'moon' ? RM : RE; line.setFade(0.25 * R, 0.8 * R); }
   const ox = S.pos.x - _base.x, oy = S.pos.y - _base.y, oz = S.pos.z - _base.z;   // ship, frame-relative
 
   /* The gap that keeps the ribbon out of the hull scales with the view: 9 % of the camera distance,

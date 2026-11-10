@@ -55,9 +55,9 @@ Read from the `keydown` handler in `js/main.js` and the hold-key reads in `js/ph
 | Mouse wheel | Zoom |
 
 Warp ladder (`WARPS` in `js/constants.js`): paused, ×0.25, ×1, 2, 4, 8, 16, 32, 64, 128, 256, 512,
-1000, and ×10000 on the pad only. The convention that makes coasting honest: **in flight the step is
+1000, 10000 and 100000 (the top two for the pad and for open space). The convention that makes coasting honest: **in flight the step is
 always `DTPHYS = 0.1 s`.** `js/main.js` banks `frame time × warp` and spends it in whole 0.1 s steps
-(up to 600 a frame), so warp changes how many steps a frame takes and never their size — the
+(up to 20,000 a frame: a coasting step costs 0.41 µs in the browser), so warp changes how many steps a frame takes and never their size — the
 trajectory is the same at ×0.25, ×1 and ×1000 and on a 60 Hz or a 144 Hz display, and it is the one
 `tools/mission-sim.mjs` certifies. A frame too slow for its warp falls behind the warp rather than
 take a coarser step. Ten steps a second would stutter, so what is drawn is the state blended
@@ -68,7 +68,11 @@ window that way and hit the Moon at 2,559 m/s instead of passing it at 346 km.)
 
 Warp is capped by place — ×4 in the air (below 70 km; ×16 under open mains) or within 15 km of the
 Moon, ×32 within 50 km of it, ×128 within 400 km, ×16 below 140 km of the Earth, ×8 while the
-engine burns, ×1000 otherwise — and drops to ×1 on crossing the Moon's sphere of influence. The one exception to the fixed step is standing on the pad with the engines
+engine burns, ×1000 below 2,000 km of the Earth, ×10000 within 30,000 km of the Earth or 5,000 km
+of the Moon, ×100000 beyond — and drops to ×1 on crossing the Moon's sphere of influence. A fast
+coast eases itself down as it arrives: each frame spends at most a quarter of the estimated time to
+the next place that lowers the cap (`warpHorizon()`), so the certified coast reaches the Moon's
+sphere of influence in about 5 s at ×100000 without stepping past it. The one exception to the fixed step is standing on the pad with the engines
 cold and the throttle shut: there a step is an exact rotation with the planet at any size, so time
 is free up to ×10000 (a day in 8.6 s). The sun's bearing is fixed in inertial space and the planet
 turns under it, so that is how you wait for the launch window, or watch night fall: the sky, the
