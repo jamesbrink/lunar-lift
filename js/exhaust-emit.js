@@ -119,7 +119,12 @@ function spawnTrail(set, pos, quat, vel, throttle, simDt, alt, reach) {
   for (let c = 0; c < n; c++) {
     const tau = (c + Math.random()) * span;                       // see spawnPlume: one frame is not one instant
     const back = -set.tailZ * VS + reach * (0.6 + 0.4 * Math.random());
+    /* Where a puff laid tau seconds ago is NOW: the vehicle was at pos − vel·tau, and the air has
+       carried the puff along at its own velocity since. Back-projecting along the inertial velocity
+       alone left out the air's 409 m/s — 7 m at one frame of x1, but 50-400 m under time warp, and
+       each frame's puffs landed as their own displaced row instead of one column. */
     _sp.copy(pos).addScaledVector(vel, -tau).addScaledVector(_ax, back);
+    _sp.x += wx * tau; _sp.z += wz * tau;
     const kick = 0.02 + 0.03 * Math.random();
     _svv.set(wx + _ax.x * kick + (Math.random() - .5) * 0.016, _ax.y * kick + (Math.random() - .5) * 0.016,
              wz + _ax.z * kick + (Math.random() - .5) * 0.016);
