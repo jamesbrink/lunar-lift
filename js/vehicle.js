@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { VS, RE, RM, EARTH_SPIN, DTPHYS, MOON_RATE, moonPos, moonVel, csmParkPos, csmParkVel } from './constants.js';
-import { rocketGroup, stages, lesGroup, bellMetal } from './saturn.js';
+import { rocketGroup, stages, lesGroup, adapterGroup, bellMetal } from './saturn.js';
 import { S, airDensity, getSimTime, getState, landing, getCsmParked } from './physics.js';
 import { ATMO_TOP } from './aero.js';
 import { TAIL_Z, R_SM_DRAWN } from './stations.js';
@@ -336,6 +336,10 @@ export function resetStages() {
   if (lesGroup.parent !== stages[2].meshes) {
     lesGroup.position.set(0, 0, 0); lesGroup.quaternion.identity(); lesGroup.scale.setScalar(1);
     stages[2].meshes.add(lesGroup);
+  }
+  if (adapterGroup.parent !== stages[2].meshes) {
+    adapterGroup.position.set(0, 0, 0); adapterGroup.quaternion.identity(); adapterGroup.scale.setScalar(1);
+    stages[2].meshes.add(adapterGroup);
   }
   rocketGroup.visible = true;
   rocketGroup.quaternion.identity();

@@ -17,7 +17,7 @@ server on another port. The server serves only files under the repo and refuses 
 dot-segment (`/.git/config` is 403).
 
 `window.game` is the debug handle:
-`state() ignite stage jettisonLES setSas(on, retro) warp(n) camera(name) map(on) ff(seconds)
+`state() ignite stage jettisonLES jettisonAdapter setSas(on, retro) warp(n) camera(name) map(on) ff(seconds)
 setThrottle(v) nudge(ω) teleport(pos, vel, simTime) reset()`, plus `_cam`, `_pred`, `setCam(d)` and
 `setView(yaw, pitch, dist)` (snapped, for scripted poses). `camera(name)` takes `'orbit'` or
 `'chase'`; the far view is `map(true)`. `warp(n)` takes a value from `WARPS` and ignores any other.
@@ -740,7 +740,7 @@ await tab.evaluate(`(async () => {
 - `js/predictor.js` — the trajectory ribbon ahead of the ship, apsis markers, the impact warning.
 
 **Vehicle and exhaust**
-- `js/saturn.js` — the Saturn V as drawn hardware and the stage records (imported headless: must tolerate having no canvas).
+- `js/saturn.js` — the Saturn V as drawn hardware and the stage records (imported headless: must tolerate having no canvas). The LM launches inside the drawn SLA adapter (`adapterGroup`, jettisoned at the SM engine's first burn in space) — display-only, its mass is carried by GEOM row 2.
 - `js/chutes.js` — the drawn drogues and mains; what is deployed is `physics.js`'s state, the pendulum is the mission clock's, and the collapse after splashdown runs on real seconds, held while paused.
 - `js/gear.js` — when the lander's legs are down (`saturn.js` owns the legs and `setGear()`), and each foot's trim to its own ground.
 - `js/vehicle.js` — the conductor: pose, staging (`detachStage`, `resetStages`), debris, and `updateBurnVisuals`, which turns "this stage is burning" into calls on the five exhaust modules.

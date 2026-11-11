@@ -621,4 +621,32 @@ stages[2].meshes.add(lesGroup);
   }
 }
 
+/* ---- SLA adapter: the shroud the lunar module launches inside. Same construction as the tower —
+   its own group, children in absolute build coordinates, group at the local origin — and physics
+   takes it off at the SM engine's first burn in space (separateAdapter). Drawn hardware only: the
+   adapter's mass and shape are already inside GEOM row 2 ("CSM service body + adapter"), so this
+   shell changes nothing that flies. It tops out at +32.6, below the cabin's top facet, so the crew
+   stage and tower poke out of it the way the CM cone poked out of Apollo's SLA. ---- */
+export const adapterGroup = new THREE.Group(); adapterGroup.name = 'sla';
+stages[2].meshes.add(adapterGroup);
+if (stages.length > 3) {
+  /* A 16-sided lathe (1 u = 1.4 m) from the IU rim to a lip round the ascent stage. Base foot at
+     +21.94, 0.06 u off the +22.0 ring plane; the belly passes r 3.48 at +25.6 against the footpad
+     dishes' 3.42, and every facet keeps ≥ 0.05 u clear of the struts (2.62), the engine-ring rims
+     (1.76) and the cabin (0.97). Double-sided `tone`: an open tube shows its inside from below and
+     after separation, and with no flat faces there is nothing to go coplanar. */
+  const pts = [[2.40, 21.94], [2.95, 23.8], [3.40, 25.0], [3.55, 26.15], [3.55, 27.4],
+    [3.10, 29.2], [2.45, 30.9], [1.80, 32.0], [1.35, 32.6]].map(([r, z]) => new THREE.Vector2(r, z));
+  const shell = new THREE.Mesh(new THREE.LatheGeometry(pts, 16), tone);
+  shell.rotation.x = Math.PI / 2; shell.castShadow = true; outline(shell); adapterGroup.add(shell);
+  {                                                    // four petal seams, 0.03 u proud along the
+    const edge = pts.map(v => new THREE.Vector2(v.x + 0.03, v.y));   // profile itself (a lathe strip
+    for (const azd of [45, 135, 225, 315]) {           // keeps the corners; the shell's vertices sit
+      const s = new THREE.Mesh(new THREE.LatheGeometry(edge, 1,    // at az −90 + 22.5k, so these cut
+        THREE.MathUtils.degToRad(azd + 90 - 1.5), THREE.MathUtils.degToRad(3)), seam);   // through them)
+      s.rotation.x = Math.PI / 2; s.castShadow = true; adapterGroup.add(s);
+    }
+  }
+}
+
 stages.forEach((st) => rocketGroup.add(st.meshes));

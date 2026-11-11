@@ -382,6 +382,30 @@ export function separateLES() {
   audio.thud();
 }
 
+/* The SLA adapter — the drawn shroud around the lunar module (adapterGroup in saturn.js). In
+   Apollo the shroud went with transposition after TLI; the event that means that here is the SM
+   engine lighting in space for the first time, so the petals fall away as the TLI burn begins and
+   the lander is revealed for the coast. Also deliberately visual: the adapter's mass and shape are
+   already carried by GEOM row 2 ("CSM service body + adapter"), so nothing that flies moves. */
+export const ADAPTER_ALT = 120;                                  // km; TLI lights near 190 km
+let adapterSeparated = false;
+
+export function separateAdapter() {
+  if (state !== 'flying' || adapterSeparated || !vehicleOps.adapter) return;
+  adapterSeparated = true;
+  const worldPos = S.pos.clone();
+  const up = fwd();
+  const lat = new THREE.Vector3(1, 0, 0).applyQuaternion(S.q);   // the petals spring sideways
+  vehicleOps.detachStage(vehicleOps.adapter, S.pos, S.q);
+  vehicleOps.addDebris({ mesh: vehicleOps.adapter, vel: S.v.clone().addScaledVector(up, 0.002).addScaledVector(lat, 0.006),
+    angVel: new THREE.Vector3(0.05, 0.22, 0.1), age: 0 });
+  for (let k = 0; k < 14; k++) vehicleOps.spawnParticle(worldPos,
+    S.v.clone().addScaledVector(lat, 0.004 + Math.random() * 0.02)
+      .add(new THREE.Vector3().randomDirection().multiplyScalar(0.01)), 0.5 + Math.random() * 0.5, [0.9, 0.91, 0.95], 6 + Math.random() * 5, 1);
+  hooks.addLog('SLA ADAPTER JETTISONED — THE LANDER IS EXPOSED', 'good');
+  audio.thud();
+}
+
 /* Drop a stage. Default: whatever engine is flying; with an index: that stage (the round trip uses
    separateStage(3) on touchdown and separateStage(4) after docking, where the "active" engine and
    the hardware being thrown are deliberately not the same decision). */
@@ -611,6 +635,7 @@ export function physStep(dt) {
   const ratio = I0.py / I.py, ratioR = I0.roll / I.roll;
   const altE = S.pos.length() - RE;
   if (!lesSeparated && altE > LES_ALT) separateLES();
+  if (!adapterSeparated && altE > ADAPTER_ALT && activeEngine() === 2 && getThrottle() > 0.05) separateAdapter();
   const pitchIn = (keys['w'] ? 1 : 0) - (keys['s'] ? 1 : 0);          // the arrow keys belong to the camera
   const yawIn = (keys['a'] ? 1 : 0) - (keys['d'] ? 1 : 0);
   const rollIn = (keys['e'] ? 1 : 0) - (keys['q'] ? 1 : 0);
@@ -929,6 +954,7 @@ export function resetSim() {
     st.separated = false; st.fuel = SPECS[idx].fuel; loggedStageOut[idx] = false;
   });
   lesSeparated = false;
+  adapterSeparated = false;
   // the round trip: the CSM flies mated, the LM has not landed, nothing is parked or docked
   csmParked = false; docked = false; moonPerch = null;
   landing.landedOnMoon = false;

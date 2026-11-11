@@ -148,6 +148,13 @@ Honest caveats about this mapping, to keep the docs from overselling realism:
 - The mass and aerodynamic geometry (`GEOM` in `js/stations.js`) is the drawn vehicle's: S-1 42 m long
   and 10 m across, S-2 26 m, CSM body and adapter 22 m at 6.2 m across, command module 8.4 m — 99 m
   from tail to apex, in build units of 1.4 m. These are the game's proportions, not Apollo's.
+- **The LM launches inside a drawn SLA adapter** (`adapterGroup` in `js/saturn.js`): a 16-sided shroud
+  from the IU rim (+21.94) bulging past the footpad dishes to a lip below the cabin at +32.6, so the
+  lander is hidden from the pad the way Apollo's was. It jettisons with the SM engine's first burn in
+  space (physics `separateAdapter`, above `ADAPTER_ALT = 120` km), where Apollo shed it after
+  transposition. Purely drawn: the adapter's 1.79 t and its shape are already carried by GEOM row 2
+  ("CSM service body + adapter"), so nothing that flies moved — the certified telemetry is
+  byte-identical with and without the shell.
 
 ## Sources
 
