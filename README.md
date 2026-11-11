@@ -87,8 +87,8 @@ stack is 1.6 m up when the arms stop being solid); yaw held from ignition with S
 arm 0.8 s later; a stack pitched over at ignition falls back and hits the ground at 142 m/s — it
 used to tunnel into the Earth. The SAS pitch program is timed from the moment the hold-down lets
 go, so waiting on the pad for the launch window does not change the ascent: waits of 0, 120, 300
-and 3,600 s reach the same S-2 burnout state to within 3 m/s (6.416 km/s, apogee 584 km, max-Q
-25.4 kPa; the hour-long wait lands on 6.4135 — the per-figure note in
+and 3,600 s reach the same S-2 burnout state to within 3 m/s (6.384 km/s, apogee 358 km, max-Q
+22.8 kPa; the hour-long wait lands on 6.3811 — the per-figure note in
 `docs/reference/mission-design.md`).
 
 Flight controls are inertial: the keys apply torque against the vehicle's live moment of inertia, so
@@ -100,17 +100,19 @@ free:
   (slender-body lift, cross-flow drag, the S-1's fins) as well as Mach-dependent axial drag, and
   `js/physics.js` takes that force's moment about the live centre of mass — so the nose weathervanes
   into the airflow while the centre of pressure is behind the centre of mass (measured static margin
-  +4.4 m on the pad, growing as the S-1 drains) and the rate is damped in proportion to dynamic
-  pressure. After the S-1 and its fins are gone the measured margin is negative (−7.2 m at
+  +3.2 m on the pad, growing as the S-1 drains) and the rate is damped in proportion to dynamic
+  pressure. After the S-1 and its fins are gone the measured margin is negative (−10.3 m at
   staging), by which point the air is nearly gone too.
 - **Side load breaks the vehicle.** The stack is rated for 0.5 g of lateral aerodynamic load (6 g
   for the bare CSM). Over that it accumulates strain — faster the further over — and lets go when
   the strain reaches its limit, or at once at three times the rating: `AERODYNAMIC BREAKUP`,
-  mission lost. The SAS ascent peaks at 0.024 g (measured, T+85 s, Mach 2, 5° off the airflow).
-  Measured the other way, SAS off and full pitch from T+60 s, through max-Q: let go after 5 s
-  (41° off the airflow, 0.55 g) and SAS brings it back; after 6 s (50°, 0.68 g) it survives with
-  77 % of its strain used; keep holding and it breaks up at 6.9 s. Above ~30 km (pitch held from
-  T+100 s) the air is too thin to hurt it.
+  mission lost. The SAS ascent peaks at 0.016 g (measured, T+87 s, Mach 1.75, 4.6° off the airflow).
+  Measured the other way, SAS off and full pitch-up from T+60 s, through max-Q: let go after 5 s
+  (68° off the airflow, 0.56 g) and SAS brings it back with 18 % of its strain spent; after 6 s
+  (85°, 0.58 g) with 41 %; keep holding and the stack turns right through the airflow — the
+  five-stage vehicle's restoring moment no longer holds the nose anywhere near it — and it breaks
+  up at T+115 s. Held from any of T+40–100 s the outcome is the same: full inversion, breakup
+  between T+85 s and T+243 s.
 - **In vacuum** the only rate damping is the RCS stability assist (`T`, on by default). Switch it
   off and the vehicle keeps whatever spin it was given until you cancel it.
 
@@ -121,8 +123,8 @@ Repo-wide convention (see `docs/reference/README.md`): **km, s, tonnes, kN**.
 - `thrust / mass` with kN over tonnes is exactly **m/s²**; `GM / r²` with `GM` in km³/s² and `r` in
   km gives **km/s²**.
 - State vectors are km/s internally; the HUD reads m/s.
-- `simTime` is real mission seconds — no time-scaling fudge anywhere. The measured mission clocks
-  3.469 days, as a real one does.
+- `simTime` is real mission seconds — no time-scaling fudge anywhere. The measured mission clock
+  is 10.318 days round trip (8.1 days was Apollo 11), as a real one is.
 - Visuals ride at real planetary scale; the vehicle mesh is scaled by `VS` (≈105 m, Saturn-V sized).
 
 ## Architecture
@@ -166,7 +168,7 @@ One concern per file.
   `MOON_DIST`, Earth spin, LC-39 position, the exponential-atmosphere parameters, `SPECS` (stage
   dry/fuel/thrust/Isp), `LAND_SAFE` (0.032 km/s), `SAFE_EARTH` (0.012 km/s), `WARPS`, `DTPHYS`, the
   SAS pitch program `TURN`, `TLI_LEAD` (how far the Moon leads the ship when the certified flight
-  lights its injection burn — 2.7742 rad, the cue the `NEXT` line counts down to),
+  lights its injection burn — 2.9159 rad, the cue the `NEXT` line counts down to),
   and `MOON_PHASE0` — the solved launch window (the Moon's angle along its orbit at MET 0 for which
   a TLI at the first perigee after insertion arrives at the Moon).
 - `js/targeting.js` — the predicted lunar aim: `lunarPass()` integrates the present state forward to
@@ -340,17 +342,17 @@ Measured (full breakdown in `docs/reference/mission-design.md`):
 
 | | |
 | --- | --- |
-| Parking orbit | 151 × 760 km at 7.3706 km/s |
-| TLI | to 10.3938 km/s inertial at coast start; apogee 383 242 km at the cutoff command |
-| Lunar SOI entry | MET 236 539 s |
-| Periselene | 346 km at 2.3611 km/s Moon-relative |
-| LOI | 849 m/s at 358 km to a lunar orbit with a = 2 135 km |
-| Deorbit | 83 m/s |
-| Powered descent | 2 055 m/s |
-| Touchdown | **3.3 m/s** against the 32 m/s `LAND_SAFE` limit |
-| Propellant spare | 7.2 t of CSM propellant unused |
-| Mission clock | 3.469 days |
-| Δv spent | 16 274 m/s (one-way) vs an ideal staged budget of 20 192 m/s and a derived one-way requirement of 15 142 m/s |
+| Pad → TLI ignition | 9 956 m/s of Δv; S-2 burns out at T+425.8 s and the CSM engine keeps pushing to perigee |
+| TLI | lit at T+1 107 s, 237 km; coast begins at 2 049.1 s at 10.4165 km/s inertial, 0.6 m/s of surplus |
+| Periselene | 358 km at 2.3517 km/s Moon-relative, v∞ 0.9213 km/s |
+| LOI | 829 m/s at 370 km to a capture orbit with a = 2 149 km |
+| Extraction | the CSM parks on a 110 km rail; the LM deorbits (84 m/s) and descends |
+| LM touchdown | **3.8 m/s** and 26.6° tilt against the 32 m/s `LAND_SAFE` limit, 2 057 m/s of descent Δv |
+| Ascent, rendezvous, docking | 1 940 + 21 + 140 m/s; re-mated with 2.4 t of ascent-stage propellant left |
+| TEI | 861 m/s, then a 793 m/s transposition-and-return correction; the service stage is dropped with it |
+| Splashdown | **7.8 m/s** under mains |
+| Mission clock | 10.318 days (891 497 s) |
+| Δv spent | 19 794 m/s round trip vs an ideal staged budget of 20 192 m/s, a derived round-trip requirement of 18 092 m/s and a one-way requirement of 15 142 m/s |
 
 `python3 tools/mission-math.py` recomputes the derived numbers (derived requirement, budgets, the
 atmosphere comparison) from the primary constants in `docs/reference/` and prints the derivation.
@@ -363,11 +365,15 @@ come from `tools/mission-sim.mjs`.
 None of this means the mission is easy: the
 descent is only survivable because its guidance flies an altitude-bounded velocity envelope rather
 than trying to hover, and an earlier, slightly smaller stack reached the Moon and then hit the
-surface at 1 264 m/s with a dry tank. The launch window is solved for a 350 km periselene, the middle
-of the band the tool's autopilot lands from: every flight from 3e-3 rad of launch phase early
-(745 km) to 1.75e-3 rad late (123 km, eleven minutes of lunar motion) lands at under 5 m/s, and
-2e-3 rad late (91 km) runs the tank down and hits at 80 m/s. Margin on paper is not margin; the
-descent has to be flown.
+surface at 1 264 m/s with a dry tank. The launch window is solved for a 350 km periselene — the
+shipped phase `MOON_PHASE0 = 2.1777643` passes the Moon at 358 km. The round trip has been flown
+from every phase of the measured band, 2.158 to 2.186 rad (2.8e-2 rad, about 2.9 hours of lunar
+motion); the shipped phase still comes home after 120 s (20.6 d) or 300 s (18.0 d) of waiting on
+the pad, while 3,600 s of pad time pushes the rendezvous phasing past the tool's own 1,100 ks
+chain horizon.
+The one-way autopilot is kept as a regression: `mission-sim.mjs landed --phase=4.9187044` still
+touches down at 3.3 m/s with 7.2 t spare. Margin on paper is not margin; the descent has to be
+flown.
 
 ## How a flight is graded
 
@@ -378,7 +384,7 @@ the best one is kept in the browser. On the way down the `NEXT` line under the c
 braking deadline: stopping from the current speed at full thrust takes v²/2(a − g) of path, and it
 says `BRAKE NOW` when the height in hand falls under 1.15 times that. The same line times the
 translunar burn: in a parking orbit it counts down (`translunar burn in m:ss`) to the moment the
-Moon leads the ship by `TLI_LEAD = 2.7742` rad, the lead at which the certified flight lights its
+Moon leads the ship by `TLI_LEAD = 2.9159` rad, the lead at which the certified flight lights its
 injection burn. It is a cue, not a solution — it puts a hand-flown burn in the right half-hour and
 the aim readout and a trim burn do the rest. Recorded with the change that added it (commit
 213226d, not re-flown for this document): the first three opportunities gave lunar passes of 194,

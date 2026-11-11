@@ -1,25 +1,29 @@
 # Mission design: is LUNAR LIFT completable?
 
-**Yes, end to end, and it has been flown.** `tools/mission-sim.mjs` drives the shipped
+**Yes — the whole round trip, and it has been flown.** `tools/mission-sim.mjs` drives the shipped
 `js/physics.js`, `js/vehicle.js` and `js/constants.js` with nothing but the controls a player has,
 at the 0.1 s step `js/main.js` never exceeds, and reaches:
 
 ```
-RESULT WON   fuel left 0.0/0.0/7.2 t        299679s TOUCHDOWN — 3.3 m/s. THE MOON IS OURS.
+RESULT WON   fuel left 0.0/0.0/0.0/0.0/0.0 t        891497s SPLASHDOWN — 7.8 m/s
 ```
 
-3.3 m/s against the `LAND_SAFE` limit of 32 m/s, 7.2 t of CSM propellant to spare, mission clock
-3.469 days. The verdict is the game's own: `impact()` in `js/physics.js` decides it by comparing
+Lunar touchdown 3.8 m/s at 26.6° tilt (`LAND_SAFE` is 32 m/s), docking 603,457 s into the trip with
+2.4 t of ascent-stage propellant left, splashdown 7.8 m/s against `SAFE_EARTH`'s 12, mission clock
+10.318 days. The previous one-way mission is kept as a regression:
+`landed --phase=4.9187044` still touches down at 3.3 m/s with 7.2 t spare in 3.469 days.
+The verdicts are the game's own: `impact()` in `js/physics.js` decides the landing by comparing
 `groundVel()` with `LAND_SAFE` in the frame of the surface underneath, at the moment the lowest
 attached point (`surfaceAlt()`) reaches the ground, and it also demands the vehicle be within 60° of
-vertical. One caveat about what "the ground" is: in the browser it is the drawn relief; the
-headless tool injects no terrain and lands on the datum sphere.
+vertical; splashdown decides the return. One caveat about what "the ground" is: in the browser it is
+the drawn relief; the headless tool injects no terrain and lands on the datum sphere.
 
 ```sh
 npm i --no-save three@0.187.0     # the tool needs Three; the game itself has no dependencies
-node tools/mission-sim.mjs                       # solves the launch window, then flies: ~50 s
-node tools/mission-sim.mjs game --phase=4.9187044  # fly the shipped window exactly, as shipped
-node tools/mission-sim.mjs retro                 # the stack this repo shipped before: LOST
+node tools/mission-sim.mjs                         # solves the launch window, then flies: ~50 s
+node tools/mission-sim.mjs game --phase=2.1777643  # fly the shipped window exactly, as shipped
+node tools/mission-sim.mjs landed --phase=4.9187044  # the previous one-way mission: still WON
+node tools/mission-sim.mjs retro                   # the stack this repo shipped before: LOST
 ```
 
 Everything below is measured output from those runs or from `tools/mission-math.py`, re-run after
@@ -44,11 +48,12 @@ rather than from a tool in `tools/`; each says so where it appears.
 | deorbit + powered descent | 2,300 | **15,142** |
 | + lunar ascent 1,850 + TEI ≈ 1,100 | | 18,092 round trip |
 
-The game's three-star outcome is the **landing**, so 15,142 m/s is the number the vehicle has to
-beat. There is no lunar ascent stage and no TEI in the game, and pretending otherwise would be the
-easiest way to hide a propellant shortfall. What the game does have is the last leg of the return:
-a command module that left its stages behind can re-enter and splash down, which ends a flight
-that stayed in Earth orbit or swung round the Moon without landing (see "Coming home").
+The game's three-star outcome is still the **landing**, so 15,142 m/s is what a one-way flight has
+to beat — but the game now flies the whole 18,092 m/s round trip: a lunar module separates from the
+parked command module, touches down, ascends, docks, and takes the mated stack home to a
+splashdown. The table's last line — "lunar ascent 1,850 + TEI ≈ 1,100" — is modelled by dedicated
+hardware (`LM ASCENT` in `SPECS`, and the CSM engine for the trans-Earth injection) and flown; the
+bookkeeping is in the flight table below.
 
 ## The vehicle
 
@@ -68,9 +73,9 @@ requirement, 1.12× the 18,092 m/s round trip**.
 
 | Candidate | ignition t | ideal Δv m/s | ratio | outcome when flown |
 | --- | --- | --- | --- | --- |
-| **shipped** (above) | 4,898 | 20,192 | 1.33× | **WON** — one-way landing 3.3 m/s, 7.2 t spare; round trip see flight tables |
+| **shipped** (above) | 4,898 | 20,192 | 1.33× | **WON** — round trip: LM touchdown 3.8 m/s, dock, splashdown 7.8 m/s, 19,794 m/s in 10.318 days |
 | previous (`retro`) | 3,780 | 16,303 | 1.08× | LOST — `HARD IMPACT ON THE MOON AT 1264 m/s`, tank dry |
-| oversized (`nova`) | 5,475 | 20,608 | 1.36× | not flown: nothing the margin is spent on, and a 3,000 t first stage is a different game |
+| oversized (`nova`) | 5,525 | 21,543 | 1.42× | **WON** — self-solved round trip at phase 1.2294908: LM awarded 2.8 m/s, splashdown 7.8 m/s, 20,733 m/s in 13.484 days |
 
 The previous stack is the instructive one. On paper it had 1.08× the requirement, it reached a
 parking orbit, it executed TLI, it entered the lunar sphere of influence, it achieved lunar orbit at
@@ -81,44 +86,52 @@ because that failure is invisible to budget arithmetic.
 
 ## The flight, as measured
 
-`node tools/mission-sim.mjs game --phase=4.9187044`. Velocities labelled `vRel` are Moon-relative
+`node tools/mission-sim.mjs game --phase=2.1777643`. Velocities labelled `vRel` are Moon-relative
 (`navVel()`); `vInert` is the game frame.
 
 | Event | MET s | state | Δv spent m/s | propellant left t |
 | --- | --- | --- | --- | --- |
-| ignition, LC-39 | 0 | pad TWR 1.37 g | | 1,800 / 1,200 / 185 |
-| stage 1 separation | 117 | game log: STAGE 1 SEPARATED | | 0 / 1,200 / 185 |
-| stage 2 separation | 422 | game log: S-2 SATURN II DEPLETED | | 0 / 0 / 185 |
-| **parking orbit** | 1,051 | 151 × 760 km, v 7.3706 km/s | **10,248** | 0 / 0 / 124.0 |
-| TLI ignition | 3,827 | at perigee, v 7.8854 | | |
-| TLI cutoff | 4,644 | v 10.3914 commanded; apogee 383,242 km | | |
-| **coast begins** | 4,647.7 | throttle run-down adds 2.4 m/s → v 10.3938 | **3,039** | 0 / 0 / 44.7 |
-| lunar SOI | 236,539 | game log: PREPARE RETROGRADE BRAKING | | |
-| periselene (uncorrected) | 295,660 | 346 km, vRel 2.3611, v∞ 0.9311 | | |
-| **LOI** | 295,799 | retrograde at 358 km to vRel 1.5450 | **849** | 0 / 0 / 31.1 |
-| parked | 295,800 | a = 2,135 km about the Moon | | |
-| **deorbit burn** | 295,844 | retrograde at 362 km | **83** | 0 / 0 / 30.0 |
-| **PDI** | 299,362 | 70 km, vRel 1.6974 | 1 | 0 / 0 / 30.0 |
-| **touchdown** | 299,679 | 3.3 m/s | **2,055** | 0 / 0 / 7.2 |
-| | | **total** | **16,274** | |
+| ignition, LC-39 | 0 | pad TWR 1.29 g | | 2,500 / 1,800 / 300 / 26 / 15 |
+| stage 1 separation | 120.3 | game log: STAGE 1 SEPARATED | | 0 / 1,800 / 300 / 26 / 15 |
+| stage 2 separation | 425.8 | S-2 SATURN II DEPLETED; the CSM engine keeps burning | | 0 / 0 / 300 / 26 / 15 |
+| TLI ignition | 1,107 | at the 237 km perigee, vInert 7.7979, Moon lead 2.9159 rad | | 0 / 0 / 197.5 / 26 / 15 |
+| TLI cutoff | 2,045 | vInert 10.4159 commanded; two-body apogee 384,427 km | | |
+| **coast begins** | 2,049.1 | the cut's 0.6 m/s tail → vInert 10.4165; that state's apogee 427,714 km | **3,104** | 0 / 0 / 56.2 / 26 / 15 |
+| lunar SOI | 237,701 | game log: PREPARE RETROGRADE BRAKING | | |
+| periselene (uncorrected) | 297,301 | 358 km, vRel 2.3517, v∞ 0.9213 | | |
+| **LOI** | 297,458 | retrograde at 370 km to vRel 1.5407 | **829** | 0 / 0 / 32.5 / 26 / 15 |
+| parked | 297,458 | a = 2,149 km capture; the CSM keeps a 110 km rail | | |
+| LM separation | 297,458 | the CSM becomes a rail curve while the LM is away | 1 | 0 / 0 / 32.5 / 26 / 15 |
+| **deorbit burn** | 297,512 | retrograde, 54 s after LOI | **84** | 0 / 0 / 32.5 / 24.7 / 15 |
+| **PDI** | 301,069 | powered descent guidance takes over | 1 | 0 / 0 / 32.5 / 24.6 / 15 |
+| **LM touchdown** | 301,397 | 3.8 m/s, tilt 26.6° — the game's awarded landing, engine out | **2,057** | 0 / 0 / 32.5 / 0.0 / 14.8 |
+| **lunar ascent** | 301,641 | to a 25.2 km insertion, vRel 1.6686 | **1,940** | 0 / 0 / 32.5 / 0.0 / 3.1 |
+| phasing trim | 377,476 | Hohmann to the rail | **21** | 0 / 0 / 32.5 / 0.0 / 3.0 |
+| **docking** | 603,457 | the terminal approach closes to 1,001 m at 9.1 m/s; the game re-mates | 140 | 0 / 0 / 32.5 / 0.0 / 2.4 |
+| **TEI** | 604,729 | trans-Earth injection from lunar orbit | **861** | 0 / 0 / 21.5 / 0 / 0 |
+| return correction | 876,725 | mid-coast aim, then the service stage is dropped | **793** | 0 / 0 / 0 / 0 / 0 |
+| re-entry interface | 876,725 | capsule alone | | 0 / 0 / 0 / 0 / 0 |
+| drogues / mains | 890,260 / 890,292 | | | |
+| **splashdown** | 891,497 | 7.8 m/s | | |
+| | | **total** | **19,794** | |
 
-Margin, stated as the two different things it is: **3,918 m/s** of headroom between the ideal
-staged budget (20,192, which carries the vehicle all the way home) and what the one-way flight
-actually spent (16,274), and **7.2 t** of propellant still in
-the CSM tank at touchdown, which on the 28 t that lands dry (18 t CSM + the 10 t `CAPSULE_MASS`) is
-4,119 × ln(35.2/28) = **943 m/s** of capability nobody used. (This file used to quote 1,444 m/s
-here; that figure left the capsule out of the mass ratio. The tool's own touchdown mass is 35 t.) The two numbers differ because the ideal budget
-is a model with assumptions the flight does not honour — nothing is spent while the launch clamp
-holds the vehicle on the pad, dry mass is dropped exactly at depletion rather than on the next
-staging command, and the per-step integral charges Δv by propellant flow. Both numbers are honest;
-neither is the other.
+Margin, stated as the two different things it is: **398 m/s** between the ideal staged budget
+(20,192) and what the round trip actually spent (19,794), and **2.4 t** still in the LM ascent
+tank at docking — every tank reads dry by splashdown, because the mission is over before the
+propellant runs out. The one-way flight kept 7.2 t at touchdown, worth 943 m/s on the 28 t that
+lands dry; that headroom is what the chain of ascent (1,940 m/s), phasing, and the 793 m/s return
+correction consumed. The ideal budget and the flown total differ because the budget is a model with
+assumptions the flight does not honour — nothing is spent while the launch clamp holds the vehicle
+on the pad, dry mass is dropped exactly at depletion rather than on the next staging command, and
+the per-step integral charges Δv by propellant flow. Both numbers are honest; neither is the other.
 
 ### Where the ascent Δv goes
 
-The ascent spent 10,248 m/s of propellant-equivalent Δv to deliver 152 t into 151 × 760 km.
+The ascent spent 9,956 m/s of propellant-equivalent Δv to deliver 275 t through the 237 km perigee
+where TLI ignites 43 s later; this profile does not circularise first.
 `mission-math.py` section 5 prices that manoeuvre — pad to a 185 km orbit, Apollo hardware,
 sea-level Isp, nothing wasted — at 8,854 m/s, so gravity, drag and steering cost about
-**1,394 m/s**. The same section derives Apollo 11's own loss from the SP-4029 ground-ignition
+**1,102 m/s**. The same section derives Apollo 11's own loss from the SP-4029 ground-ignition
 weights as 1,469–1,997 m/s. Two different vehicles and two different derivations land in the same
 band, which is the check that the game is not handing out orbital velocity for free. The tool prints
 this comparison every run; it deliberately compares against Apollo's derived cost rather than
@@ -128,9 +141,10 @@ accounting identity.
 
 Drag specifically is not a factor. Measured on the shipped SAS ascent by integrating the axial drag
 deceleration `q · CD_AREA · machDrag(M) · cos²α / m` over every 0.1 s step (a headless script on
-`js/physics.js`, not a tool in `tools/`): **24 m/s** lost to drag before S-2 burnout, peak
-deceleration 0.45 m/s², max-Q 25.4 kPa at T+65 s, 10.9 km, Mach 1.3. The Mach rise and the angle of
-attack together account for 5 of those 24 m/s; the same path priced at a constant `CD_AREA` is 19.
+`js/physics.js`, not a tool in `tools/`): **16.0 m/s** lost to drag before S-2 burnout, peak
+deceleration 0.29 m/s², max-Q 22.8 kPa at T+71 s, 11.1 km, Mach 1.25. The Mach rise and the angle of
+attack together account for 3.4 of those 16.0 m/s; the same path priced at a constant `CD_AREA` is
+12.6.
 `mission-math.py` section 8 bounds the loss from above at ≤ 109 m/s for a constant `CD_AREA = 28` m²
 (≤ 47 m/s at 12 m²) and ≤ 174 m/s with the drag rise held at its 1.6× peak throughout, because the
 pitch program is above the dense air within two minutes. The exponential density model is a poor fit
@@ -142,19 +156,20 @@ The tool burns prograde until `v = sqrt(MU_E (2/r − 1/aT))` with `aT = (r + 1.
 The 1.012 is not decoration: an exactly-tangent transfer whose apogee equals `MOON_DIST` came up
 about 2,000 km short of the sphere of influence in testing and never registered an encounter, and
 no correction burn can rescue a miss that large at 384,000 km. Overshooting puts the crossing
-*inside* the SOI, where the Moon's gravity does the rest. Measured result: apogee 383,242 km at the
-cutoff command, SOI entry at 236,539 s, periselene 346 km with **no correction burns fired**. They
-were not available either: the tool's mid-course machinery is gated on `fuel > 60 t` and the CSM
-holds 44.7 t after TLI, so for this vehicle the aim has to be right at injection — which is what the HUD readout
-described below is for.
+*inside* the SOI, where the Moon's gravity does the rest. Measured result: apogee 384,427 km at the
+cutoff command, SOI entry at 237,701 s, periselene 358 km with **no correction burns fired**. That
+was a choice, not a lack of one: the mid-course machinery runs for this stack (the `game` and `nova`
+tools, gated on `fuel > 5 t`, up to eight burns) and the CSM holds 56.2 t after TLI — but the first
+aim check read 357 km, so the flight corrected nothing. The one-way regression `landed` flies
+without the machinery at all: its encounter is decided at injection.
 
 Apollo flew harder than this — `mission-math.py` section 4 shows Apollo 11's post-TLI orbit with an
 apogee of 522,505 km, a ~73 h fast transfer rather than the 120 h minimum-energy one. The game sits
-between the two: **80.8 h** from coast start (4,647.7 s) to periselene (295,660 s), measured. The
-383,242 km apogee the tool prints belongs to the cutoff *command*; the engine keeps pushing through
+between the two: **82.0 h** from coast start (2,049.1 s) to periselene (297,301 s), measured. The
+384,427 km apogee the tool prints belongs to the cutoff *command*; the engine keeps pushing through
 the ~4 s run-down while the radius grows, and the two-body apogee of the coast-start state the tool
-records (`ev.tliDone`) works out to about 432,700 km altitude — computed by hand from that state,
-not printed by the tool. This file used to call the coast "119.5 h-class"; no run ever showed that.
+records (`ev.tliDone`) works out to 427,714 km altitude — computed from that state, not printed by
+the tool. This file used to call the coast "119.5 h-class"; no run ever showed that.
 
 ### Capture belongs at periselene
 
@@ -162,17 +177,23 @@ The `approach` phase coasts on nothing until the Moon-relative radial velocity c
 burns. Braking from the edge of the SOI instead spends the tank fighting your own approach energy
 and still misses the orbit: at 66,200 km the circular speed is 272 m/s, so decelerating to bind
 yourself early buys a huge eccentric fall instead of an orbit. At periselene the same Δv is worth
-the most: LOI cost 849 m/s here, at 358 km, against the 820 m/s the patched-conic estimate predicts
-for 111 km and Apollo's measured 889 m/s. (At the previous window's 205 km periselene the same burn
-was 865 m/s; a higher capture is a cheaper capture and a dearer deorbit — 83 m/s against 58.)
+the most: LOI cost 829 m/s here, at 370 km, against the 820 m/s the patched-conic estimate predicts
+for 111 km and Apollo's measured 889 m/s. (The one-way regression's capture burned 849 m/s at 358 km
+and 83 m/s to deorbit from it; a higher capture is a cheaper capture and a dearer descent.)
 
 ## Launch window and how tight "aim" really is
 
-`MOON_PHASE0 = 4.9187044` rad is not a rounded number and must not be rounded. The tool finds it by
+`MOON_PHASE0 = 2.1777643` rad is not a rounded number and must not be rounded. The tool finds it by
 bisecting the first periselene altitude toward `AIM_PERI = 350` km — the middle of the band the
-tool's autopilot lands from, not its late edge. (It aimed at 200 km until the sweep below was first
-flown and showed the window sitting 0.5e-3 rad from a dry tank.) Sensitivity measured by flying the
-shipped configuration at eleven phases:
+autopilot lands from, not its late edge; the solver's own converged phase is 2.1777956 and the
+shipped constant passes the Moon at 358 km. Every phase flown since — 2.158 through 2.186 rad,
+fifteen flights at 0.002 rad steps — completes the whole chain to splashdown, with mission clocks
+from 10.2 to 20.3 days (the long ones spend it in rendezvous phasing, not in trouble); the shipped
+phase does it after 120 s (20.587 days) or 300 s (17.979 days) of waiting on the pad, while 3,600 s
+of pad time pushes the phasing past the tool's own 1,100 ks chain horizon — that mission was still
+FLYING, healthy, at 12.731 days. The eleven-phase sweep below is the
+one-way `landed` regression: it maps the corridor that mission's window sits in, and it remains the
+sweep the corridor constants (`CORRIDOR = { lo: 120, hi: 745 }` km) were measured against:
 
 | phase rad | periselene | outcome | touchdown | spare | Δv spent | aim readout |
 | --- | --- | --- | --- | --- | --- | --- |
@@ -180,7 +201,7 @@ shipped configuration at eleven phases:
 | 4.9167044 (−2e-3) | 610 km | WON | 2.6 m/s | 6.8 t | 16,321 m/s | green |
 | 4.9177044 (−1e-3) | 477 km | WON | 2.8 m/s | 7.0 t | 16,298 m/s | 477 km, green |
 | 4.9182044 (−0.5e-3) | 412 km | WON | 3.0 m/s | 7.1 t | 16,287 m/s | green |
-| **4.9187044 (shipped)** | **346 km** | **WON** | **3.3 m/s** | **7.2 t** | **16,274 m/s** | **346 km, green** |
+| **4.9187044 (landed window)** | **346 km** | **WON** | **3.3 m/s** | **7.2 t** | **16,274 m/s** | **346 km, green** |
 | 4.9192044 (+0.5e-3) | 282 km | WON | 3.7 m/s | 7.3 t | 16,262 m/s | green |
 | 4.9197044 (+1e-3) | 218 km | WON | 4.1 m/s | 7.4 t | 16,248 m/s | 217 km, green |
 | 4.9199544 (+1.25e-3) | 186 km | WON | 4.4 m/s | 7.5 t | 16,241 m/s | green |
@@ -191,7 +212,8 @@ shipped configuration at eleven phases:
 (The aim column is `js/targeting.js` run headless from the coast-start state where a number is
 given, and `CORRIDOR`'s 120–745 km test applied to the tool's periselene where it is not.)
 
-So about **130 km of periselene per 1e-3 rad** (1e-3 rad is 376 s of lunar motion at
+So about **130 km of periselene per 1e-3 rad** on that one-way profile (1e-3 rad is 376 s of lunar
+motion at
 `MOON_RATE = 2.6617e-6` rad/s), and the band is still **a slope on one side and a cliff on the
 other** — but the window now stands in the middle of it. Early costs about 0.2 t of propellant per
 1e-3 rad and nothing else, out to at least −3e-3 rad. Late, every flight lands down to +1.75e-3 rad
@@ -206,9 +228,10 @@ not about the Moon — a pilot who brakes differently may land from lower — bu
 anyone has measured. Two consequences for the game:
 
 - The lever a player actually has is *time*: wait on the pad, or coast in the parking orbit, and warp
-  until the geometry works. Small along-track correction burns would work too, and the tool has
-  machinery for them, but it is gated on `fuel > 60 t` and the shipped CSM has 44.7 t left after
-  TLI, so for this vehicle the encounter is decided at injection and cannot be repaired later.
+  until the geometry works. Small along-track correction burns work too: the round-trip tool carries
+  that machinery (the `game` and `nova` stacks, gated on `fuel > 5 t`, up to eight burns) and the
+  shipped CSM has 56.2 t after TLI, though the certified flight never needed one — and `landed` has
+  none, so that encounter really is decided at injection.
 - **Aim is visible, and live through the burn.** `js/targeting.js` predicts the closest lunar
   approach from the present state four times a second (`lunarPass`, 1.6 ms a call, timed headless in
   Node on the development machine) and the orbit panel shows it as `<km> km in <hh:mm:ss>`. With the
@@ -222,7 +245,8 @@ anyone has measured. Two consequences for the game:
 - **SAS cuts the injection burn.** At full CSM thrust the pass crosses the whole corridor in about
   a tenth of a second of burn, so with SAS on (prograde) `cutoffNow()` shuts the engine down when
   the pass is inside the corridor with 60 km in hand. Flown headless on three successive
-  opportunities it left passes of 568, 349 and 369 km with 44.5–44.6 t aboard. With SAS off the cut
+  opportunities (the one-way stack of that date) it left passes of 568, 349 and 369 km with
+  44.5–44.6 t aboard. With SAS off the cut
   is the pilot's and the trim hint is how it is repaired.
 
 ### The readout predicts the game, not the textbook
@@ -231,7 +255,7 @@ The game's step (`simTime += dt`, gravity at the advanced time, `v += a·dt`, `p
 `DTPHYS = 0.1 s`) is leapfrog with its velocity written half a step late. The state it holds
 therefore evolves, to second order, like a true trajectory started from the same position with
 velocity `v + a·dt/2`, and `lunarPass` is a velocity-Verlet integration from that state with a step
-of 1/1000 of the local radius (0.5–300 s). Measured from the recorded coast-start state
+of 1/1000 of the local radius (0.5–300 s). Measured from the `landed` coast-start state
 (`ev.tliDone`, the same for every phase — only the Moon moves), against the game's own scheme
 stepped at 0.1 s all the way to the Moon, headless in Node with the shipped modules:
 
@@ -239,7 +263,7 @@ stepped at 0.1 s all the way to the Moon, headless in Node with the shipped modu
 | --- | --- | --- | --- |
 | −3e-3 | 744.24 km | 743.39 km | 745 |
 | −1e-3 | 476.51 km | 475.70 km | 477 |
-| 0 (shipped) | 345.66 km | 344.87 km | 346 |
+| 0 (at that window) | 345.66 km | 344.87 km | 346 |
 | +1e-3 | 217.00 km | 216.23 km | 218 |
 | +1.75e-3 | 122.03 km | 121.28 km | 123 |
 | +2e-3 | 90.68 km | 89.93 km | 91 |
@@ -250,17 +274,20 @@ The predictor reads 0.75–0.85 km low on all six. The state was seeded as the t
 The half-step term is the whole of it. The same Verlet integration from the raw `(p, v)` says
 442.74 km at the shipped window — 97 km from the ship's real trajectory, which is the "a converged
 integrator disagrees with the game" of earlier revisions of this page. And the game scheme itself
-at 1 s instead of 0.1 s says −474.5 km, an impact (that figure is from the previous revision's run
-and was not repeated here). The module this replaced replayed the 0.1 s steps a budget at a time:
+at 1 s instead of 0.1 s says −474.5 km on that state, an impact. On the shipped round-trip
+coast-start state the same experiment gives 658 km where 0.1 s gives 358 km — re-measured for this
+revision: the discretisation error is worth hundreds of km, and its sign is not fixed from one
+coast geometry to the next. The module this replaced replayed the 0.1 s steps a budget at a time:
 exact, but 6–14 s to an answer and blank whenever the engine burned.
 
 ### Why the coast step is not a free parameter
 
 Until this was checked, the tool stepped the coast at 1 s and only used the game's 0.1 s cap during
 powered flight and near bodies. That is ten times faster and it certified a trajectory **no player
-can fly**. With the current forces the same experiment, from the shipped coast-start state: the
-game's scheme at 0.1 s reaches 346 km and at 1 s it is 475 km *under the surface* — an 820 km
-difference, more than the whole band of periselenes anyone has landed from (123–745 km). (When the step was first fixed, at the
+can fly**. With the current forces, the same experiment, from the shipped coast-start state: the
+game's scheme reaches 358 km at 0.1 s and 658 km at 1 s — 300 km off; on the previous one-way state
+the 1 s step went 475 km *under the surface* instead, 820 km off. Either way it is worth far more
+than the margin anyone steers by. (When the step was first fixed, at the
 physics of that date, every coast-derived number moved: SOI entry 234,479 → 232,147 s, LOI 869 →
 875 m/s, parked semimajor axis 1,990 → 1,957 km, touchdown 20.2 → 20.1 m/s, and the window itself
 4.957230 → 4.9561012. Those are history now; none of them is a current value.)
@@ -274,20 +301,20 @@ before it the browser stepped at the frame time below ×6, and the tool was cert
 page did not take at ×1.)
 
 `MOON_PHASE0` is solved for the `TURN` table in the same file. Change the pitch program without
-re-running the tool and TLI mis-aims by tens of thousands of km: `--turn=steep` (the reach-horizontal
-table `t0 60, ramp 200, max π/2`) solves to phase **2.1635768**, 3.88e-3 rad ≈ 24 min of lunar motion
-from the shipped window, periselene comes back at 337 km — and **LOSES**. Its LOI parks the CSM,
-the descent stage runs dry braking into a deorbit whose coast height is 1.1 km where the shipped
-chain flies ~20 km, the insertion arrives at 19.7 km, the Hohmann window takes the ascent stage to
-an apoapsis 74 km over the parked CSM, and the terminal phase opens a 2,694 km gap it has no fuel
-to close: `HARD IMPACT ON THE MOON AT 1503 m/s`. The pitch program is not decoration; it shapes the
-descent it will fly three days later.
+re-running the tool and TLI mis-aims by tens of thousands of km. `--turn=steep` (the reach-horizontal
+table `t0 60, ramp 200, max π/2`) solves its own window at phase **2.1909830** — 1.32e-2 rad,
+some 83 min of lunar motion from the shipped one — and flies the whole chain there: WON, 10.916
+days, 19,779 m/s, ascent 9,952 m/s. Two tables, two windows, two missions; the constant belongs to
+whichever table is in the file. (On the build that predates the finished round-trip chain the same
+steep table lost with `HARD IMPACT ON THE MOON AT 1503 m/s`; the chain's homing and correction
+laws are what the profile now flies through.)
 
 The same is true of the forces. The flight-model change — a drag rise that reshapes the ascent, and
 the indirect term in `gravityAt` that acts through the whole 80 h coast — moved the solved window
 from 4.9561012 to 4.9198031 for the same 200 km aim: 0.036 rad, twenty times the 1.75e-3 rad that
 now separates the window from the last late flight that lands. (Re-centring on 350 km then moved it
-to 4.9187044 on purpose.) Any change to
+to 4.9187044 on purpose — the one-way regression's window; the round-trip chain's own window was
+solved at 2.1777643 when the LM stages entered the stack.) Any change to
 `js/aero.js`, `GEOM`, `CD_AREA` or `gravityAt` needs the tool re-run and the constant replaced.
 
 ## The descent, which is where the mission was won
@@ -307,7 +334,13 @@ exactly as the game's own SAS does it, and the engine cut at 3 m (the last 3 met
 judged by. It used to be the altitude of `S.pos`, the middle of the *full*
 stack, while contact was declared when `S.pos` came within the full stack's half-height (52 m) of
 the surface: the guidance met "the ground" while still reading 52 m of altitude, and every
-touchdown before this fix came in near 20 m/s. With the heights agreeing the shipped flight touches at **3.3 m/s**.
+touchdown before this fix came in near 20 m/s. With the heights agreeing the one-way regression
+still touches at **3.3 m/s**, and the round-trip LM — the same law on the 45 t stage — is awarded
+**3.8 m/s, tilt 26.6°** (`ev.touchMoon` is the game's own award: `js/physics.js` records TOUCHDOWN
+only on a contact step with the engine out, which the law's 3 m cutoff delivers — the last metres
+are a throttle-ramping hop. The tool used to print `0.0 m/s, 0.0°` for that landing: it keyed its
+guard on contact, the stage-3 tank ran dry ~200 m up, and the debrief recorded the initial values
+of `landing.speed` for a touchdown the game had never awarded).
 
 Four things had to be true before it stopped crashing, each one measured:
 
@@ -329,9 +362,10 @@ Four things had to be true before it stopped crashing, each one measured:
   frame — claimed authority the attitude control does not have: alignment went to −0.93 and the
   vehicle accelerated sideways instead of braking.
 
-Powered descent cost 2,055 m/s — 2,139 with the 83 m/s deorbit burn and the 1 m/s spent reaching
+The LM's powered descent cost 2,057 m/s — 2,142 with the 84 m/s deorbit burn and the 1 m/s spent reaching
 PDI — against Apollo's derived 2,300 m/s for deorbit plus powered descent (PDI at 1,696 m/s plus
-gravity losses). PDI sits at 70 km here rather than Apollo's 11.9 km / 1,696 m/s,
+gravity losses); the one-way regression's CSM descent cost 2,055 and 2,139 on the same law.
+PDI sits at 70 km here rather than Apollo's 11.9 km / 1,696 m/s,
 because the envelope above needs path, not because it is more realistic.
 
 ## Leaving the pad
@@ -361,14 +395,14 @@ now starts the flight and its ground test.
 The pitch program runs on time **since the hold-down let go**, not on the mission clock. It has to:
 waiting on the pad is how a player moves the launch window, and on the mission clock a late launch
 was already "past" its vertical hold and tipped into the swing arms. Measured — wait, then SPACE
-and P, state at S-2 burnout 422.1 s after ignition:
+and P, state at S-2 burnout 425.8 s after ignition:
 
-| wait on the pad | speed | apogee | max-Q | peak side load |
-| --- | --- | --- | --- | --- |
-| 0 s | 6.4162 km/s | 584 km | 25.4 kPa | 0.024 g |
-| 120 s | 6.4163 km/s | 584 km | 25.4 kPa | 0.024 g |
-| 300 s | 6.4163 km/s | 584 km | 25.4 kPa | 0.024 g |
-| 3,600 s | 6.4135 km/s | 584 km | 25.4 kPa | 0.024 g |
+| wait on the pad | speed | max-Q | peak side load |
+| --- | --- | --- | --- |
+| 0 s | 6.3838 km/s | 22.8 kPa | 0.016 g |
+| 120 s | 6.3841 km/s | 22.8 kPa | 0.016 g |
+| 300 s | 6.3841 km/s | 22.8 kPa | 0.016 g |
+| 3,600 s | 6.3811 km/s | 22.8 kPa | 0.0159 g |
 
 (The hour-long wait differs in the fourth figure — the Moon has moved 0.55° by then, which is the
 likely cause, not a measured one; the ascent is the same ascent.) Other things the same review fixed, read from the code rather than measured:
@@ -455,8 +489,11 @@ A touchdown on the Moon opens a debrief (`js/hud.js`):
 - A splashdown is one star, two after a lunar flyby, and three when it closes a round trip that
   touched down on the Moon ("walked on the Moon and came back").
 
-By that rule the tool's shipped flight — 3.3 m/s with 7.2 t left — is a three-star landing if its
-tilt is under 8°; the tool does not print tilt, so the score is not quoted here. Note what the
+By that rule the certified chain scores at both ends: the awarded landing reads 3.8 m/s at 26.6°
+tilt — one star (the throttle-ramp hop leaves the vehicle further from vertical than the second
+star's 20°, though well inside `LAND_SAFE` and the 60° gate) — and a splashdown that closes a round
+trip which touched down is the third kind. The one-way regression's landing (3.3 m/s with 7.2 t left) is a three-star
+landing too if its tilt is under 8°. Note what the
 score rewards: 40 points per tonne is worth more than 25 per m/s, so a late, hard braking burn that
 arrives at 10 m/s with more in the tank can outscore a gentle one. The HUD's `NEXT` line gives the
 deadline for it: stopping from the current speed at full thrust takes `v²/2(a − g)` of path, and it
@@ -465,27 +502,28 @@ calls `BRAKE NOW` when the height in hand falls below 1.15× that.
 ## What is not true yet
 
 - **The burn cue is coarse.** In a parking orbit the HUD counts down to the moment the Moon leads
-  the ship by `TLI_LEAD = 2.7742` rad — the lead `tools/mission-sim.mjs` prints at the certified
-  flight's ignition (`ev.tliIgn`: lead 2.7742, 245 km up; re-run here). It puts a hand-flown burn in
+  the ship by `TLI_LEAD = 2.9159` rad — the lead `tools/mission-sim.mjs` prints at the certified
+  flight's ignition (`ev.tliIgn`: lead 2.9159, 237 km up; re-run here). It puts a hand-flown burn in
   the right half-hour, no better: the commit that added it records lunar passes of 194, 348 and
   −68 km on the first three opportunities (its measurement, not repeated here), against 92,521 km
   for a burn "at periapsis". The aim readout and a trim burn have to do the rest.
-- **No way home from the surface.** A landed mission ends at touchdown. Lunar ascent and TEI are
-  not modelled, so the 18,092 m/s round-trip figure is a reference number, not a game target. The
-  re-entry and splashdown that are modelled serve flights that never landed.
+- **Docking is an arrival, not a piloted mate.** Within `DOCK_DIST = 1` km of the parked CSM at
+  under `DOCK_SPEED = 50 m/s` the modules join and the stack re-mates; the parked CSM rides a
+  closed-form rail and never seeks the LM. There is no soft-dock port, no capture probe to line
+  up, and no way to fail the mate gently from inside the gate.
 - **Entry is ballistic.** The capsule trims at zero angle of attack, so it has no lift to steer
   with; that is why the lunar-return corridor is a degree wide and its survivable end is 14 g.
 - **The Moon is parametric** (`constants.js` `moonPos`/`moonVel`): a circular 384,400 km orbit in
   the launch plane at the sidereal rate. Real ephemerides would come from `astronomy-engine`, which
   was evaluated and is not used; see [libraries.md](libraries.md) for why the integrator stays
   hand-written and what adopting it would buy.
-- **Nothing marks the launch window.** The shipped phase now has 1.75e-3 rad of measured room on
-  the late side and at least 3e-3 on the early side, but a player who launches at another time has
-  only the aim readout to steer by.
+- **Nothing marks the launch window.** The shipped round-trip phase has at least 2.8e-2 rad of
+  measured room (2.158 through 2.186 rad all fly the chain), but a player who launches at another
+  time has only the aim readout to steer by.
 - **Headless landings are on a smooth Moon.** The tool injects no relief; the browser lands on the
   drawn terrain. No headless number here says anything about a slope.
 - **The air's density is one exponential**, not USSA-1976 + MSISE-90; `mission-math.py` section 7
-  has the tables and section 8 bounds drag's whole effect at ≤ 174 m/s (24 m/s measured).
+  has the tables and section 8 bounds drag's whole effect at ≤ 174 m/s (16 m/s measured).
 - **The flight model is coarse.** Coefficients are textbook orders of magnitude, body lift is lumped
   at the planform centroid so the vehicle is statically stable where Apollo's was not, and there is
   heating is a threshold on a proxy, not a thermal model. See [atmosphere.md](atmosphere.md).
@@ -497,20 +535,21 @@ calls `BRAKE NOW` when the height in hand falls below 1.15× that.
   anyone could argue for. A sharper sheet fixes the look; changing the coordinates would move the
   pad off the launch complex to agree with a pixel. See [launch-site.md](launch-site.md).
 - **One structural load, and it is lateral.** The stack fails on accumulated strain above 0.5 g of
-  aerodynamic side load (6 g for the bare CSM); the SAS ascent peaks at 0.024 g. There is no axial
+  aerodynamic side load (6 g for the bare CSM); the SAS ascent peaks at 0.016 g. There is no axial
   or max-Q limit, so nothing punishes an over-fast ascent flown nose-on beyond drag.
 
 ## Status
 
 | Requirement | Value | Measured | |
 | --- | --- | --- | --- |
-| Reach a parking orbit | pe ≥ 150 km | 151 × 760 km at 7.3706 km/s | ✅ |
-| Reach the Moon | enter SOI | 236,539 s, periselene 346 km | ✅ |
-| Lunar orbit | bound, circularisable | LOI to vRel 1.5450 at 358 km, a = 2,135 km | ✅ |
-| Deorbit | periselene in the corridor | burn at 362 km, PDI at 70 km | ✅ |
-| Soft landing | < 32 m/s (`LAND_SAFE`), within 60° of vertical | **3.3 m/s** | ✅ |
-| Propellant margin | > 0 at touchdown | 7.2 t = 943 m/s unused | ✅ |
-| One-way budget | ≥ 15,142 m/s | 17,090 ideal / 16,274 spent | ✅ |
-| Survive the air | side load < 0.5 g | 0.024 g peak on the SAS ascent | ✅ |
-| Splash down a command module | < 12 m/s (`SAFE_EARTH`), capsule alone, under 16 g | 7.8 m/s under mains from 7.8 km/s (−1.5° to −6°) and 11 km/s (−5.5° to −6.5°) | ✅ |
-| Return from the lunar surface | 18,092 m/s | not modelled | ❌ |
+| Reach orbit | a path the TLI burn can light from | 237 km perigee at S-IVB cutoff, TLI 43 s later (the `landed` regression still makes 151 × 760 km at 7.3706 km/s) | ✅ |
+| Reach the Moon | enter SOI | 237,701 s, periselene 358 km | ✅ |
+| Lunar orbit | bound, circularisable | LOI 829 m/s at 370 km to vRel 1.5407, a = 2,149 km | ✅ |
+| Deorbit | periselene in the corridor | 84 m/s burn, PDI 301,069 s | ✅ |
+| Soft landing | < 32 m/s (`LAND_SAFE`), within 60° of vertical | LM **3.8 m/s**, tilt 26.6° | ✅ |
+| Return from the surface and dock | re-mate with the CSM | ascent + insertion 1,940 m/s, phasing 21 m/s, dock 603,457 s, 2.4 t left | ✅ |
+| Come home | TEI, re-entry | 861 + 793 m/s, capsule alone from 876,725 s | ✅ |
+| Splash down | < 12 m/s (`SAFE_EARTH`), capsule alone, under 16 g | **7.8 m/s** under mains | ✅ |
+| Propellant margin | > 0 at the end | 2.4 t at docking; every tank dry by splashdown | ✅ |
+| Round-trip budget | ≥ 18,092 m/s | 20,192 ideal / 19,794 spent | ✅ |
+| Survive the air | side load < 0.5 g | 0.016 g peak on the SAS ascent | ✅ |

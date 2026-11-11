@@ -87,9 +87,9 @@ what the game now computes; the full model is the next section.
 Apollo 11's max-q is tabulated as **735.17 psf = 35.20 kPa**. At `ρ(13.57 km) = 0.243 kg/m³`
 that implies `v = 539 m/s`. (The ascent table's own velocity entry for that event cannot be
 reconciled with this `q` and altitude, so the game docs quote `q` only; see
-[apollo-11-profile.md](apollo-11-profile.md).) The game's SAS ascent, measured: max-q
-**25.4 kPa** at T+65 s, 10.9 km, Mach 1.3; Mach 1 at T+56 s and 7.65 km, where Apollo 11
-passed it at 7.84 km.
+[apollo-11-profile.md](apollo-11-profile.md).) The game's SAS ascent, measured on the shipped
+five-stage stack: max-q **22.8 kPa** at T+71 s, 11.1 km, Mach 1.25; Mach 1 at T+63 s and
+8.31 km, where Apollo 11 passed it at 7.84 km.
 
 Drag area of the stack. The game's `CD_AREA = 28 m²` is the full stack nose-on below Mach 0.8.
 On the vehicle `js/physics.js` describes (`GEOM`: 10.0 m across, reference area
@@ -109,9 +109,9 @@ figure with no source fetched here. Bound on what axial drag can cost (from
 
 Measured on the shipped SAS ascent, summing `q · CD_AREA · machDrag(M) · cos²α / m` over every
 0.1 s step until S-2 burnout (a headless script on the shipped modules, not a tool in
-`tools/`): **23.8 m/s** of drag loss, peak deceleration 0.45 m/s². The same path at a constant
-`CD_AREA` would have lost 18.8 m/s, so the Mach rise and the angle of attack together are
-worth 5 m/s. Either way drag is a rounding error next to gravity loss (~1.0–1.5 km/s); it
+`tools/`): **16.0 m/s** of drag loss, peak deceleration 0.29 m/s². The same path at a constant
+`CD_AREA` would have lost 12.6 m/s, so the Mach rise and the angle of attack together are
+worth 3.4 m/s. Either way drag is a rounding error next to gravity loss (~1.0–1.5 km/s); it
 matters for *feeling* — and, since the flight model, for which way the nose wants to point.
 
 ## The flight model (`js/aero.js`)
@@ -144,20 +144,20 @@ of mass. Measured along the SAS ascent:
 
 | MET s | altitude km | q kPa | Mach | α | side load g | static margin m |
 | --- | --- | --- | --- | --- | --- | --- |
-| 0 (pad) | 0.1 | 0 | 0 | — | 0 | **+4.4** |
-| 20 | 0.9 | 4.0 | 0.25 | 0.2° | 0.000 | +6.1 |
-| 40 | 3.7 | 15.5 | 0.61 | 0.3° | 0.001 | +8.0 |
-| 60 | 9.0 | 25.0 | 1.13 | 1.5° | 0.007 | +10.5 |
-| 80 | 17.7 | 21.6 | 1.80 | 4.6° | 0.024 | +13.7 |
-| 100 | 30.6 | 10.3 | 2.64 | 5.8° | 0.018 | +17.9 |
-| 120 (S-1 gone at 117) | 48.9 | 2.2 | 3.59 | 7.2° | 0.004 | **−7.2** |
-| 140 | 69.4 | 0.2 | 3.70 | 9.5° | 0.001 | −7.0 |
+| 0 (pad) | 0.1 | 0 | 0 | — | 0 | **+3.2** |
+| 20 | 0.7 | 2.6 | 0.20 | 0.3° | 0.000 | +4.8 |
+| 40 | 3.0 | 11.3 | 0.49 | 0.3° | 0.000 | +6.8 |
+| 60 | 7.4 | 20.9 | 0.92 | 1.5° | 0.004 | +9.3 |
+| 80 | 14.7 | 21.7 | 1.51 | 4.3° | 0.015 | +12.4 |
+| 100 | 25.5 | 13.2 | 2.22 | 5.1° | 0.013 | +16.4 |
+| 120 | 40.9 | 4.4 | 3.18 | 5.7° | 0.006 | +21.8 |
+| 140 (S-1 gone at 120.3) | 59.0 | 0.6 | 3.31 | 7.5° | 0.001 | **−10.1** |
 
 The stack with its fins is stable and gets more so as the S-1 empties from the tail; with SAS
-switched off at T+60 s and no input, the angle of attack falls from 1.5° to 0.1° in 20 s on
-its own. Without the S-1 the margin is negative, but only where q is already a tenth of its
-peak and falling by a factor of ten every 20 s. Peak side load on the whole ascent: **0.024 g**
-at T+85.4 s, 20.6 km, Mach 2.0, 5.0° off the airflow, q 18.9 kPa.
+switched off at T+60 s and no input the angle of attack stays inside 0.3° for the following 20 s.
+The S-1 goes at T+120.3 s and the margin lands at −10.3 m — negative, but only where q is
+already a fifth of its peak and falling by a factor of ten every 20 s. Peak side load on the
+whole ascent: **0.016 g** at T+87 s, 17.4 km, Mach 1.75, 4.6° off the airflow, q 19.9 kPa.
 
 **Breakup.** The normal force is carried by the airframe as a side load,
 `(N_body + N_fin) / m` in g, against `LOAD_LIMIT_STACK = 0.5` g for the stack and
@@ -166,34 +166,37 @@ data. Crossing one is no longer instant death: `overstressed()` in `js/physics.j
 **strain**. Over the limit it grows at `(load/limit − 1)` per second; under it, it relaxes at
 0.5 per second; the airframe goes at 0.6 (`AERODYNAMIC BREAKUP`) — 1.5× the limit held for 1.2 s,
 2× for 0.6 s — and at once above 3× the limit. Measured by switching SAS off and holding full
-pitch from a given moment of the nominal ascent:
+pitch-up (W) from a given moment of the nominal ascent. The five-stage stack's restoring moment
+no longer holds the nose anywhere near the airflow: every hold goes through a full inversion,
+and every hold now ends the flight:
 
 | pitch held from | outcome | seconds over 0.5 g | peak side load |
 | --- | --- | --- | --- |
-| T+40 s | **breakup** at T+81.9 s, Mach 0.8, 48° — after a tumble back into dense air | 4.4 | 0.89 g |
-| T+50 s | **breakup** at T+58.2 s, Mach 0.9, 63° | 2.6 | 0.69 g |
-| T+60 s (through max-q) | **breakup** at T+66.9 s, Mach 1.3, 56° | 2.2 | 0.75 g |
-| T+70 s | **breakup** at T+76.4 s, Mach 1.6, 57° | 2.1 | 0.76 g |
-| T+80 s | **breakup** at T+86.5 s, Mach 1.9, 65° | 2.3 | 0.72 g |
-| T+90 s | survives, strain peaked at 59 % of failure | 3.4 | 0.58 g |
-| T+100 s | survives, never over the limit | 0 | 0.41 g |
+| T+40 s | **breakup** at T+85.1 s, Mach 0.8, inverted — after a tumble back into dense air | 1.1 | 1.00 g |
+| T+50 s | **breakup** at T+94.2 s, Mach 0.7, inverted | 2.3 | 0.67 g |
+| T+60 s (through max-q) | **breakup** at T+115.1 s, Mach 1.0, inverted | 3.9 | 0.85 g |
+| T+70 s | **breakup** at T+151.3 s, Mach 1.3, inverted | 5.9 | 0.97 g |
+| T+80 s | **breakup** at T+174.7 s, Mach 1.7, inverted | 6.2 | 1.03 g |
+| T+90 s | **breakup** at T+207.1 s, Mach 1.8, inverted | 4.0 | 0.68 g |
+| T+100 s | **breakup** at T+243.1 s, Mach 2.2, inverted | 2.7 | 0.81 g |
 
 And what the strain rule buys — pitch held from T+60 s for a few seconds, then SAS switched back on:
 
 | pitch held for | peak angle of attack | peak side load | seconds over 0.5 g | peak strain (1 = lost) | outcome |
 | --- | --- | --- | --- | --- | --- |
-| 3 s | 22° | 0.23 g | 0 | 0 | survives |
-| 4 s | 32° | 0.39 g | 0 | 0 | survives |
-| 5 s | 41° | 0.55 g | 0.8 | 0.09 | survives |
-| 6 s | 50° | 0.68 g | 2.3 | 0.77 | survives |
-| held | 56° | 0.75 g | 2.2 | 1 | breakup at 6.9 s |
+| 3 s | 34° | 0.27 g | 0 | 0 | survives |
+| 4 s | 50° | 0.44 g | 0 | 0 | survives |
+| 5 s | 68° | 0.56 g | 1.4 | 0.18 | survives |
+| 6 s | 85° | 0.58 g | 2.5 | 0.41 | survives |
+| held | inversion | 0.85 g | 3.9 | 1 | breakup 55 s after the hold starts |
 
-So an excursion to 40° at max-q is a warning and one to 50° is the last one you get. With the
-instant rule that preceded this the T+60 s case broke at T+64.8 s, the moment the load crossed
-0.5 g. Why 0.5 g and not more: the limit was 1.2 g for one commit, and a vehicle pitched
-broadside through max-q flew on at 0.93 g, because fully broadside at 25 kPa the cross-flow term
-is 1.2 × 853 m² × 25 kPa = 25.6 MN on the 2,430 t the stack weighs by then, about 1.07 g
-(computed from the coefficients, not a run) — the airframe could barely reach its own limit.
+So a 50° excursion at max-q costs nothing, a 68° one spends 18 % of the strain budget and an
+85° one spends 41 %; a nose kept past vertical keeps rotating, and the tumble finishes the
+airframe. With the instant rule that preceded this the T+60 s case broke at T+64.8 s, the moment
+the load crossed 0.5 g. Why 0.5 g and not more: the limit was 1.2 g for one commit, and a vehicle
+pitched broadside through max-q flew on at 0.93 g. Broadside the cross-flow term is
+1.2 × 853 m² × q, and the tumbles in the table above — every one of which passes through full
+inversion — peaked at 0.67–1.03 g: the airframe can barely reach its own limit.
 The angular acceleration the moment can produce is clamped at ±2 rad/s², and the torque and
 damping are skipped below q = 0.5 Pa.
 
@@ -287,9 +290,9 @@ cosmetic; weather is not simulated.
 | sea-level density | 1.225 kg/m³ | USSA-1976 (fact sheet says 1.217 for the real atmosphere's mean) |
 | sea-level pressure | 101 325 Pa | USSA-1976 (fact sheet: 1014 mb) |
 | `C_d·A`, nose-on, subsonic | 28 m² (game) = 0.357 × 78.5 m² | game value; no Apollo figure fetched |
-| side-load limit | 0.5 g stack, 6 g bare CSM; failure at 0.6 of accumulated strain or 3× the limit | gameplay choice; nominal ascent peaks at 0.024 g |
+| side-load limit | 0.5 g stack, 6 g bare CSM; failure at 0.6 of accumulated strain or 3× the limit | gameplay choice; nominal ascent peaks at 0.016 g |
 | crew limit | 16 g for 2 s | gameplay choice; survivable entries measured up to 14.7 g |
 | heat limit | `sqrt(ρ)·v³` > 4 for 3 s without a heat shield forward | gameplay choice; 8.9 at a 7.8 km/s entry, 33.7 at 11 km/s (measured) |
 | parachutes | drogues 30 m², tear 20 kPa or Mach 1.5; mains 2,300 m², tear 4 kPa or Mach 0.5; either lost in entry heat | gameplay choice; 7.8 m/s under mains (measured) |
 | Kármán line | 100 km | convention only; no physical discontinuity |
-| max-q | 35.2 kPa (Apollo 11), 25.4 kPa (game, measured) | SP-4029; SAS ascent |
+| max-q | 35.2 kPa (Apollo 11), 22.8 kPa (game, measured) | SP-4029; SAS ascent |

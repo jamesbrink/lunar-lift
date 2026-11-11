@@ -69,9 +69,9 @@ and a *flip* if it changes by more than 60 and is back within 20 of where it was
 numbers from the run made for this file:
 
 ```
-ok   pad, weather off           unstable      0 (<= 300)   strong      0 (<= 20)   flips     0 (<= 20)
-ok   pad close, weather off     unstable     27 (<= 400)   strong      5 (<= 25)   flips     7 (<= 25)
-ok   pad, weather on            unstable   1789 (<= 6000)   strong    182 (<= 1500)   flips    68 (<= 150)
+ok   pad, weather off           unstable     22 (<= 300)   strong     11 (<= 20)   flips    13 (<= 20)
+ok   pad close, weather off     unstable     30 (<= 400)   strong      7 (<= 25)   flips     3 (<= 25)
+ok   pad, weather on            unstable   1814 (<= 6000)   strong    178 (<= 1500)   flips    57 (<= 150)
 ok   paused in flight           unstable      0 (<= 0)   strong      0 (<= 0)   flips     0
 ok   coplanar overlapping faces: 0
 flicker-test: ok
@@ -79,11 +79,12 @@ flicker-test: ok
 
 The two pad views with the weather off (`window.__noWeather`) are the precision test: everything in
 frame is bolted to ground that moves 409 m/s through the inertial frame; the numbers above are from
-the review-fixes run, and the idle pad came out at a clean 0 (the run before recorded 69/1/0, and
-'pad close' 167/7/4; the cause of either drop was not isolated — the trajectory ribbon is empty on
-the pad, so the render-scale fix to it cannot be one). With the weather on the
+the LM round-trip run (Nov-27). The idle pad is no longer a clean 0 (the review-fixes run measured
+0/0/0; the run before 69/1/0): the stack now carries the LM's windows, legs and frames, and the
+ship-collider basis — degenerate whenever the axis stood parallel to up before the `shipAxes` fix —
+rests the camera where single MSAA samples on those edges flip. With the weather on the
 cloud outlines move on the wind and the gate is loose — the flips there are the known cloud-outline
-shimmer, gated at 150 (58 in the measurement that set the gate, 68 here) — and that view is the one
+shimmer, gated at 150 (58 in the measurement that set the gate, 57 here) — and that view is the one
 a loaded machine fails: its strong count measured
 1,674 and 1,709 with 33 other Chromium processes running and 1,102 minutes later with the machine
 quiet (presumably the ten frames spread further apart; the cause is inferred). `paused in flight` must be exactly 0: a paused frame is a still. The last line
@@ -94,16 +95,32 @@ failure. Diff maps go to `[outdir]`.
 Not gates, measurements: `tools/gpu-time.mjs [port] [query]` (GPU ms per frame by timer query at a
 retina buffer: pad idle, liftoff, 15 km, 500 km orbit) and `tools/cloud-views.mjs` (weather
 screenshots and GPU time). `node tools/mission-sim.mjs` with no `--phase` solves the launch window
-and then flies it (~50 s).
+and then flies it (~50 s for the periselene aim; a round-trip stack flies every candidate the
+solve can find — up to eight full missions — until one also wins its return corridor, minutes).
 
-Shipped flight right now: `RESULT WON`, periselene 346 km, LOI 849 m/s at 358 km, touchdown
-**3.3 m/s** (`LAND_SAFE` is 32 m/s), 7.2 t spare, 16,274 m/s spent, 3.469 days. `retro` (the previous
-stack, at `--phase=1.4742618`) is LOST at 1,264 m/s with a dry tank. The window is solved for
-`AIM_PERI = 350` km, the middle of the band that lands: −3e-3 rad of phase (745 km) lands at 2.8 m/s
-with 6.6 t, +1.75e-3 rad (123 km) at 4.9 m/s with 7.6 t, and +2e-3 rad (91 km) is **LOST** at 80 m/s
-with the tank run down. Nominal ascent under SAS: max-Q 25.4 kPa at T+65 s, peak side load 0.024 g
-at T+85 s (limit 0.5 g, then strain), static margin +4.4 m on the pad; the same ascent after 0, 120,
-300 or 3,600 s of waiting on the pad. Command module alone from 122 km: 7.8 km/s lands from −1.5°
+Shipped flight right now: the round trip — `RESULT WON`, 10.318 days. Periselene 358 km, LOI
+829 m/s at 370 km into a = 2,149 km capture; the CSM parks on a 110 km rail while the LM deorbits
+(84 m/s) and the game awards the landing at **3.8 m/s, tilt 26.6°** (`LAND_SAFE` is 32 m/s —
+physics records TOUCHDOWN only on an engine-out contact step, which the law's 3 m cutoff delivers;
+an earlier tool guard keyed on contact and debriefed a phantom `0.0 m/s` the game never awarded);
+lunar ascent + insertion
+1,940 m/s, Hohmann trim 21 m/s, docking at 603,457 s (the terminal approach closes to 1,001 m at
+9.1 m/s) with 2.4 t of ascent-stage propellant left; TEI 861 m/s plus a 793 m/s return
+correction after which the service stage is dropped; splashdown **7.8 m/s**; 19,794 m/s spent.
+`landed` (the previous one-way
+autopilot, at `--phase=4.9187044`) is the kept one-way regression — WON in 3.469 days, touchdown
+3.3 m/s, 7.2 t spare, 16,274 m/s spent; its band ran −3e-3 rad (745 km) to +1.75e-3 rad (123 km)
+with +2e-3 rad LOST at 80 m/s. `retro` (at `--phase=1.4742618`) is LOST at 1,264 m/s with a dry
+tank. The round-trip window is solved for `AIM_PERI = 350` km: the shipped `MOON_PHASE0 =
+2.1777643` passes at 358 km (the solver's own converged 350-aim phase is 2.1777956), every phase
+measured from 2.158 to 2.186 rad (fifteen flights at 0.002-rad steps) flies the whole chain to
+splashdown, and the shipped phase does it after 120 s (20.587 d) or 300 s (17.979 d) of waiting on
+the pad; 3,600 s of pad time pushes the docking phasing past the tool's own 1,100 ks chain
+horizon — that mission was still FLYING, healthy, at 12.731 d. Nominal ascent under SAS: max-Q
+22.8 kPa at
+T+71 s, peak side load 0.016 g at T+87 s (limit 0.5 g, then strain), static margin +3.2 m on the
+pad; the same ascent after 0, 120, 300 or 3,600 s of waiting on the pad (S-2 burnout inertial
+speed 6.3838 km/s, and 6.3811 after the hour). Command module alone from 122 km: 7.8 km/s lands from −1.5°
 (7.2 g, splashdown 7.8 m/s, `SAFE_EARTH` is 12) to −6° (14.7 g) and is `ENTRY TOO STEEP` at −7°;
 11 km/s skips out at −5°, lands at −5.5° to −6.5° (5.6 to 14.4 g) and is too steep at −7°. If you
 change physics, specs, constants or the launch window, re-run and fix every number that moved **in
@@ -202,14 +219,15 @@ autopilot: Moon impact at 2,559 m/s instead of a 346 km pass. Measured after the
 real page with real keys against headless 0.1 s stepping: altitude and speed differ by 0.000 after
 12.1 s at ×1 and 36.0 s at ×4.
 
-The encounter is that sensitive: stepping the coast at 1 s instead of 0.1 s moves the periselene by
-~820 km (346 km becomes an impact 475 km under the surface, measured from the shipped coast-start
-state), more than the whole band of periselenes anyone has landed from. Related: the mission is
-sensitive to ~130 km of periselene per 1e-3 rad of launch phase, and `MOON_PHASE0 = 4.9187044` is
-solved for the current `TURN` table **and the current forces** — change the pitch program, the
-step, the drag model or `gravityAt` and the window constant is wrong. The flight-model commit moved
-it by 0.036 rad (4.9561012 → 4.9198031 for the same 200 km aim), twenty times the 1.75e-3 rad
-between today's window and the last late flight that lands.
+The encounter is that sensitive: stepping the coast at 1 s instead of 0.1 s is worth hundreds of km
+of periselene and the sign is not fixed — re-measured on the shipped round-trip coast-start state
+it gives 658 km where the game's 0.1 s step gives 358 km; the same experiment on the previous
+one-way state moved 346 km to an impact 475 km under the surface, 820 km. Related: the mission is
+sensitive to ~130 km of periselene per 1e-3 rad of launch phase, and `MOON_PHASE0 = 2.1777643` is
+solved for the current `TURN` table, the current stage masses **and the current forces** — change
+the pitch program, the stacks, the step, the drag model or `gravityAt` and the window constant is
+wrong. The flight-model commit moved it by 0.036 rad (4.9561012 → 4.9198031 for the same 200 km
+aim), and adding the 50 t LM to the stack moved the window's phase outright to 2.1777643.
 
 A corollary for anything that *predicts* the game: account for its discretisation. The step is
 `simTime += dt`, gravity at the advanced time, `v += a·dt`, `p += v·dt` — leapfrog with the velocity
@@ -235,18 +253,20 @@ air. Corollaries, each read off the code or measured:
 - `GEOM` in `js/stations.js` is the single table for mass distribution *and* aerodynamic shape, in
   build units (1 u = 1.4 m) at the stations `js/saturn.js` draws. Move a drawn stage and the centre
   of mass, the planform centroid and the fin arm all move with it; `stability()` returns the result
-  as a static margin in metres. Measured: +4.4 m on the pad, +17.9 m at T+100 s as the S-1 drains,
-  −7.2 m just after staging (no fins; q is 2.2 kPa by then and the side load stays under 0.004 g).
+  as a static margin in metres. Measured: +3.2 m on the pad, +16.4 m at T+100 s as the S-1 drains,
+  −10.3 m just after staging (no fins; q is 4.4 kPa by then and the side load stays under 0.006 g).
 - The breakup limits (`LOAD_LIMIT_STACK = 0.5` g, `LOAD_LIMIT_CSM = 6` g) are set against the
-  measured SAS ascent, whose peak is 0.024 g, **and against what the vehicle can generate at all**.
+  measured SAS ascent, whose peak is 0.016 g, **and against what the vehicle can generate at all**.
   The stack limit was 1.2 g for one commit and almost nothing reached it: full pitch held with SAS
-  off through max-Q peaked at 0.93 g and flew on, because broadside at 25 kPa this airframe makes
-  about 1 g and no more. A limit is only a rule if a measured manoeuvre crosses it.
+  off through max-Q peaked at 0.93 g and flew on, because held broadside this airframe makes about
+  1 g and no more — the five-stage stack's inversion tumbles peak at 0.67–1.03 g. A limit is only a
+  rule if a measured manoeuvre crosses it.
 - Failure is accumulated strain (`overstressed()`): `(load/limit − 1)` per second over the limit,
   relaxing 0.5/s under it, gone at 0.6 or at once above 3× the limit. Measured, pitch held SAS-off
-  from T+60 s: released after 5 s it peaks 0.55 g with 9 % of the strain used; after 6 s, 0.68 g and
-  77 %; held, breakup at 6.9 s. Held from T+90 s it survives at 59 %; from T+100 s it never crosses
-  the limit. Change `CD_CROSS`, `GEOM`, the stage masses or the strain constants and re-measure
+  from T+60 s: released after 5 s it peaks 0.56 g with 18 % of the strain used; after 6 s, 0.58 g
+  and 41 %; held, the nose goes through and breakup follows at T+115 s. The five-stage stack inverts
+  and breaks up under every hold from T+40 s to T+100 s — every one of them crosses the limit now.
+  Change `CD_CROSS`, `GEOM`, the stage masses or the strain constants and re-measure
   both tables in `docs/reference/atmosphere.md`.
 - The command module alone is a different vehicle in the same code path: `aeroShape()` gives a bare
   capsule `CA = 1.1` and a 3 m² normal-force area at the apex so it is stable heat-shield-first;
@@ -270,7 +290,7 @@ air. Corollaries, each read off the code or measured:
   (`g.warp(1)`), and never treat index 0 as ×1. `guardWarp()` caps warp by place every frame and
   drops it to ×1 at the Moon's SOI, so a browser test that sets ×1000 in the air does not get it;
   `ff(seconds)` is not capped.
-- `TLI_LEAD = 2.7742` rad is `ev.tliIgn.lead` from the shipped flight (the tool prints `lead` and
+- `TLI_LEAD = 2.9159` rad is `ev.tliIgn.lead` from the shipped flight (the tool prints `lead` and
   `altE`). It moves with anything that moves the ascent or the window — `TURN`, the forces,
   `MOON_PHASE0`, `AIM_PERI` — so re-read it from the tool whenever those change. It is a cue for a
   hand-flown burn, not a targeting solution.
@@ -295,8 +315,10 @@ air. Corollaries, each read off the code or measured:
 - It imports the real `js/*.js`. Phases: `ascent → tliwait → tli → mcc → approach → loi →
   orbitCheck → deorbit → toPeri → descend`, and for a round-trip stack (≥ 5 rows: demate,
   touchdown, ascent) additionally `→ lmClimb → lmCoast → lmRise → lmApex → lmTerminal → tei →
-  tecoast → capsule`. Three-row stacks (`landed`, `nova`, `retro`) pre-separate the LM rows and
-  fly the one-way chain they were certified on.
+  tecoast → capsule`. Three-row stacks (`landed`, `retro`) pre-separate the LM rows and
+  fly the one-way chain they were certified on; `nova` carries the shipped LM rows (5,525 t at
+  ignition) and flies the round-trip chain — its 6,000 kN third stage is a ~39 g_moon thruster,
+  outside the tool's own 1.2–2.2 g_moon lander sizing, so it was never a one-way lander.
 - The launch phase is found by bisecting the first periselene (`probePeri` runs the mission with
   `capture: false, stopAtPeri: true`). The straddling corridor is ~0.004 rad wide and moves with
   every mass change, so the solve walks FORWARD FROM `MOON_PHASE0` in 0.002 rad steps to bracket
@@ -316,8 +338,23 @@ air. Corollaries, each read off the code or measured:
   while stage 0 is attached and lit), so `engineOn` stays true after a `toggleIgnite()` on the pad.
   To reach a genuine no-thrust state for a test, call `separateStage()`: it clears `engineOn`,
   `targetThrottle` and `throttle`.
-- Mid-course correction burns are gated on `fuel > 60 t`. The shipped CSM holds 44.7 t after TLI, so
-  for this vehicle the encounter is decided at injection and cannot be repaired afterwards.
+- Mid-course correction burns run for the round-trip `game` and `nova` stacks only, gated on
+  `fuel > 5 t` with a budget of eight burns. The shipped CSM holds 56.2 t after TLI and the
+  certified flight fired **zero** trim burns (the first aim check read 357 km). `landed` flies
+  with no MCC machinery: that encounter really is decided at injection.
+- The round-trip chain's guidance laws were each tuned by measurement and are documented where
+  they live — do not simplify them from this file. What they are, in one line each: LOI holds at
+  periselene and may spend up to four revolutions before it cuts (`loiPeri`, `L.alt ≤` periselene
+  `+ 50` to arm; past rev 4 the pass is abandoned as `dry`); the LM demates near periselene and
+  `insert` burns retrograde while the **predicted** periapsis (vis-viva + angular momentum, valid
+  mid-burn) sits above `RM + 350` km; the terminal approach to the rail is a Hill/Clohessy-Wiltshire
+  V-bar servo at 10 Hz (an earlier absolute-velocity homing law flew backwards); TEI aims the
+  lunar-departure asymptote, not the raw geocentric corridor state (`teiEscape` — the Moon will
+  not release a bound vehicle, and three cuts at the corridor velocity itself never left 2,000 km),
+  with mid-coast taps refining the Earth corridor outside the sphere. Inside the sphere the
+  co-rotating frame has equilibria and the Earth's tidal term cancels ~7.6 m/s of the Kepler
+  rate — altitude-drift phasing laws written from two-body intuition break there; the events
+  (`ev.touchMoon`, `ev.insert`, `ev.dock`) are the ground truth for anything quoted.
 - The descent guidance law (`a_cmd = (v_des − v)/τ + dv_des/dt − g_abs + g_moon`, τ = 2.5 s, with the
   altitude-bounded velocity envelope) was tuned by measurement. Simplify it and you get 41 m/s, 62
   m/s or 220 m/s impacts, all of which have been observed. Attitude must be commanded through the
@@ -336,6 +373,30 @@ air. Corollaries, each read off the code or measured:
 - `airDensity(alt)` (in `js/aero.js`, re-exported by `physics.js`) returns exactly 0 above
   `ATMO_TOP = 420` km, so coast trajectories are drag-free. The air's own velocity is `airVel(p, out)`
   in the same file; nothing else may write `ω × r` by hand.
+- **The return-corridor ladder's minimum impulse bit is the engine.** A tap asking less than one
+  full-throttle step (`a·H` ≈ 7–9 m/s at 66–90 t) used to cut at step 0 (`teiAcc >= dv − a·H`) and
+  burn nothing forever: nova@0.82 stalled at 6.5 m/s across 17 zero-burn taps, and the game chain's
+  late passes ended on zero-burn taps too, rescued only by Moon-tide kicks over the 20 m/s re-arm.
+  The law (`teicorr`): full throttle when the ask ≥ 2·a·H, else `thr = sqrt(ask/4a)` cut at
+  `2a·thr² + 0.0004` — the throttle ramps ±0.25/s (`js/physics.js`), so a ramp-up/down pair at
+  throttle τ delivers exactly 4aτ²; that is the quantum the cut leaves for. Hand-back floor 5 m/s:
+  micro-taps overshoot ~1.4× and 4 m/s was unreachable by construction.
+- **`teiIter` counts taps per pass; `teiFixAcc` is the mission budget.** The re-arm resets the tap
+  counter (40 per pass) — cumulative starved the late passes (nova@0.82 spent 23 of 40 in one
+  locked pass). Δv asks are cumulative, capped 0.45 km/s, measured both ways (comment at
+  `teicorr`): 1 km/s never starves but the tide re-kicks every ~27 ks forever, and the cert phase
+  then burns 1,751 m/s of corrections arriving 21.3 d out; at 0.45 the certified chains land in
+  ~10 d having spent 793–880 m/s. What the cap can do to a needy geometry — silence the ladder
+  mid-work with fuel aboard, a 25 g entry — was measured on the pre-awarded-touchdown chain at
+  wait=120; with the descent fixed that same flight comes home on the 0.45 cap in 20.587 d, so
+  nothing starves today and the number is a measured stability bound, not a live failure.
+- **Touchdown is the game's award, not the tool's observation.** The `descend` guard waits for
+  `P.landing.landedOnMoon` — physics records TOUCHDOWN only on a contact step with the engine out
+  (`isBurning()` defers it), and that flag is the sticky one (`moonPerch` reads false under any
+  powered state). A guard keyed on contact debriefed `0.0 m/s, 0.0°` for a powered touchdown the
+  game never awarded — those were `landing.speed`'s initial values. A stack that runs its descent
+  tank dry above the surface lands through a throttle-ramp hop; the certified landing is whatever
+  physics wrote (currently 3.8 m/s at 26.6° tilt).
 - The exit code is the verdict: `game`, `landed` and `nova` must WIN, `retro` must LOSE, and
   `--expect=won|lost|any` overrides. The solve (no `--phase`) is not part of `npm test`.
 
@@ -569,6 +630,10 @@ These five are carried as written — rule and history together — because `js/
 
 - Collide the camera twice per frame — the wanted place and the blended one — three rounds each,
   ground last, with a sideways escape if it is still inside the hull. `tools/clip-test.mjs` sweeps it.
+- The hull collider's basis must stay orthonormal: when the axis is parallel to `up` (every vertical
+  pose) `shipAxes` builds its fallback by crossing the axis itself, never `X_AXIS` — a reference
+  sharing the axis overcounts the ellipsoid's `s²` by 1/sin² and a camera inside the hull reads far
+  outside (the moon-30 m view parked it 1.4 m off the vehicle centre that way).
 - The pad collider is two ellipsoids and a box in the pad's frame (`padMatrix()`), not a dome: the camera
   must be able to stand on the apron.
 - Start a damped quantity at its target.
