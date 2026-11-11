@@ -300,7 +300,18 @@ function collide(pos, map) {
 function shipAxes() {
   _ax0.copy(fwd()).normalize();                                // along the vehicle axis
   _ax1.crossVectors(_ax0, _up);
-  if (!Number.isFinite(_ax1.x) || _ax1.lengthSq() < 1e-9) _ax1.copy(X_AXIS); else _ax1.normalize();
+  if (!Number.isFinite(_ax1.x) || _ax1.lengthSq() < 1e-9) {
+    /* The axis is parallel to up — vertical on the pad, on ascent, and every lunar stand-off, which
+       is most of the game. The fallback must still be PERPENDICULAR to the axis: a basis sharing
+       the axis is not orthonormal, the sum x²+y²+z² overcounts by 1/sin²(angle from ref), and a
+       camera deep inside the hull reads as far outside it (measured: the moon-30 m view parked the
+       camera 1.4 m below the vehicle's centre with s² = 9.8 and no push-out — tools/clip-test.mjs).
+       Take the plane normal to X_AXIS; the axis itself is only parallel to it if the ship points
+       along the world X, which is what the second guard stands off. */
+    _ax1.crossVectors(_ax0, X_AXIS);
+    if (_ax1.lengthSq() < 1e-9) _ax1.crossVectors(_ax0, Y_AXIS);   // ship along X: Y stands off
+    _ax1.normalize();
+  } else _ax1.normalize();
   _ax2.crossVectors(_ax0, _ax1).normalize();
 }
 /* The hull is a cylinder and the collider an ellipsoid, which pinches toward its ends; 1.3× the
