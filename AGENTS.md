@@ -98,15 +98,15 @@ screenshots and GPU time). `node tools/mission-sim.mjs` with no `--phase` solves
 and then flies it (~50 s for the periselene aim; a round-trip stack flies every candidate the
 solve can find — up to eight full missions — until one also wins its return corridor, minutes).
 
-Shipped flight right now: the round trip — `RESULT WON`, 10.318 days. Periselene 358 km, LOI
+Shipped flight right now: the round trip — `RESULT WON`, 10.343 days. Periselene 358 km, LOI
 829 m/s at 370 km into a = 2,149 km capture; the CSM parks on a 110 km rail while the LM deorbits
 (84 m/s) and the game awards the landing at **3.8 m/s, tilt 26.6°** (`LAND_SAFE` is 32 m/s —
 physics records TOUCHDOWN only on an engine-out contact step, which the law's 3 m cutoff delivers;
 an earlier tool guard keyed on contact and debriefed a phantom `0.0 m/s` the game never awarded);
 lunar ascent + insertion
-1,940 m/s, Hohmann trim 21 m/s, docking at 603,457 s (the terminal approach closes to 1,001 m at
-9.1 m/s) with 2.4 t of ascent-stage propellant left; TEI 861 m/s plus a 793 m/s return
-correction after which the service stage is dropped; splashdown **7.8 m/s**; 19,794 m/s spent.
+1,940 m/s, Hohmann trim 21 m/s, docking at 603,456 s (the terminal approach closes to 1,001 m at
+9.0 m/s) with 2.4 t of ascent-stage propellant left; TEI 859 m/s plus an 802 m/s return
+correction after which the service stage is dropped; splashdown **7.8 m/s**; 19,802 m/s spent.
 `landed` (the previous one-way
 autopilot, at `--phase=4.9187044`) is the kept one-way regression — WON in 3.469 days, touchdown
 3.3 m/s, 7.2 t spare, 16,274 m/s spent; its band ran −3e-3 rad (745 km) to +1.75e-3 rad (123 km)
@@ -114,7 +114,7 @@ with +2e-3 rad LOST at 80 m/s. `retro` (at `--phase=1.4742618`) is LOST at 1,264
 tank. The round-trip window is solved for `AIM_PERI = 350` km: the shipped `MOON_PHASE0 =
 2.1777643` passes at 358 km (the solver's own converged 350-aim phase is 2.1777956), every phase
 measured from 2.158 to 2.186 rad (fifteen flights at 0.002-rad steps) flies the whole chain to
-splashdown, and the shipped phase does it after 120 s (20.587 d) or 300 s (17.979 d) of waiting on
+splashdown, and the shipped phase does it after 120 s (20.487 d) or 300 s (17.979 d) of waiting on
 the pad; 3,600 s of pad time pushes the docking phasing past the tool's own 1,100 ks chain
 horizon — that mission was still FLYING, healthy, at 12.731 d. Nominal ascent under SAS: max-Q
 22.8 kPa at
@@ -386,9 +386,9 @@ air. Corollaries, each read off the code or measured:
   locked pass). Δv asks are cumulative, capped 0.45 km/s, measured both ways (comment at
   `teicorr`): 1 km/s never starves but the tide re-kicks every ~27 ks forever, and the cert phase
   then burns 1,751 m/s of corrections arriving 21.3 d out; at 0.45 the certified chains land in
-  ~10 d having spent 793–880 m/s. What the cap can do to a needy geometry — silence the ladder
+  ~10 d having spent 802–880 m/s. What the cap can do to a needy geometry — silence the ladder
   mid-work with fuel aboard, a 25 g entry — was measured on the pre-awarded-touchdown chain at
-  wait=120; with the descent fixed that same flight comes home on the 0.45 cap in 20.587 d, so
+  wait=120; with the descent fixed that same flight comes home on the 0.45 cap in 20.487 d, so
   nothing starves today and the number is a measured stability bound, not a live failure.
 - **Touchdown is the game's award, not the tool's observation.** The `descend` guard waits for
   `P.landing.landedOnMoon` — physics records TOUCHDOWN only on a contact step with the engine out

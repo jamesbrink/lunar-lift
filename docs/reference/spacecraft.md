@@ -108,7 +108,7 @@ the Lunar Module as the two small ones — and `SPECS` entries are
 
 | stack | ignition mass | stage Δv (m/s) | TWR | burn times | ideal total | vs 15,142 m/s requirement | flown |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| **shipped `SPECS`** | 4,898 t | 2,129 / 6,423 / 6,810 / 2,117 / 2,714 | 1.29 / 1.08 / 0.18 / 0.65 / 0.63 | 120 / 305 / 1,992 / 255 / 311 s | **20,192 m/s** | 1.33× | **WON** — round trip, LM awarded 3.8 m/s, splashdown 7.8 m/s, 19,794 m/s |
+| **shipped `SPECS`** | 4,898 t | 2,129 / 6,423 / 6,810 / 2,117 / 2,714 | 1.29 / 1.08 / 0.18 / 0.65 / 0.63 | 120 / 305 / 1,992 / 255 / 311 s | **20,192 m/s** | 1.33× | **WON** — round trip, LM awarded 3.8 m/s, splashdown 7.8 m/s, 19,802 m/s |
 | previous (`retro`) | 3,780 t | 2,599 / 2,737 / 10,967 | 1.24 / 0.98 / 0.71 | 135 / 194 / 549 s | 16,303 m/s | 1.08× | LOST — 1,264 m/s impact, tank dry |
 | NOVA candidate | 5,525 t | 2,534 / 4,151 / 10,028 / 2,117 / 2,714 | 1.29 / 0.94 / 0.78 / 0.65 / 0.63 | 139 / 288 / 526 / 255 / 311 s | 21,543 m/s | 1.42× | **WON** — self-solved round trip at phase 1.2294908, 20,733 m/s, 13.484 days |
 
@@ -149,12 +149,21 @@ Honest caveats about this mapping, to keep the docs from overselling realism:
   and 10 m across, S-2 26 m, CSM body and adapter 22 m at 6.2 m across, command module 8.4 m — 99 m
   from tail to apex, in build units of 1.4 m. These are the game's proportions, not Apollo's.
 - **The LM launches inside a drawn SLA adapter** (`adapterGroup` in `js/saturn.js`): a 16-sided shroud
-  from the IU rim (+21.94) bulging past the footpad dishes to a lip below the cabin at +32.6, so the
-  lander is hidden from the pad the way Apollo's was. It jettisons with the SM engine's first burn in
+  from the IU rim (+21.94) bulging past the footpad dishes and closing over the whole lander to a lip
+  at +33.95 round the escape tower's seat, so the lander is hidden from the pad the way Apollo's was. It jettisons with the SM engine's first burn in
   space (physics `separateAdapter`, above `ADAPTER_ALT = 120` km), where Apollo shed it after
   transposition. Purely drawn: the adapter's 1.79 t and its shape are already carried by GEOM row 2
   ("CSM service body + adapter"), so nothing that flies moved — the certified telemetry is
   byte-identical with and without the shell.
+- **The lunar module is drawn as Grumman's, on the game's long legs** (`js/saturn.js`, stages 3 and
+  4). Descent stage: an octagon with a flat toward each leg and each cardinal, gold foil on the leg
+  faces and black thermal panels (two carrying the flag) on the others, cantilever gear — main strut,
+  outrigger truss, a V of secondary struts — a porch, rungs and a ladder on the front leg (azimuth
+  225°). Ascent stage, built in its own frame and turned to face that leg: a crew cabin lying on its
+  side with two triangular windows and the forward hatch, a mid-section carrying the overhead hatch,
+  the aft equipment bay, an unequal propellant-tank blister on each side, four RCS quads on
+  outriggers, the rendezvous radar and the S-band dish. Drawn hardware only: stations, `GEOM` and
+  contact are unchanged, and the legs stay 4.4 u long because they straddle the command module.
 
 ## Sources
 

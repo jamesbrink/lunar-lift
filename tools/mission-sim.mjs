@@ -1275,7 +1275,7 @@ function mission(phase, { trace = false, capture = true, stopAtPeri = false } = 
          raised to 1 km/s on the pre-awarded-touchdown chain the ladder never starved, but the
          Moon's tide re-kicks the corridor every ~27 ks forever and the cert phase burned
          1,751 m/s of corrections arriving 21.3 d out with 5 t aboard — safe, wasteful. At 0.45
-         the certified chain lands in 10.3 d having spent 793 m/s, and every measured variant
+         the certified chain lands in 10.3 d having spent 802 m/s, and every measured variant
          (fifteen corridor phases 2.158–2.186 rad, the steep table, 120 and 300 s pad waits)
          comes home on the same cap; the starvation the low cap CAN inflict — a ladder silenced
          mid-work with fuel aboard, a 25 g entry — is what the pre-fix chain did at wait=120. */

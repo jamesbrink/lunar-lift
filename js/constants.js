@@ -64,7 +64,7 @@ export const G0 = 9.81;
 export const MOON_PHASE0 = 2.1777643;                      // rad — 124.77° along the lunar orbit.
 // Round-trip window, solved by `node tools/mission-sim.mjs game` (coast-periselene straddle of
 // AIM_PERI 350, then flown): RESULT WON end to end — LM awarded 3.8 m/s after 2,057 m/s of
-// descent, dock, TEI, splashdown 7.8 m/s — at 10.318 days and 19,794 m/s. The solver's converged
+// descent, dock, TEI, splashdown 7.8 m/s — at 10.343 days and 19,802 m/s. The solver's converged
 // 350-aim phase is 2.1777956 and this constant passes the Moon at 358 km; the measured corridor
 // and pad-wait behaviour are in docs/reference/mission-design.md.
 // The one-way regression (landed) flies its own phase, re-solve with `landed --scan=`.
@@ -131,7 +131,7 @@ export const WARP_ONE = WARPS.indexOf(1);
    holds the local vertical, then sweeps the nose toward the launch-plane east direction
    (the plane that contains the Moon's orbit), then trims to the inertial velocity.
    Verified with the stack below: TLI lights at the first perigee (237 km) and the round trip
-   completes — LM awarded 3.8 m/s, splashdown 7.8 m/s, 19,794 m/s and 10.318 days. The
+   completes — LM awarded 3.8 m/s, splashdown 7.8 m/s, 19,802 m/s and 10.343 days. The
    one-way `landed` regression flies the same table to a 151 x 760 km parking orbit at 7.37 km/s
    and leaves 7.2 t of CSM propellant on the Moon. The pitch-over here reaches 66 degrees rather
    than horizontal; a steeper table (t0 60, ramp 200, max pi/2, --turn=steep in the tool) also
