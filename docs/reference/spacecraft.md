@@ -108,7 +108,7 @@ the Lunar Module as the two small ones — and `SPECS` entries are
 
 | stack | ignition mass | stage Δv (m/s) | TWR | burn times | ideal total | vs 15,142 m/s requirement | flown |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| **shipped `SPECS`** | 3,433 t | 2,215 / 6,518 / 8,357 | 1.37 / 1.09 / 0.19 | 117 / 305 / 1,905 s | **17,090 m/s** | 1.13× | **WON**, 3.3 m/s, 7.2 t spare |
+| **shipped `SPECS`** | 4,898 t | 2,129 / 6,423 / 6,810 / 2,117 / 2,714 | 1.29 / 1.08 / 0.18 / 0.65 / 0.63 | 120 / 305 / 1,992 / 255 / 311 s | **20,192 m/s** | 1.33× | **WON**, 3.3 m/s, 7.2 t spare |
 | previous (`retro`) | 3,780 t | 2,599 / 2,737 / 10,967 | 1.24 / 0.98 / 0.71 | 135 / 194 / 549 s | 16,303 m/s | 1.08× | LOST — 1,264 m/s impact, tank dry |
 | NOVA candidate | 5,475 t | 2,569 / 4,304 / 13,734 | 1.30 / 0.96 / 0.83 | 139 / 288 / 526 s | 20,608 m/s | 1.36× | not flown |
 

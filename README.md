@@ -350,7 +350,7 @@ Measured (full breakdown in `docs/reference/mission-design.md`):
 | Touchdown | **3.3 m/s** against the 32 m/s `LAND_SAFE` limit |
 | Propellant spare | 7.2 t of CSM propellant unused |
 | Mission clock | 3.469 days |
-| Δv spent | 16 274 m/s vs an ideal staged budget of 17 090 m/s and a derived one-way requirement of 15 142 m/s |
+| Δv spent | 16 274 m/s (one-way) vs an ideal staged budget of 20 192 m/s and a derived one-way requirement of 15 142 m/s |
 
 `python3 tools/mission-math.py` recomputes the derived numbers (derived requirement, budgets, the
 atmosphere comparison) from the primary constants in `docs/reference/` and prints the derivation.
@@ -360,7 +360,7 @@ mass and the Moon's sphere of influence it has just computed must be the figures
 source comments quote. It does not check anything that is flown — periselene, touchdown, Δv spent
 come from `tools/mission-sim.mjs`.
 
-None of this means the mission is easy. The vehicle has ~5 % margin between spent and ideal, the
+None of this means the mission is easy: the
 descent is only survivable because its guidance flies an altitude-bounded velocity envelope rather
 than trying to hover, and an earlier, slightly smaller stack reached the Moon and then hit the
 surface at 1 264 m/s with a dry tank. The launch window is solved for a 350 km periselene, the middle

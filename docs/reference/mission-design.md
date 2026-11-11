@@ -57,15 +57,18 @@ reasoning, and `mission-math.py` section 6 for the arithmetic):
 
 | Stage | dry t | propellant t | thrust kN | Isp s | ideal Δv m/s | TWR at ignition |
 | --- | --- | --- | --- | --- | --- | --- |
-| S-1 SATURN I | 130 | 1,800 | 46,000 | 304 | 2,215 | 1.37 g |
-| S-2 SATURN II | 90 | 1,200 | 16,000 | 415 | 6,518 | 1.09 g |
-| CSM ENGINE | 18 | 185 | 400 | 420 | 8,357 | 0.19 g (Earth) / 4.2 g_moon |
+| S-1 SATURN I | 130 | 2,500 | 62,000 | 304 | 2,129 | 1.29 g |
+| S-2 SATURN II | 90 | 1,800 | 24,000 | 415 | 6,423 | 1.08 g |
+| CSM ENGINE | 18 | 300 | 650 | 440 | 6,810 | 0.18 g (Earth) |
+| LM DESCENT | 5 | 26 | 380 | 380 | 2,117 | 0.65 g_moon |
+| LM ASCENT | 4 | 15 | 180 | 380 | 2,714 | 0.63 g_moon |
 
-Ignition mass 3,433 t; ideal staged budget **17,090 m/s = 1.13× the requirement**.
+Ignition mass 4,898 t; ideal staged budget **20,192 m/s = 1.33× the 15,142 m/s one-way
+requirement, 1.12× the 18,092 m/s round trip**.
 
 | Candidate | ignition t | ideal Δv m/s | ratio | outcome when flown |
 | --- | --- | --- | --- | --- |
-| **shipped** (above) | 3,433 | 17,090 | 1.13× | **WON**, 3.3 m/s, 7.2 t spare |
+| **shipped** (above) | 4,898 | 20,192 | 1.33× | **WON** — one-way landing 3.3 m/s, 7.2 t spare; round trip see flight tables |
 | previous (`retro`) | 3,780 | 16,303 | 1.08× | LOST — `HARD IMPACT ON THE MOON AT 1264 m/s`, tank dry |
 | oversized (`nova`) | 5,475 | 20,608 | 1.36× | not flown: nothing the margin is spent on, and a 3,000 t first stage is a different game |
 
@@ -99,8 +102,9 @@ because that failure is invisible to budget arithmetic.
 | **touchdown** | 299,679 | 3.3 m/s | **2,055** | 0 / 0 / 7.2 |
 | | | **total** | **16,274** | |
 
-Margin, stated as the two different things it is: **816 m/s** of headroom between the ideal staged
-budget (17,090) and what the flight actually spent (16,274), and **7.2 t** of propellant still in
+Margin, stated as the two different things it is: **3,918 m/s** of headroom between the ideal
+staged budget (20,192, which carries the vehicle all the way home) and what the one-way flight
+actually spent (16,274), and **7.2 t** of propellant still in
 the CSM tank at touchdown, which on the 28 t that lands dry (18 t CSM + the 10 t `CAPSULE_MASS`) is
 4,119 × ln(35.2/28) = **943 m/s** of capability nobody used. (This file used to quote 1,444 m/s
 here; that figure left the capsule out of the mass ratio. The tool's own touchdown mass is 35 t.) The two numbers differ because the ideal budget
