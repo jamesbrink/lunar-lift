@@ -195,7 +195,9 @@ for name, d, why in items:
     total += d
     print(f"  {name:<32} {d:7.0f}   running {total:7.0f}   # {why}")
 print(f"  ONE-WAY REQUIREMENT              {total:7.0f} m/s")
-print(f"  + lunar ascent {asc:.0f} + TEI ~1100 -> round trip {total+asc+1100:.0f} m/s")
+ROUND_TRIP = total + asc + 1100.0
+print(f"  ROUND-TRIP REQUIREMENT           {ROUND_TRIP:7.0f}   # + lunar ascent {asc:.0f} (SP-4029)"
+      f" + TEI ~1100; re-entry needs no propulsive dv")
 
 # ──────────────────────────────────────────────────────── 6. game stacks
 heading("6. GAME VEHICLE IDEAL DELTA-V vs REQUIREMENT")
@@ -214,8 +216,8 @@ def game_stack(specs, label, requirement):
         total += d
         m -= prop + dry
         print(f"    {name:<14} TWR {twr:5.2f}  burn {burn:5.0f} s  dv {d*1000:6.0f} m/s  -> {m:7.1f} t")
-    print(f"    ideal total {total*1000:.0f} m/s   vs one-way requirement {requirement:.0f} m/s"
-          f"   margin {(total*1000)/requirement:.2f}x")
+    print(f"    ideal total {total*1000:.0f} m/s   vs one-way {requirement:.0f} m/s {(total*1000)/requirement:.2f}x"
+          f"   vs round trip {ROUND_TRIP:.0f} m/s {(total*1000)/ROUND_TRIP:.2f}x")
     return total
 
 
@@ -379,6 +381,10 @@ quoted = [
      ["README.md", "js/constants.js", "docs/reference/mission-design.md", "docs/reference/spacecraft.md"]),
     (f"{IDEAL_SHIPPED*1000/REQUIREMENT:.2f}", "shipped margin over the requirement",
      ["js/constants.js", "docs/reference/mission-design.md"]),
+    (f"{IDEAL_SHIPPED*1000/ROUND_TRIP:.2f}", "shipped margin over the round-trip requirement",
+     ["docs/reference/mission-design.md"]),
+    (f"{ROUND_TRIP:.0f}", "round-trip requirement, m/s",
+     ["docs/reference/mission-design.md"]),
     (f"{IDEAL_PREVIOUS*1000:.0f}", "previous stack ideal budget, m/s",
      ["js/constants.js", "docs/reference/mission-design.md", "docs/reference/spacecraft.md"]),
     (f"{IDEAL_NOVA*1000:.0f}", "NOVA candidate ideal budget, m/s",
