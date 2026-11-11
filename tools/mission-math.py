@@ -231,7 +231,12 @@ PREVIOUS = [("S-1 SATURN I", 130, 2400, 46000, 263),
             ("CSM ENGINE", 20, 400, 3000, 420)]
 NOVA = [("S-1 SATURN I", 130, 3000, 70000, 330),
         ("S-2 SATURN II", 110, 1500, 22000, 430),
-        ("CSM ENGINE", 25, 700, 6000, 460)]
+        ("CSM ENGINE", 25, 700, 6000, 460),
+        # The LM rows: a 6,000 kN third stage is ~39 g_moon at landing mass, outside the
+        # lander sizing tools/mission-sim.mjs holds every stage to, so the oversized
+        # candidate flies the round trip with the LM — the same chain the shipped stack flies.
+        ("LM DESCENT", 5, 26, 380, 380),
+        ("LM ASCENT", 4, 15, 180, 380)]
 REQUIREMENT = total
 IDEAL_SHIPPED = game_stack(SHIPPED, "js/constants.js SPECS (shipped; flies, see mission-design.md)", total)
 IDEAL_PREVIOUS = game_stack(PREVIOUS, "SPECS as they were (reached lunar orbit, hit the Moon at 1264 m/s dry)", total)
