@@ -435,8 +435,8 @@ if (stages.length > 3) {
      and wore its RCS quads on the descent stage; the real quads are on the ASCENT stage (fore
      and aft), and the descent stage carries the landing radar instead. */
   g3.add(cyl(1.72, 1.72, 1.65, 30.525, gold, 8, true));
-  g3.add(cyl(1.76, 1.76, 0.16, 29.78, tone, 8));              // aft frame at the tank's foot
-  g3.add(cyl(1.76, 1.76, 0.16, 31.27, tone, 8));              // and the deck the cabin bolts to
+  g3.add(cyl(1.76, 1.76, 0.16, 29.83, tone, 8));              // aft frame at the tank's foot (its bottom face clears the tank's own bottom by 0.05 u: flush is a flicker, tools/flicker-test.mjs)
+  g3.add(cyl(1.76, 1.76, 0.16, 31.18, tone, 8));              // and the deck the cabin bolts to (top face 31.26: clear of the tank top 31.35 and the corner posts' 31.31 by ≥ 0.05 u)
   {
     const dk = fuse(black, { cast: true });
     for (let k = 0; k < 8; k++)                               // the eight corner posts of the tank cluster
@@ -455,8 +455,8 @@ if (stages.length > 3) {
      under a foot. At 225° the strut carries the ladder the crew walks down onto the Moon. */
   {
     const A = new THREE.Vector3(), B = new THREE.Vector3(), D = new THREE.Vector3(), YAX = new THREE.Vector3(0, 1, 0);
-    const leg = (mat, ra, za, rb, zb, r, edge = true) => {    // a strut from (ra,0,za) to (rb,0,zb); cylinder axis is Y → map Y onto the strut
-      A.set(ra, 0, za); B.set(rb, 0, zb); D.subVectors(B, A);
+    const leg = (mat, ra, za, rb, zb, r, az, edge = true) => {    // a strut from (ra,0,za) rotated to azimuth az to (rb,0,zb); cylinder axis is Y → map Y onto the strut
+      A.set(ra * Math.cos(az), ra * Math.sin(az), za); B.set(rb * Math.cos(az), rb * Math.sin(az), zb); D.subVectors(B, A);
       const m = new THREE.Mesh(new THREE.CylinderGeometry(r, r, D.length(), 8), mat);
       m.position.copy(A).addScaledVector(D, 0.5);
       m.quaternion.setFromUnitVectors(YAX, D.clone().normalize());
@@ -466,9 +466,9 @@ if (stages.length > 3) {
     const padGeo = new THREE.LatheGeometry(padPts, 20);       // a shallow dish, opening up: rim is the sole
     for (let i = 0; i < 4; i++) {
       const az = i * Math.PI / 2 + Math.PI / 4, c = Math.cos(az), s = Math.sin(az);
-      leg(silver, 1.78, 30.10, 2.62, 25.80, 0.085);           // main strut (hinge bracket to foot centre)
-      leg(silver, 1.70, 29.78, 2.20, 27.05, 0.045, false);    // the two secondaries Apollo braced it with
-      leg(silver, 1.70, 29.78, 2.42, 26.45, 0.045, false);
+      leg(silver, 1.78, 30.10, 2.62, 25.80, 0.085, az);       // main strut (hinge bracket to foot centre)
+      leg(silver, 1.70, 29.78, 2.20, 27.05, 0.045, az, false);  // the two secondaries Apollo braced it with
+      leg(silver, 1.70, 29.78, 2.42, 26.45, 0.045, az, false);
       const pad = new THREE.Mesh(padGeo, tone);
       pad.position.set(c * 2.62, s * 2.62, 25.60); pad.castShadow = true; outline(pad); g3.add(pad);  // rim at 25.6 = LM_FOOT_Z
       const hng = new THREE.Mesh(new THREE.CylinderGeometry(0.14, 0.14, 0.34, 10), black);
@@ -503,19 +503,22 @@ if (stages.length > 3) {
   roof.position.z = 33.34; roof.castShadow = true; outline(roof); g4.add(roof);   // top 33.40 = LM_TOP_Z
   {
     const gl = fuse(glass, { edge: false }), fr = fuse(frame), dk = fuse(black, { cast: true }), sv = fuse(silver, { cast: true });
+    /* A plane is born facing +Z: without rotateY these windows were horizontal plates floating
+       beside the cabin at the station z (the coplanar gate caught it). rotateY(π/2) stands each
+       one on the axis — PlaneGeometry(vertical, tangential) then swings to azimuth with az. */
     for (const azd of [90, 270]) {                            // the two big front windows, and their frames
-      gl.add(new THREE.PlaneGeometry(0.46, 0.32), 0.880, 0, 32.60, 0, 0, 0, azd * Math.PI / 180);
-      fr.add(new THREE.PlaneGeometry(0.58, 0.44), 0.865, 0, 32.60, 0, 0, 0, azd * Math.PI / 180);
+      gl.add(new THREE.PlaneGeometry(0.32, 0.46).rotateY(Math.PI / 2), 0.905, 0, 32.60, 0, 0, 0, azd * Math.PI / 180);
+      fr.add(new THREE.PlaneGeometry(0.44, 0.58).rotateY(Math.PI / 2), 0.865, 0, 32.60, 0, 0, 0, azd * Math.PI / 180);
     }
     for (const azd of [45, 225]) {                            // the two side windows
-      gl.add(new THREE.PlaneGeometry(0.30, 0.22), 0.880, 0, 32.56, 0, 0, 0, azd * Math.PI / 180);
-      fr.add(new THREE.PlaneGeometry(0.40, 0.32), 0.865, 0, 32.56, 0, 0, 0, azd * Math.PI / 180);
+      gl.add(new THREE.PlaneGeometry(0.22, 0.30).rotateY(Math.PI / 2), 0.905, 0, 32.56, 0, 0, 0, azd * Math.PI / 180);
+      fr.add(new THREE.PlaneGeometry(0.32, 0.40).rotateY(Math.PI / 2), 0.865, 0, 32.56, 0, 0, 0, azd * Math.PI / 180);
     }
-    fr.add(new THREE.PlaneGeometry(0.50, 0.60), 0.868, 0, 32.45);                // hatch frame at 0°...
-    gl.add(new THREE.PlaneGeometry(0.32, 0.42), 0.885, 0, 32.45);                // ...and its glass
+    fr.add(new THREE.PlaneGeometry(0.60, 0.50).rotateY(Math.PI / 2), 0.868, 0, 32.45);              // hatch frame at 0°...
+    gl.add(new THREE.PlaneGeometry(0.42, 0.32).rotateY(Math.PI / 2), 0.912, 0, 32.45);              // ...and its glass
     /* RCS: the two quads the real ascent stage carries, fore on one diagonal and aft on the
        other, each four nozzles. They live above the deck, never on the descent stage. */
-    for (const [azd, zq] of [[45, 33.02], [225, 31.80]]) {
+    for (const [azd, zq] of [[45, 32.94], [225, 31.80]]) {    // fore quad's top 33.07: 0.08 u below the cabin top (was flush at 33.15 — coplanar gate)
       const az = azd * Math.PI / 180, r = azd === 45 ? 0.97 : 1.08;
       dk.add(new THREE.BoxGeometry(0.28, 0.28, 0.26), r, 0, zq, 0, 0, 0, az);
       for (const dz of [-0.19, 0.19]) dk.add(new THREE.CylinderGeometry(0.05, 0.07, 0.22, 8).rotateX(Math.PI / 2), r, 0, zq + dz, 0, 0, 0, az);
