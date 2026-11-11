@@ -388,7 +388,7 @@ export function updateCamera(dt, paused = false) {
        top of the mated stack is the ascent cabin, not the docking tunnel. */
     const tail = i < 0 ? CM_TAIL_Z : i === 3 ? LM_FOOT_Z : i === 4 ? LM_ASC_TAIL_Z : stages[i].tailZ;
     /* Under parachutes the vehicle is the capsule AND what it hangs from: frame both. */
-    const ch = i < 0 ? getChute() : 0, top = i >= 2 ? LM_TOP_Z : ch === 2 ? NOSE_Z + 36 : ch === 1 ? NOSE_Z + 18 : NOSE_Z;
+    const ch = i < 0 ? getChute() : 0, top = i >= 2 && stages.length > 4 && !stages[4].separated ? LM_TOP_Z : ch === 2 ? NOSE_Z + 36 : ch === 1 ? NOSE_Z + 18 : NOSE_Z;
     const wantZ = 0.5 * (tail + top) * VS;
     focusZ = focusZ === null || !placed ? wantZ : focusZ + (wantZ - focusZ) * (1 - Math.exp(-2.5 * dt));
     spanHalf = 0.5 * (top - tail) * VS;

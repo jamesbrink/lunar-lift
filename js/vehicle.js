@@ -304,16 +304,19 @@ export function clearDebris() {
    back the moment the docks engage. (resetStages also re-homes it; this covers dock, which does
    not pass through reset.) */
 const _parkV = new THREE.Vector3(), _parkUp = new THREE.Vector3(0, 0, 1);
+let csmOut = false;   // this function put the CSM in the scene. A DROPPED service module is in the scene too (detachStage) and is debris: it must not be taken back
 export function syncParkedCsm() {
   const m = stages[2].meshes;
   if (getCsmParked()) {
     if (m.parent !== scene) scene.add(m);
+    csmOut = true;
     csmParkPos(getSimTime(), m.position);
     csmParkVel(getSimTime(), _parkV);
     if (_parkV.lengthSq() > 1e-12) m.quaternion.setFromUnitVectors(_parkUp, _parkV.normalize());
     m.scale.setScalar(VS);
     m.visible = true;
-  } else if (m.parent === scene) {
+  } else if (csmOut) {
+    csmOut = false;
     rocketGroup.add(m);
     m.position.set(0, 0, 0); m.quaternion.identity(); m.scale.setScalar(1);
   }
@@ -324,7 +327,7 @@ export function resetStages() {
      the pad for its whole remaining life otherwise. */
   resetPool(); resetEmit(); clearExhaustDraw(); resetEntryFx(); resetSplashFx(); resetDustSheet(); setFireLight(ZERO_V, 0, 0);
   pend.length = 0; boomAt.x = NaN; wasOver = wasHome = false;
-  ship.live = true; burnT0 = -1;
+  ship.live = true; burnT0 = -1; csmOut = false;
   stages.forEach(st => {
     /* detachStage hands a dropped stage to the scene at scale VS; back under rocketGroup (itself VS)
        it must be 1 again, or the stage returns VS times too small to see. */

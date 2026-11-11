@@ -120,7 +120,7 @@ function nextStep({ state, engineOn, live, i, dry, altE, alt, nearMoon, el, radi
   if (parked && i >= 3 && el.pe > 60)
     return [`Coasting at ${alt.toFixed(0)} km over the Moon — burn retrograde to go down to it, or find the parked CSM: within 1 km, under 50 m/s relative, the docks engage`, 'ok'];
   if (docked && nearMoon && el.pe > 0 && !live)
-    return [`Docked ✓ — ${K('X')} jettisons the ascent stage. Then burn ${K('V')} ${K('P')} retrograde at perilune to fall home`, 'ok'];
+    return [`Docked ✓ — ${K('X')} jettisons the ascent stage. Then ${K('P')} prograde to escape the Moon — burn so you leave BEHIND it, against its motion round the Earth, and the Earth periapsis falls`, 'ok'];
   if (nearMoon) {
     const vs = -radial * 1000;
     if (el.escape || el.pe > 0 && !el.escape && el.ap > SOI_M) return [`Capture: ${K('V')} retrograde, ${K('P')} SAS, burn at the lowest point (${Math.round(el.pe)} km)`];

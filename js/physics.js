@@ -420,7 +420,7 @@ export function separateStage(j) {
   st.separated = true;
   {
     const rest = activeEngine();   // what flies once this is gone — the message names it
-    hooks.addLog(i === 4 ? 'LUNAR ASCENT STAGE JETSONED'
+    hooks.addLog(i === 4 ? 'LUNAR ASCENT STAGE JETTISONED'
       : rest < 0
       ? (i === 2 ? 'CSM DROPPED — THE COMMAND MODULE FLIES ALONE' : `${SPECS[i].name} DROPPED — THE COMMAND MODULE FLIES ALONE`)
       : `STAGE ${i + 1} SEPARATED — ${SPECS[rest].name} IS NOW FLYING`, 'good');
@@ -575,6 +575,7 @@ export function physStep(dt) {
       _spinQ.setFromAxisAngle(SPIN_AXIS, MOON_RATE * dt);
       moonPos(simTime, _moon); moonVel(simTime, _mv);
       moonPerch.applyQuaternion(_spinQ);
+      S.q.premultiply(_spinQ);                   // and the attitude with it, as the pad hold does: left inertial, the cabin leaned 13° a day off its own descent stage
       S.pos.copy(_moon).add(moonPerch);
       S.v.copy(_mv);
       omega.set(0, 0, 0);
@@ -810,7 +811,7 @@ function impact(onMoon) {
     if (!stages[3].separated) {
       stages[3].separated = true; stages[3].fuel = 0;
       vehicleOps.parkStage(stages[3].meshes, S.pos, S.q);
-      hooks.addLog('LM DESCENT STAGE JETSONED — ASCENT ENGINE ONLY', 'good');
+      hooks.addLog('LM DESCENT STAGE JETTISONED — ASCENT ENGINE ONLY', 'good');
     }
     return;
   }
