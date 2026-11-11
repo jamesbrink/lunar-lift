@@ -36,11 +36,12 @@ export const MOON_V = new THREE.Vector3().crossVectors(MOON_PLANE_N, MOON_U).nor
    first perigee after insertion arrives at the Moon instead of thousands of km past it. Solved
    numerically by tools/mission-sim.mjs (bisecting the first periselene altitude) at the step the
    game can actually run — see the note in that tool about coast step size: from the shipped
-   coast-start state the game's scheme reaches 346 km at 0.1 s steps and an impact 475 km under
-   the surface at 1 s steps, so this number is only valid for the step it was solved at. The tool
+   coast-start state the game's scheme reaches 358 km at 0.1 s steps and 658 km at 1 s steps (the
+   same experiment on the previous one-way state: 346 km against an impact 475 km under the
+   surface), so this number is only valid for the step it was solved at. The tool
    aims at AIM_PERI = 350 km, the middle of the band its autopilot lands from.
 
-   Measured sensitivity near the window (shipped vehicle, game's own step):
+   Measured sensitivity near the one-way window (the `landed` regression, game's own step):
      phase -3e-3    rad -> periselene 745 km, touchdown 2.8 m/s, 6.6 t spare
      phase -1e-3    rad -> periselene 477 km, touchdown 2.8 m/s, 7.0 t spare
      phase 4.9187044    -> periselene 346 km, touchdown 3.3 m/s, 7.2 t spare
@@ -58,13 +59,16 @@ export const MOON_V = new THREE.Vector3().crossVectors(MOON_PLANE_N, MOON_U).nor
    and the predictor cannot disagree with the engine. The budget tools (tools/mission-sim.mjs,
    tools/mission-math.py) keep the defined 9.80665 for their delta-v bookkeeping, as the Apollo
    figures they are compared with do: their totals read 0.034 % under the engine's own (16,274 m/s
-   quoted, 16,280 at 9.81 - measured by switching the tool's constant on the shipped flight). */
+   quoted on the one-way flight, 16,280 at 9.81 - measured by switching the tool's constant there). */
 export const G0 = 9.81;
-export const MOON_PHASE0 = 2.1597018;                      // rad — 123.74° along the lunar orbit.
-// Round-trip window: the 5-row SPECS ascend differently (16 parking orbits before TLI), and the
-// window sits ~2.76 rad from the one-way stack's 4.9187044 — which is still the phase the one-way
-// regression (landed) flies. Re-solve with `node tools/mission-sim.mjs game` after any change to
-// the ascent, the TURN table, the forces or the masses; the check walks from this value.
+export const MOON_PHASE0 = 2.1777643;                      // rad — 124.77° along the lunar orbit.
+// Round-trip window, solved by `node tools/mission-sim.mjs game` (coast-periselene straddle of
+// AIM_PERI 350, then flown): RESULT WON end to end — LM awarded 3.8 m/s after 2,057 m/s of
+// descent, dock, TEI, splashdown 7.8 m/s — at 10.318 days and 19,794 m/s. The solver's converged
+// 350-aim phase is 2.1777956 and this constant passes the Moon at 358 km; the measured corridor
+// and pad-wait behaviour are in docs/reference/mission-design.md.
+// The one-way regression (landed) flies its own phase, re-solve with `landed --scan=`.
+// Re-solve after ANY change to the ascent, the TURN table, the forces or the masses.
 let moonPhase = MOON_PHASE0;
 export function setMoonPhase(p) { moonPhase = p; }
 
@@ -126,20 +130,22 @@ export const WARP_ONE = WARPS.indexOf(1);
 /* SAS pitch program. A real launch vehicle does not chase "prograde" off the pad: it
    holds the local vertical, then sweeps the nose toward the launch-plane east direction
    (the plane that contains the Moon's orbit), then trims to the inertial velocity.
-   Verified with the stack below: a 151 x 760 km parking orbit at 7.37 km/s, and 7.2 t of CSM
-   propellant left on the Moon. The pitch-over here reaches 66 degrees rather than horizontal; a
-   steeper table (t0 60, ramp 200, max pi/2, --turn=steep in the tool) also completes the mission and
-   lands with 7.7 t spare for 16,216 m/s instead of 16,274, so the exact shape is not what makes the
-   mission fly - the propellant load is. MOON_PHASE0 is solved for whichever table is in here
-   (4.9187044 for this one, 4.9463355 for the steep one), so changing one without re-running
+   Verified with the stack below: TLI lights at the first perigee (237 km) and the round trip
+   completes — LM awarded 3.8 m/s, splashdown 7.8 m/s, 19,794 m/s and 10.318 days. The
+   one-way `landed` regression flies the same table to a 151 x 760 km parking orbit at 7.37 km/s
+   and leaves 7.2 t of CSM propellant on the Moon. The pitch-over here reaches 66 degrees rather
+   than horizontal; a steeper table (t0 60, ramp 200, max pi/2, --turn=steep in the tool) also
+   completes the round trip — WON in 10.916 days for 19,779 m/s — so the exact shape is not what
+   makes the mission fly - the propellant load is. MOON_PHASE0 is solved for whichever table is
+   in here (2.1777643 for this one, 2.1909830 for the steep one), so changing one without re-running
    tools/mission-sim.mjs mis-aims the translunar injection by tens of thousands of km. */
 export const TURN = { t0: 55, ramp: 190, max: 1.15 };
 
 /* Translunar ignition cue: how far the Moon leads the ship along the orbit (rad) when the certified
-   flight lights its 817 s injection burn at 245 km — measured by tools/mission-sim.mjs (ev.tliIgn).
+   flight lights its 942 s injection burn at 237 km — measured by tools/mission-sim.mjs (ev.tliIgn).
    A cue, not a solution: it puts a hand-flown burn in the right half-hour, and the lunar-aim readout
    and a trim burn do the rest. */
-export const TLI_LEAD = 2.7742;
+export const TLI_LEAD = 2.9159;
 export const LAND_SAFE = 0.032;          // km/s — 32 m/s touchdown limit
 export const SAFE_EARTH = 0.012;         // km/s — 12 m/s: a splashdown under parachutes (three good mains give ~8)
 
