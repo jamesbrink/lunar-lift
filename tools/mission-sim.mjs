@@ -99,7 +99,7 @@ const STACKS = {
          { dry: 5, fuel: 26, thrust: 380, isp: 380 },
          { dry: 4, fuel: 15, thrust: 180, isp: 380 }],
   /* What shipped before the verified stack: 2,400 + 700 + 400 t. Reaches the Moon and lunar orbit,
-     then runs the tank dry on the descent — HARD IMPACT ON THE MOON AT 1264 m/s. */
+     then runs the tank dry on the descent — HARD IMPACT ON THE MOON AT 1266 m/s. */
   retro: [{ dry: 130, fuel: 2400, thrust: 46000, isp: 263 },
           { dry: 120, fuel: 700, thrust: 12000, isp: 340 },
           { dry: 20, fuel: 400, thrust: 3000, isp: 420 }],
@@ -236,7 +236,7 @@ function mission(phase, { trace = false, capture = true, stopAtPeri = false } = 
     if (r > raC) return hor.clone().multiplyScalar(Math.sqrt(2 * C.MU_E * (C.RE + 55) / (r * (C.RE + 55 + r))));
     const q = 2 * C.MU_E / r + 2 * E - h * h / (r * r);
     const vTs = h / r;
-    return hor.multiplyScalar(vTs).addScaledVector(rh, -Math.sqrt(Math.max(0, q - vTs * vTs)));
+    return hor.multiplyScalar(vTs).addScaledVector(rh, -Math.sqrt(Math.max(0, q)));   // q IS the radial speed squared (h²/r² is already out of it)
   };
   const teiDv = () => {
     const g = P.gravityAt(P.S.pos, new THREE.Vector3(), P.getSimTime());
@@ -294,7 +294,7 @@ function mission(phase, { trace = false, capture = true, stopAtPeri = false } = 
     const cost = th => {
       const vt = mv.clone().addScaledVector(dhat, -V * Math.cos(th)).addScaledVector(s, V * Math.sin(th));
       const vM = vt.clone().sub(mv);
-      const rv = rM.dot(vM) / rm;
+      const rv = rM.dot(vM);                              // r·v, not its radial component: the eccentricity vector wants the dot product (moonAsym, below, has it right)
       const evec = rM.clone().multiplyScalar(vM.lengthSq() / C.MU_M - 1 / rm).addScaledVector(vM, -rv / C.MU_M);
       const e = evec.length();
       const h = new THREE.Vector3().crossVectors(rM, vM).length();
@@ -642,7 +642,7 @@ function mission(phase, { trace = false, capture = true, stopAtPeri = false } = 
       else if (L.alt > 400) {
         /* Wait for periapsis before handing the LM to the surface. The deorbit law makes the
            BURN POINT the apocentre — from the ~370 km capture pass that is a 1.6 km/s entry the
-           descent guidance absorbs (certified 3.3 m/s); fired instead at the 4,000 km top of a
+           descent guidance absorbs (certified 3.8 m/s); fired instead at the 4,000 km top of a
            long capture ellipse (the wait=3600 flight, Nov-26) it is a 2.07 km/s entry at
            interface and the LM meets the Moon at 367 m/s with the tank run dry. If the capture
            ellipse itself never reaches the parking band (wait=3600 arrives BOUND at a 5,804 km
@@ -796,6 +796,13 @@ function mission(phase, { trace = false, capture = true, stopAtPeri = false } = 
         const vrT = Math.min(0.2, Math.sqrt(2 * 0.4 * (C.MU_M / (C.RM + hKm) ** 2) * Math.max(0, 20 - hKm)));
         const vDes = tHat.clone().multiplyScalar(vC15).addScaledVector(rel, vrT / L.r);
         const aCmd = vDes.sub(relV).divideScalar(8).sub(gAbs).add(gMF);
+        /* KNOWN, kept on purpose: normalize() works in place, so the length read on the next line
+           is 1 and the throttle is 1 / aMax = full, always — this "controller" never eases off.
+           Reading the magnitude first (the obvious fix) was measured: the shipped phase still
+           wins (10.161 d) but 10 of the 15 neighbours 2.158..2.186 and the 300 s and 3,600 s pad
+           waits then lose at lmApex. Everything downstream — the Hohmann scan, the apsis trim,
+           the V-bar servo — was tuned on the insertion a full-throttle cut leaves. Fix the two
+           together or not at all. */
         dir = aCmd.lengthSq() > 1e-12 ? aCmd.normalize() : tHat;
         thr = THREE.MathUtils.clamp(aCmd.length() / Math.max(aMax, 1e-6), 0.12, 1);
       }
@@ -1250,7 +1257,7 @@ function mission(phase, { trace = false, capture = true, stopAtPeri = false } = 
           const mpn = C.moonPos(P.getSimTime(), new THREE.Vector3());
           const wnow = corridorVel(mpn.length(), C.moonVel(P.getSimTime(), new THREE.Vector3()).normalize(),
             mpn.clone().multiplyScalar(1 / mpn.length())).sub(C.moonVel(P.getSimTime(), new THREE.Vector3())).normalize();
-          ev.tei = { t: +P.getSimTime().toFixed(0), pe: +(elE.pe - C.RE).toFixed(0), vInert: +P.S.v.length().toFixed(4),
+          ev.tei = { t: +P.getSimTime().toFixed(0), pe: +elE.pe.toFixed(0), vInert: +P.S.v.length().toFixed(4),
             escape: elE.escape, dv: +(teiAcc * 1000).toFixed(0), aim: +(teiDv0 * 1000).toFixed(0),
             aimErr: u ? +(Math.acos(THREE.MathUtils.clamp(u.dot(wnow), -1, 1)) * 180 / Math.PI).toFixed(1) : 'bound' };
           mark('tei');
@@ -1275,7 +1282,7 @@ function mission(phase, { trace = false, capture = true, stopAtPeri = false } = 
          raised to 1 km/s on the pre-awarded-touchdown chain the ladder never starved, but the
          Moon's tide re-kicks the corridor every ~27 ks forever and the cert phase burned
          1,751 m/s of corrections arriving 21.3 d out with 5 t aboard — safe, wasteful. At 0.45
-         the certified chain lands in 13.7 d having spent 779 m/s, and every measured variant
+         the certified chain lands in 10.1 d having spent 726 m/s, and every measured variant
          (fifteen corridor phases 2.158–2.186 rad, the steep table, 120 and 300 s pad waits)
          comes home on the same cap; the starvation the low cap CAN inflict — a ladder silenced
          mid-work with fuel aboard, a 25 g entry — is what the pre-fix chain did at wait=120. */
@@ -1306,7 +1313,7 @@ function mission(phase, { trace = false, capture = true, stopAtPeri = false } = 
         // has actually won.
         if (d2.length() <= 0.005 || teiIter >= 40 || fuel <= 0 || d2.length() > 0.5 || teiFixAcc > 0.45) {
           teiFixSnap = { t: +P.getSimTime().toFixed(0), dv: +(d2.length() * 1000).toFixed(1), taps: teiIter,
-                         pe: +(P.orbitalElements(P.S.pos, P.S.v, C.MU_E, C.RE).pe - C.RE).toFixed(0) };
+                         pe: +P.orbitalElements(P.S.pos, P.S.v, C.MU_E, C.RE).pe.toFixed(0) };
           mode = 'tecoast';
         } else {
           teiCorr = d2.clone().normalize(); teiCorrDv = d2.length(); teiAcc = 0; teiCBurn = 0; teiIter++; teiFixAcc += teiCorrDv;
@@ -1562,7 +1569,7 @@ report(r, phase);
    asks — see teicorr) can leave some periselene-350 phases unwinnable at the end while other
    corridors in the same basin splash at 7.8 m/s. Measured on the pre-awarded-touchdown chain:
    nova's first candidate stranded the CSM dry at 130 × 139,533 km after 841 m/s of corrections
-   — the same phase flies the whole chain on the current one (self-solved WON, 13.443 d), so
+   — the same phase flies the whole chain on the current one (self-solved WON, 11.936 d), so
    this loop is insurance for the geometry that still loses. After a loss it walks DOWN the
    phase circle to the next straddle of AIM_PERI (peri rises as phase falls through a corridor,
    so a crossing is the step where peri passes from below AIM_PERI to above it), bisects it and

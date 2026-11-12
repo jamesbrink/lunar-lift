@@ -3,7 +3,7 @@ import { RE, RM, WARPS, DTPHYS, PAD_POS, SPECS, moonPos } from './constants.js';
 import { initWorld, syncTime, updateSky, updateSunShadow, setWeatherVisible, getSpin, groundHeight, fineGroundHeight, moonGroundHeight } from './world.js';
 import { stages, lesGroup, adapterGroup } from './saturn.js';
 import { initVehicle, spawnParticle, addDebris, detachStage, parkStage, setVisible, updateParticles, updateDebris, updateBurnVisuals, clearDebris, resetStages, syncParkedCsm, plumeLive } from './vehicle.js';
-import { S, keys, initPhysics, getState, getSimTime, setSimTime, getEngineOn, getThrottle, getWarpIndex, setWarpIndex, setTargetThrottle, getTargetThrottle, getSasOn, setSas, cycleWarp, warpHorizon, toggleSas, toggleSasRetro, activeEngine, isBurning, accelAt, physStep, toggleIgnite, separateStage, separateLES, separateAdapter, addDistFlown, resetSim, markTeleported, airDensity, groundVel, navVel, padIdle, moonIdle, parkCsm, omega, getControlAuthority, toggleRcsAssist, toggleHold, deployChute, getArmSwing, guardWarp, setCutoffGuard, aeroState, getAeroLoad, stability } from './physics.js';
+import { S, keys, initPhysics, getState, getSimTime, setSimTime, getEngineOn, getThrottle, getWarpIndex, setWarpIndex, setTargetThrottle, getTargetThrottle, getSasOn, setSas, cycleWarp, warpHorizon, toggleSas, toggleSasRetro, activeEngine, isBurning, accelAt, physStep, toggleIgnite, separateStage, jettisonTarget, separateLES, separateAdapter, addDistFlown, resetSim, markTeleported, airDensity, groundVel, navVel, padIdle, moonIdle, parkCsm, omega, getControlAuthority, toggleRcsAssist, toggleHold, deployChute, getArmSwing, guardWarp, setCutoffGuard, aeroState, getAeroLoad, stability } from './physics.js';
 import { camera, initCamera, cycleCamera, updateCamera, resetCameraView, setCamMode, setCamDist, setCamView, resizeCamera, setMap, isMap, cycleMapFocus } from './camera.js';
 import { initMapView, updateMapView } from './mapview.js';
 import { updateChutes } from './chutes.js';
@@ -163,7 +163,7 @@ addEventListener('blur', () => { for (const k in keys) keys[k] = false; });
    its propellant. A stage that still holds more than 5 % wants X twice within two seconds. */
 let xArmed = 0;
 function dropStage() {
-  const i = activeEngine();
+  const i = jettisonTarget();
   if (getState() === 'flying' && i >= 0 && stages[i].fuel / SPECS[i].fuel > 0.05 && performance.now() - xArmed > 2000) {
     xArmed = performance.now();
     addLog(`${Math.round(stages[i].fuel / SPECS[i].fuel * 100)}% PROPELLANT STILL IN THIS STAGE — X AGAIN TO DROP IT ANYWAY`, 'warn');

@@ -108,9 +108,9 @@ the Lunar Module as the two small ones — and `SPECS` entries are
 
 | stack | ignition mass | stage Δv (m/s) | TWR | burn times | ideal total | vs 15,142 m/s requirement | flown |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| **shipped `SPECS`** | 4,898 t | 2,129 / 6,423 / 6,810 / 2,117 / 2,714 | 1.29 / 1.08 / 0.18 / 0.65 / 0.63 | 120 / 305 / 1,992 / 255 / 311 s | **20,192 m/s** | 1.33× | **WON** — round trip, LM awarded 3.7 m/s, splashdown 7.8 m/s, 19,784 m/s |
-| previous (`retro`) | 3,780 t | 2,599 / 2,737 / 10,967 | 1.24 / 0.98 / 0.71 | 135 / 194 / 549 s | 16,303 m/s | 1.08× | LOST — 1,264 m/s impact, tank dry |
-| NOVA candidate | 5,525 t | 2,534 / 4,151 / 10,028 / 2,117 / 2,714 | 1.29 / 0.94 / 0.78 / 0.65 / 0.63 | 139 / 288 / 526 / 255 / 311 s | 21,543 m/s | 1.42× | **WON** — self-solved round trip at phase 1.2294908, 20,716 m/s, 13.443 days |
+| **shipped `SPECS`** | 4,898 t | 2,129 / 6,423 / 6,810 / 2,117 / 2,714 | 1.29 / 1.08 / 0.18 / 0.65 / 0.63 | 120 / 305 / 1,992 / 255 / 311 s | **20,192 m/s** | 1.33× | **WON** — round trip, LM awarded 6.4 m/s, splashdown 7.8 m/s, 19,730 m/s |
+| previous (`retro`) | 3,780 t | 2,599 / 2,737 / 10,967 | 1.24 / 0.98 / 0.71 | 135 / 194 / 549 s | 16,303 m/s | 1.08× | LOST — 1,266 m/s impact, tank dry |
+| NOVA candidate | 5,525 t | 2,534 / 4,151 / 10,028 / 2,117 / 2,714 | 1.29 / 0.94 / 0.78 / 0.65 / 0.63 | 139 / 288 / 526 / 255 / 311 s | 21,543 m/s | 1.42× | **WON** — self-solved round trip at phase 1.2294908, 20,524 m/s, 11.936 days |
 
 NOVA candidate = `S-1 130/3000/70000/330`, `S-2 110/1500/22000/430`, `CSM 25/700/6000/460`, plus the
 shipped LM rows `5/26/380/380` and `4/15/180/380` — with a 5-row stack the descent belongs to the
@@ -128,8 +128,9 @@ Honest caveats about this mapping, to keep the docs from overselling realism:
   made orbit. The change to 304 s is not what rescued the mission; the propellant loads and stage 2
   (12,000 → 24,000 kN, 340 → 415 s) were.
 - **Upper-stage TWR is not a failure condition in vacuum**, but the two lunar stages are chosen for
-  the Moon, not for Earth: at a full 50 t at PDI the descent engine gives 4.7 g_moon and hovers at
-  a fifth of throttle; the ascent engine lifts its own 19 t off the surface at 5.8 g_moon — far
+  the Moon, not for Earth: at the full 60 t at PDI (both LM stages and the crew's 10 t, which physics carries with
+  the primary) the descent engine gives 3.9 g_moon and hovers at a quarter of throttle; the ascent
+  engine lifts 29 t off the surface at 3.8 g_moon — far
   from Apollo's 1.6 g, and deliberately so: at 120 kN the spiral to orbit spends half its propellant
   fighting gravity and the terminal phase died 2.9 km short of the dock with an empty tank
   (measured). Neither needs to be launch-class. The CSM engine — 0.18 g next to the Saturn on

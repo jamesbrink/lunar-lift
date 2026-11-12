@@ -33,6 +33,8 @@ let loggedMaxQ = false;
    here may ever step the parked CSM. moonPerch is the Moon-relative offset of an LM standing on the
    surface — holding it is exact at any step because moonPos is analytic. */
 let csmParked = false, docked = false;
+let dockClear = false;           // the LM has stood off from the parked CSM since demating: only then can it be captured
+let probeCut = false;            // the contact probe has stopped the engine and the landing is not yet awarded: a held SHIFT may not relight it
 let moonPerch = null;
 const UP_REF = new THREE.Vector3(0, 0, 1);
 export const S = { pos: PAD_POS.clone(), v: PAD_ANGULAR.clone(), q: new THREE.Quaternion().setFromUnitVectors(UP_REF, PAD_UP) };
@@ -198,7 +200,12 @@ export function navVel(out = new THREE.Vector3()) {
   return out.copy(S.v);
 }
 export function groundVel(out = new THREE.Vector3()) {
-  if (overMoon()) { moonVel(simTime, _mv); return out.copy(S.v).sub(_mv); }
+  if (overMoon()) {
+    /* the regolith's velocity: the Moon's through the frame plus its turn about the pole — the same
+       MOON_RATE the drawn Moon, the terrain lookup and the perch turn at (4.6 m/s at the equator) */
+    moonVel(simTime, _mv); out.subVectors(S.pos, _moon);
+    return out.crossVectors(SPIN_AXIS, out).multiplyScalar(-MOON_RATE).add(S.v).sub(_mv);
+  }
   return surfaceVel(out);
 }
 /* Unit "up" from whichever body is underneath — the attitude to hold when the velocity vector
@@ -413,11 +420,13 @@ export function separateAdapter() {
 /* Drop a stage. Default: whatever engine is flying; with an index: that stage (the round trip uses
    separateStage(3) on touchdown and separateStage(4) after docking, where the "active" engine and
    the hardware being thrown are deliberately not the same decision). */
+/* What X drops. While docked the throttle answers to the CSM service engine, but what the player
+   means is the spent LM ascent stage on the nose — that goes first. js/main.js asks the same
+   question for its "propellant still aboard" confirmation. */
+export function jettisonTarget() { return docked && stages.length > 4 && !stages[4].separated ? 4 : activeEngine(); }
 export function separateStage(j) {
   if (state !== 'flying') { if (state === 'pad') hooks.addLog('NOTHING TO DROP ON THE PAD — SPACE TO IGNITE', 'warn'); return; }
-  /* While docked the throttle answers to the CSM service engine, but what the player means by X
-     is the spent LM ascent stage hanging off the nose — aim there first. */
-  const i = j === undefined ? (docked && !stages[4].separated ? 4 : activeEngine()) : j;
+  const i = j === undefined ? jettisonTarget() : j;
   if (i < 0 || i >= stages.length || stages[i].separated || (csmParked && i === 2)) return;
   const st = stages[i];
   if (st.fuel > 1 && i < 2) hooks.addLog(`STAGE ${i + 1} SEPARATED WITH ${Math.round(st.fuel / SPECS[i].fuel * 100)}% PROPELLANT LEFT`, 'warn');
@@ -480,13 +489,17 @@ export function parkCsm() {
   if (csmParked) { hooks.addLog('THE LM IS ALREADY FLYING ALONE', 'warn'); return; }
   if (docked) { hooks.addLog('THE LM IS DOCKED — UNDOCKING IS NOT FLOWN', 'warn'); return; }
   if (activeEngine() !== 2 || !overMoon()) { hooks.addLog('NOTHING TO PARK — THE CSM IS NOT FLYING IN LUNAR ORBIT', 'warn'); return; }
-  csmParked = true;
+  csmParked = true; dockClear = false;
   engineOn = false; targetThrottle = 0; throttle = 0;
   hooks.addLog('LM SEPARATED — CSM PARKED IN LUNAR ORBIT', 'good');
 }
 export function dockCsm() {
   if (!csmParked) return;
   csmParked = false; docked = true;
+  /* The throttle now answers to the service engine. A terminal approach flown under LM thrust
+     must not become a 650 kN burn nobody lit. */
+  if (engineOn) audio.engine(false);
+  engineOn = false; targetThrottle = 0; throttle = 0;
   hooks.addLog('LUNAR MODULE DOCKED — CSM RE-MATED', 'good');
 }
 export const getCsmParked = () => csmParked;
@@ -539,6 +552,7 @@ export function physStep(dt) {
   if (keys['shift']) targetThrottle = Math.min(1, targetThrottle + 0.6 * dt);
   if (keys['control'] || keys['z']) targetThrottle = Math.max(0, targetThrottle - 0.6 * dt);   // Z: CTRL+W/S/D belong to the browser on Windows and Linux
   if (engineOn && stages && !stages[0].separated && (state === 'pad' || state === 'flying')) targetThrottle = 1;   // a solid has no throttle
+  if (probeCut) targetThrottle = 0;
   const dThr = targetThrottle - throttle;
   throttle += THREE.MathUtils.clamp(dThr, -0.25 * dt, 0.25 * dt);
 
@@ -581,7 +595,7 @@ export function physStep(dt) {
       moonPerch.applyQuaternion(_spinQ);
       S.q.premultiply(_spinQ);                   // and the attitude with it, as the pad hold does: left inertial, the cabin leaned 13° a day off its own descent stage
       S.pos.copy(_moon).add(moonPerch);
-      S.v.copy(_mv);
+      S.v.crossVectors(SPIN_AXIS, moonPerch).multiplyScalar(MOON_RATE).add(_mv);   // the ground's own velocity: the Moon's, plus its turn (4.6 m/s at the equator)
       omega.set(0, 0, 0);
       return;
     }
@@ -811,14 +825,14 @@ function impact(onMoon) {
        landing: the same deferral is what lets the ascent engine build thrust off the perch. */
     if (isBurning()) {
       if (!landing.landedOnMoon && targetThrottle > 0) {
-        engineOn = false; targetThrottle = 0; audio.engine(false);
+        engineOn = false; targetThrottle = 0; probeCut = true; audio.engine(false);
         hooks.addLog('CONTACT LIGHT — ENGINE STOP', 'good');
       }
       return;
     }
     landing.speed = disp; landing.tilt = Math.acos(Math.min(1, fwd().dot(bodyUp(_rad)))) * 57.2958;
     landing.fuel = stages[4].separated ? 0 : stages[4].fuel; landing.time = simTime;
-    landing.landedOnMoon = true;
+    landing.landedOnMoon = true; probeCut = false;
     /* Stand it ON the ground. Contact is found a step late — up to speed × dt under the surface,
        more after a deferred powered contact — and a perch taken there buried the footpads. */
     { const sink = -surfaceAlt(true); if (sink > 0) S.pos.addScaledVector(bodyUp(_rad), sink); }
@@ -953,8 +967,13 @@ function checkMissionEvents() {
      harness and the player get the same rule — physics decides it, nothing outside may flip the
      flag. Once docked the service stage is primary again; the ascent stage leaves on the player's
      X, exactly as it did on Apollo before TEI. */
-  if (csmParked && S.pos.distanceTo(csmParkPos(simTime, _cp)) < DOCK_DIST
-      && S.v.distanceTo(csmParkVel(simTime, _cv)) < DOCK_SPEED) dockCsm();
+  if (csmParked) {
+    /* Not until the LM has stood off: a demate flown ON the rail met both thresholds on the very
+       next step, re-mated, and L was refused for the rest of the flight. */
+    const gap = S.pos.distanceTo(csmParkPos(simTime, _cp));
+    if (!dockClear) dockClear = gap > 2 * DOCK_DIST;
+    else if (gap < DOCK_DIST && S.v.distanceTo(csmParkVel(simTime, _cv)) < DOCK_SPEED) dockCsm();
+  }
   if ((strandTick += 1) % 50 === 0) { stranded(dom, r); if (state !== 'flying') return; }
   if (dom === 'earth') {
     const el = orbitalElements(S.pos, S.v, MU_E, RE);
@@ -974,7 +993,7 @@ export function resetSim() {
   lesSeparated = false;
   adapterSeparated = false;
   // the round trip: the CSM flies mated, the LM has not landed, nothing is parked or docked
-  csmParked = false; docked = false; moonPerch = null;
+  csmParked = false; docked = false; moonPerch = null; dockClear = false; probeCut = false;
   landing.landedOnMoon = false;
   // state vector and clock
   S.pos.copy(PAD_POS); S.v.copy(PAD_ANGULAR); S.q.setFromUnitVectors(UP_REF, PAD_UP);
@@ -998,4 +1017,4 @@ export function resetSim() {
 }
 
 /* teleport() starts the flight directly, bypassing the liftoff guard */
-export function markTeleported() { flightStarted = true; state = 'flying'; tRelease = -1e9; armSwing = 1; moonPerch = null; }   // a teleported flight is long past its pitch program, and not standing on anything
+export function markTeleported() { flightStarted = true; state = 'flying'; tRelease = -1e9; armSwing = 1; moonPerch = null; probeCut = false; }   // a teleported flight is long past its pitch program, and not standing on anything

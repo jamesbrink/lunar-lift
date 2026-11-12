@@ -124,7 +124,7 @@ Repo-wide convention (see `docs/reference/README.md`): **km, s, tonnes, kN**.
   km gives **km/s²**.
 - State vectors are km/s internally; the HUD reads m/s.
 - `simTime` is real mission seconds — no time-scaling fudge anywhere. The measured mission clock
-  is 13.667 days round trip (8.1 days was Apollo 11), as a real one is.
+  is 10.072 days round trip (8.1 days was Apollo 11), as a real one is.
 - Visuals ride at real planetary scale; the vehicle mesh is scaled by `VS` (≈105 m, Saturn-V sized).
 
 ## Architecture
@@ -347,12 +347,12 @@ Measured (full breakdown in `docs/reference/mission-design.md`):
 | Periselene | 358 km at 2.3517 km/s Moon-relative, v∞ 0.9213 km/s |
 | LOI | 829 m/s at 370 km to a capture orbit with a = 2 149 km |
 | Extraction | the CSM parks on a 110 km rail; the LM deorbits (84 m/s) and descends |
-| LM touchdown | **3.7 m/s** and 27.4° tilt against the 32 m/s `LAND_SAFE` limit, 2 057 m/s of descent Δv |
-| Ascent, rendezvous, docking | 1 940 + 27 + 6 + 134 m/s; re-mated with 2.4 t of ascent-stage propellant left |
-| TEI | 857 m/s, then a 779 m/s transposition-and-return correction; the service stage is dropped with it |
+| LM touchdown | **6.4 m/s** and 27.4° tilt against the 32 m/s `LAND_SAFE` limit, 2 057 m/s of descent Δv |
+| Ascent, rendezvous, docking | 1 936 + 21 + 138 m/s; re-mated with 2.4 t of ascent-stage propellant left |
+| TEI | 869 m/s, then a 726 m/s transposition-and-return correction; the service stage is dropped with it |
 | Splashdown | **7.8 m/s** under mains |
-| Mission clock | 13.667 days (1 180 800 s) |
-| Δv spent | 19 784 m/s round trip vs an ideal staged budget of 20 192 m/s, a derived round-trip requirement of 18 092 m/s and a one-way requirement of 15 142 m/s |
+| Mission clock | 10.072 days (870 239 s) |
+| Δv spent | 19 730 m/s round trip vs an ideal staged budget of 20 192 m/s, a derived round-trip requirement of 18 092 m/s and a one-way requirement of 15 142 m/s |
 
 `python3 tools/mission-math.py` recomputes the derived numbers (derived requirement, budgets, the
 atmosphere comparison) from the primary constants in `docs/reference/` and prints the derivation.
@@ -365,14 +365,14 @@ come from `tools/mission-sim.mjs`.
 None of this means the mission is easy: the
 descent is only survivable because its guidance flies an altitude-bounded velocity envelope rather
 than trying to hover, and an earlier, slightly smaller stack reached the Moon and then hit the
-surface at 1 264 m/s with a dry tank. The launch window is solved for a 350 km periselene — the
+surface at 1 266 m/s with a dry tank. The launch window is solved for a 350 km periselene — the
 shipped phase `MOON_PHASE0 = 2.1777643` passes the Moon at 358 km. The round trip has been flown
 from every phase of the measured band, 2.158 to 2.186 rad (2.8e-2 rad, about 2.9 hours of lunar
-motion); the shipped phase still comes home after 120 s (20.6 d) or 300 s (18.0 d) of waiting on
+motion); the shipped phase still comes home after 120 s (11.2 d) or 300 s (9.7 d) of waiting on
 the pad, while 3,600 s of pad time pushes the rendezvous phasing past the tool's own 1,100 ks
 chain horizon.
 The one-way autopilot is kept as a regression: `mission-sim.mjs landed --phase=4.9187044` still
-touches down at 3.3 m/s with 7.2 t spare. Margin on paper is not margin; the descent has to be
+touches down at 3.8 m/s with 7.2 t spare. Margin on paper is not margin; the descent has to be
 flown.
 
 ## How a flight is graded

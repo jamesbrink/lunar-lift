@@ -44,7 +44,7 @@ export const MOON_V = new THREE.Vector3().crossVectors(MOON_PLANE_N, MOON_U).nor
    Measured sensitivity near the one-way window (the `landed` regression, game's own step):
      phase -3e-3    rad -> periselene 745 km, touchdown 2.8 m/s, 6.6 t spare
      phase -1e-3    rad -> periselene 477 km, touchdown 2.8 m/s, 7.0 t spare
-     phase 4.9187044    -> periselene 346 km, touchdown 3.3 m/s, 7.2 t spare
+     phase 4.9187044    -> periselene 346 km, touchdown 3.8 m/s, 7.2 t spare
      phase +1e-3    rad -> periselene 218 km, touchdown 4.1 m/s, 7.4 t spare
      phase +1.75e-3 rad -> periselene 123 km, touchdown 4.9 m/s, 7.6 t spare
      phase +2e-3    rad -> periselene  91 km, LOST at 80 m/s, 0.4 t left
@@ -63,8 +63,8 @@ export const MOON_V = new THREE.Vector3().crossVectors(MOON_PLANE_N, MOON_U).nor
 export const G0 = 9.81;
 export const MOON_PHASE0 = 2.1777643;                      // rad — 124.77° along the lunar orbit.
 // Round-trip window, solved by `node tools/mission-sim.mjs game` (coast-periselene straddle of
-// AIM_PERI 350, then flown): RESULT WON end to end — LM awarded 3.7 m/s after 2,057 m/s of
-// descent, dock, TEI, splashdown 7.8 m/s — at 13.667 days and 19,784 m/s. The solver's converged
+// AIM_PERI 350, then flown): RESULT WON end to end — LM awarded 6.4 m/s after 2,057 m/s of
+// descent, dock, TEI, splashdown 7.8 m/s — at 10.072 days and 19,730 m/s. The solver's converged
 // 350-aim phase is 2.1777956 and this constant passes the Moon at 358 km; the measured corridor
 // and pad-wait behaviour are in docs/reference/mission-design.md.
 // The one-way regression (landed) flies its own phase, re-solve with `landed --scan=`.
@@ -131,7 +131,7 @@ export const WARP_ONE = WARPS.indexOf(1);
    holds the local vertical, then sweeps the nose toward the launch-plane east direction
    (the plane that contains the Moon's orbit), then trims to the inertial velocity.
    Verified with the stack below: TLI lights at the first perigee (237 km) and the round trip
-   completes — LM awarded 3.7 m/s, splashdown 7.8 m/s, 19,784 m/s and 13.667 days. The
+   completes — LM awarded 6.4 m/s, splashdown 7.8 m/s, 19,730 m/s and 10.072 days. The
    one-way `landed` regression flies the same table to a 151 x 760 km parking orbit at 7.37 km/s
    and leaves 7.2 t of CSM propellant on the Moon. The pitch-over here reaches 66 degrees rather
    than horizontal; a steeper table (t0 60, ramp 200, max pi/2, --turn=steep in the tool) also
@@ -167,15 +167,16 @@ export const SKY_DAY = new THREE.Color(0x79b1de), SKY_NULL = new THREE.Color(0x0
      - the CSM engine is the mission engine: 650 kN is 0.18 g on Earth and 1.06 g_moon at the
        378 t LOI mass, so capture is flown at full throttle from periselene and the throttle
        closes on the cutoff, not on the tank.
-     - the LM descent engine at 380 kN is 4.7 g_moon at the 50 t PDI mass and hovers at ~20 %
+     - the LM descent engine at 380 kN is 3.9 g_moon at the 60 t PDI mass (both LM
+       stages plus the crew's 10 t, carried with the primary) and hovers at ~26 %
        throttle. That is survivable only because the descent guidance commands a velocity
        envelope bounded by altitude instead of trying to hover. Throttle granularity, not thrust
-       level, is what limits a soft landing. The ascent engine at 180 kN lifts its 19 t off the
-       surface at 5.8 g_moon — Apollo's was 1.6 g — because at 120 kN the spiral to orbit spends
+       level, is what limits a soft landing. The ascent engine at 180 kN lifts 29 t off the
+       surface at 3.8 g_moon — Apollo's was 1.6 g — because at 120 kN the spiral to orbit spends
        too much propellant fighting gravity: measured, it died 2.9 km short of the parked CSM
        with an empty tank. The spiral is fuel, not velocity.
    The 2,400/700/400 t stack this replaced had 16,303 m/s of ideal budget (1.08x) and still failed:
-   it reached lunar orbit, then ran the tank dry on the descent and hit the surface at 1,264 m/s.
+   it reached lunar orbit, then ran the tank dry on the descent and hit the surface at 1,266 m/s.
    Margin on paper is not margin; the descent has to be flown. */
 export const SPECS = [
   { name: 'S-1 SATURN I', dry: 130, fuel: 2500, thrust: 62000, isp: 304 },

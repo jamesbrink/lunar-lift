@@ -116,11 +116,19 @@ function nextStep({ state, engineOn, live, i, dry, altE, alt, nearMoon, el, radi
     return [`Lunar orbit ✓ — ${K('L')} demates the LM: the CSM stays parked up here, you take the lander down`, 'ok'];
   if (moonLanded) return [`${K('⇧')} open the throttle to lift off — then build speed ACROSS the ground: about 1,670 m/s at 20 km is orbit`, 'ok'];
   if (parked && i >= 3 && live && radial > -0.002)
-    return [`Ascent — ${Math.round(speed * 1000).toLocaleString()} m/s across the ground; orbit is ~1,670. The CSM docks with you inside 1 km at under 50 m/s`, 'ok'];
+    return [`Ascent — ${Math.round(Math.sqrt(Math.max(0, speed * speed - radial * radial)) * 1000).toLocaleString()} m/s across the ground; orbit is ~1,670. The CSM docks with you inside 1 km at under 50 m/s`, 'ok'];
   if (parked && i >= 3 && el.pe > 60)
     return [`Coasting at ${alt.toFixed(0)} km over the Moon — burn retrograde to go down to it, or find the parked CSM: within 1 km, under 50 m/s relative, the docks engage`, 'ok'];
-  if (docked && nearMoon && el.pe > 0 && !live)
-    return [`Docked ✓ — ${K('X')} jettisons the ascent stage. Then ${K('P')} prograde to escape the Moon — burn so you leave BEHIND it, against its motion round the Earth, and the Earth periapsis falls`, 'ok'];
+  if (docked && nearMoon) {
+    /* The way home, by what is still bolted on — the docked flag is sticky and the inbound
+       prompts below (deorbit, capture) would talk a returning crew back out of their own TEI. */
+    if (stages.length > 4 && !stages[4].separated) return live ? [`Cut the engine (${K('SPACE')}) and drop the ascent stage (${K('X')}) before the burn home — it is 4 t of dead weight`, 'warn']
+      : [`Docked ✓ — ${K('X')} jettisons the ascent stage. Then ${K('P')} prograde to escape the Moon — burn so you leave BEHIND it, against its motion round the Earth`, 'ok'];
+    if (el.escape) return live ? [`Escaping the Moon ✓ — cut the engine (${K('SPACE')}); trim the Earth periapsis once outside the Moon's sphere`, 'ok']
+      : ['Leaving the Moon — coast out of its sphere, then check the Earth periapsis: under 60 km is the way home', 'ok'];
+    if (el.pe > 0) return live ? ['Trans-Earth injection — keep burning prograde until you are escaping the Moon', 'ok']
+      : [`${K('P')} prograde and burn to escape the Moon — leave BEHIND it, against its motion round the Earth, and the Earth periapsis falls`, 'ok'];
+  }
   if (nearMoon) {
     const vs = -radial * 1000;
     if (el.escape || el.pe > 0 && !el.escape && el.ap > SOI_M) return [`Capture: ${K('V')} retrograde, ${K('P')} SAS, burn at the lowest point (${Math.round(el.pe)} km)`];
