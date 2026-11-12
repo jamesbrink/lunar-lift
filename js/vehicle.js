@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { VS, RE, RM, EARTH_SPIN, DTPHYS, MOON_RATE, moonPos, moonVel, csmParkPos, csmParkVel } from './constants.js';
-import { rocketGroup, stages, lesGroup, adapterGroup, bellMetal } from './saturn.js';
+import { rocketGroup, capsuleGroup, stages, lesGroup, adapterGroup, bellMetal } from './saturn.js';
 import { S, airDensity, getSimTime, getState, landing, getCsmParked } from './physics.js';
 import { ATMO_TOP } from './aero.js';
 import { TAIL_Z, R_SM_DRAWN } from './stations.js';
@@ -309,6 +309,10 @@ export function syncParkedCsm() {
   const m = stages[2].meshes;
   if (getCsmParked()) {
     if (m.parent !== scene) scene.add(m);
+    /* The command module waits in orbit with its service module, as it did: only the lunar module
+       goes down. Drawn hardware only — physics carries the crew (CAPSULE_MASS) with the primary,
+       which while parked is the LM, and that is where they are. */
+    if (capsuleGroup.parent !== m) m.add(capsuleGroup);
     csmOut = true;
     csmParkPos(getSimTime(), m.position);
     csmParkVel(getSimTime(), _parkV);
@@ -317,6 +321,7 @@ export function syncParkedCsm() {
     m.visible = true;
   } else if (csmOut) {
     csmOut = false;
+    rocketGroup.add(capsuleGroup);
     rocketGroup.add(m);
     m.position.set(0, 0, 0); m.quaternion.identity(); m.scale.setScalar(1);
   }
@@ -328,6 +333,7 @@ export function resetStages() {
   resetPool(); resetEmit(); clearExhaustDraw(); resetEntryFx(); resetSplashFx(); resetDustSheet(); setFireLight(ZERO_V, 0, 0);
   pend.length = 0; boomAt.x = NaN; wasOver = wasHome = false;
   ship.live = true; burnT0 = -1; csmOut = false;
+  rocketGroup.add(capsuleGroup);
   stages.forEach(st => {
     /* detachStage hands a dropped stage to the scene at scale VS; back under rocketGroup (itself VS)
        it must be 1 again, or the stage returns VS times too small to see. */

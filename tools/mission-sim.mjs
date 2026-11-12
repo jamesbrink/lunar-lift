@@ -1275,7 +1275,7 @@ function mission(phase, { trace = false, capture = true, stopAtPeri = false } = 
          raised to 1 km/s on the pre-awarded-touchdown chain the ladder never starved, but the
          Moon's tide re-kicks the corridor every ~27 ks forever and the cert phase burned
          1,751 m/s of corrections arriving 21.3 d out with 5 t aboard — safe, wasteful. At 0.45
-         the certified chain lands in 10.3 d having spent 802 m/s, and every measured variant
+         the certified chain lands in 13.7 d having spent 779 m/s, and every measured variant
          (fifteen corridor phases 2.158–2.186 rad, the steep table, 120 and 300 s pad waits)
          comes home on the same cap; the starvation the low cap CAN inflict — a ladder silenced
          mid-work with fuel aboard, a 25 g entry — is what the pre-fix chain did at wait=120. */
@@ -1562,7 +1562,7 @@ report(r, phase);
    asks — see teicorr) can leave some periselene-350 phases unwinnable at the end while other
    corridors in the same basin splash at 7.8 m/s. Measured on the pre-awarded-touchdown chain:
    nova's first candidate stranded the CSM dry at 130 × 139,533 km after 841 m/s of corrections
-   — the same phase flies the whole chain on the current one (self-solved WON, 13.484 d), so
+   — the same phase flies the whole chain on the current one (self-solved WON, 13.443 d), so
    this loop is insurance for the geometry that still loses. After a loss it walks DOWN the
    phase circle to the next straddle of AIM_PERI (peri rises as phase falls through a corridor,
    so a crossing is the step where peri passes from below AIM_PERI to above it), bisects it and

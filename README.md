@@ -124,7 +124,7 @@ Repo-wide convention (see `docs/reference/README.md`): **km, s, tonnes, kN**.
   km gives **km/s²**.
 - State vectors are km/s internally; the HUD reads m/s.
 - `simTime` is real mission seconds — no time-scaling fudge anywhere. The measured mission clock
-  is 10.343 days round trip (8.1 days was Apollo 11), as a real one is.
+  is 13.667 days round trip (8.1 days was Apollo 11), as a real one is.
 - Visuals ride at real planetary scale; the vehicle mesh is scaled by `VS` (≈105 m, Saturn-V sized).
 
 ## Architecture
@@ -347,12 +347,12 @@ Measured (full breakdown in `docs/reference/mission-design.md`):
 | Periselene | 358 km at 2.3517 km/s Moon-relative, v∞ 0.9213 km/s |
 | LOI | 829 m/s at 370 km to a capture orbit with a = 2 149 km |
 | Extraction | the CSM parks on a 110 km rail; the LM deorbits (84 m/s) and descends |
-| LM touchdown | **3.8 m/s** and 26.6° tilt against the 32 m/s `LAND_SAFE` limit, 2 057 m/s of descent Δv |
-| Ascent, rendezvous, docking | 1 940 + 21 + 139 m/s; re-mated with 2.4 t of ascent-stage propellant left |
-| TEI | 859 m/s, then an 802 m/s transposition-and-return correction; the service stage is dropped with it |
+| LM touchdown | **3.7 m/s** and 27.4° tilt against the 32 m/s `LAND_SAFE` limit, 2 057 m/s of descent Δv |
+| Ascent, rendezvous, docking | 1 940 + 27 + 6 + 134 m/s; re-mated with 2.4 t of ascent-stage propellant left |
+| TEI | 857 m/s, then a 779 m/s transposition-and-return correction; the service stage is dropped with it |
 | Splashdown | **7.8 m/s** under mains |
-| Mission clock | 10.343 days (893 597 s) |
-| Δv spent | 19 794 m/s round trip vs an ideal staged budget of 20 192 m/s, a derived round-trip requirement of 18 092 m/s and a one-way requirement of 15 142 m/s |
+| Mission clock | 13.667 days (1 180 800 s) |
+| Δv spent | 19 784 m/s round trip vs an ideal staged budget of 20 192 m/s, a derived round-trip requirement of 18 092 m/s and a one-way requirement of 15 142 m/s |
 
 `python3 tools/mission-math.py` recomputes the derived numbers (derived requirement, budgets, the
 atmosphere comparison) from the primary constants in `docs/reference/` and prints the derivation.

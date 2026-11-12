@@ -219,13 +219,17 @@ export function bodyUp(out = new THREE.Vector3()) {
 const CONTACT_Z = [TAIL_Z[0], TAIL_Z[1], GEAR_Z, LM_FOOT_Z, LM_ASC_TAIL_Z];
 const _cu = new THREE.Vector3(), _air = new THREE.Vector3();
 export function tailStation() { const i = activeEngine(); return i >= 0 ? CONTACT_Z[i] : CM_TAIL_Z; }
+/* The top of what is attached, for a vehicle that meets the ground the other way up: the ascent
+   cabin's roof while the lunar module is aboard (it stands 4.7 u over the command module's apex),
+   the docking tunnel's rim otherwise. Only an inverted contact reads it. */
+export function noseStation() { return stages.length > 4 && !stages[4].separated ? LM_TOP_Z : NOSE_Z; }
 /* km from the lowest attached point down to the surface of the Moon (onMoon) or the Earth. */
 export function surfaceAlt(onMoon = overMoon()) {
   if (onMoon) { moonPos(simTime, _moon); _cu.subVectors(S.pos, _moon); } else _cu.copy(S.pos);
   const r = _cu.length(); _cu.multiplyScalar(1 / r);
   const c = _fw.copy(UP_REF).applyQuaternion(S.q).dot(_cu);          // cos of the tilt from vertical
   const i = activeEngine(), rad = i < 0 ? R_CM_BASE : i === 2 ? R_CSM_AERO : i > 2 ? R_LM : R_STACK;
-  const low = (Math.min(tailStation() * c, NOSE_Z * c) - rad * Math.sqrt(Math.max(0, 1 - c * c))) * VS;   // lowest point of a tilted cylinder, km above S.pos
+  const low = (Math.min(tailStation() * c, noseStation() * c) - rad * Math.sqrt(Math.max(0, 1 - c * c))) * VS;   // lowest point of a tilted cylinder, km above S.pos
   const sphere = r - (onMoon ? RM : RE) + low;
   if (!relief || sphere > 30) return sphere;                         // no relief lookup while it cannot matter
   return sphere - (onMoon ? relief.moon(_cu) : relief.earth(_cu));
@@ -801,10 +805,23 @@ function impact(onMoon) {
        splashdown. So no end card and no state change — the vehicle perches (physStep holds it
        exactly until the ascent engine lights), the debrief starts recording from here, and the
        descent stage is jettisoned on the spot, as it was on every Apollo landing site. */
-    if (isBurning()) return;                    // engine still pushing: the descent ends after the cutoff, a step or two down
+    /* Engine still pushing: the landing is awarded on the engine-out step, a step or two down. A
+       descent that arrives soft with the throttle still open gets Apollo's contact probe — ENGINE
+       STOP — or it would hover into the regolith with no card and no touchdown. Never after a
+       landing: the same deferral is what lets the ascent engine build thrust off the perch. */
+    if (isBurning()) {
+      if (!landing.landedOnMoon && targetThrottle > 0) {
+        engineOn = false; targetThrottle = 0; audio.engine(false);
+        hooks.addLog('CONTACT LIGHT — ENGINE STOP', 'good');
+      }
+      return;
+    }
     landing.speed = disp; landing.tilt = Math.acos(Math.min(1, fwd().dot(bodyUp(_rad)))) * 57.2958;
     landing.fuel = stages[4].separated ? 0 : stages[4].fuel; landing.time = simTime;
     landing.landedOnMoon = true;
+    /* Stand it ON the ground. Contact is found a step late — up to speed × dt under the surface,
+       more after a deferred powered contact — and a perch taken there buried the footpads. */
+    { const sink = -surfaceAlt(true); if (sink > 0) S.pos.addScaledVector(bodyUp(_rad), sink); }
     moonPerch = _md.subVectors(S.pos, _moon).clone();       // _moon is the current one: checkImpact set it this step
     hooks.addLog(`TOUCHDOWN — ${disp.toFixed(1)} m/s. THE MOON IS OURS.`, 'good');
     audio.win();

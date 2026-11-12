@@ -140,6 +140,7 @@ function nextStep({ state, engineOn, live, i, dry, altE, alt, nearMoon, el, radi
     }
     /* Burning with far more room than the stop needs is how a tank is emptied 900 km up: say so. */
     if (live && (vs <= 0 || alt > 2.5 * stop + 5)) return [`Periapsis is below the surface — cut the engine (${K('SPACE')}) and coast down; brake when this line says BRAKE NOW`, 'warn'];
+    if (i >= 3 && live && alt < 0.03 && vs < LAND_SAFE * 1000) return [`Contact — cut the engine (${K('SPACE')}): the landing counts when it stops`, 'ok'];
     if (alt > 2) return [`Braking — ${Math.round(speed * 1000)} m/s to lose, ${stop.toFixed(1)} km needed of ${alt.toFixed(1)} km`, stop > alt ? 'bad' : 'ok'];
     return vs > LAND_SAFE * 1000 ? [`BRAKE — ${vs.toFixed(0)} m/s down, touch under ${LAND_SAFE * 1000} m/s`, 'bad']
       : [`Good descent: ${vs.toFixed(0)} m/s — keep it under ${LAND_SAFE * 1000} m/s and upright`, 'ok'];
